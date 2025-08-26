@@ -76,6 +76,10 @@ mod tests {
                 let data = vec![0u8; 50_000];
                 stream.send_message(Bytes::from(data)).await.unwrap();
             }
+            // Close all streams to signal completion
+            for stream in streams {
+                let _ = stream.close().await;
+            }
         });
         
         let server_task = tokio::spawn(async move {
