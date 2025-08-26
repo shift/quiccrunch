@@ -97,6 +97,7 @@ async fn test_multiple_streams() {
             let mut stream = conn.open_bi().await.unwrap();
             let msg = stream.receive_message().await.unwrap();
             stream.send_message(msg).await.unwrap();
+            let _ = stream.close().await;
         }
     });
     
@@ -111,6 +112,7 @@ async fn test_multiple_streams() {
             stream.send_message(test_msg.clone()).await.unwrap();
             let response = stream.receive_message().await.unwrap();
             assert_eq!(response, test_msg);
+            let _ = stream.close().await;
         });
         
         handles.push(handle);
@@ -150,6 +152,7 @@ async fn test_large_messages() {
     
     let response = stream.receive_message().await.unwrap();
     assert_eq!(response, large_msg);
+    let _ = stream.close().await;
     
     // Wait for server with timeout
     timeout(Duration::from_secs(10), server_handle).await.unwrap().unwrap();
@@ -224,6 +227,7 @@ async fn test_concurrent_streams_varying_windows() {
                         Err(_) => break,
                     }
                 }
+                let _ = stream.close().await;
             });
             handles.push(handle);
         }
@@ -240,14 +244,15 @@ async fn test_concurrent_streams_varying_windows() {
     for i in 0..10 {
         let mut stream = client.open_bi().await.unwrap();
         let handle = tokio::spawn(async move {
-            for j in 0..5 {
-                let size = 1024 * (i + 1); // Different sizes for different streams
-                let data = vec![j as u8; size];
-                let msg = Bytes::from(data);
-                stream.send_message(msg.clone()).await.unwrap();
-                let response = stream.receive_message().await.unwrap();
-                assert_eq!(response, msg);
-            }
+                for j in 0..5 {
+                    let size = 1024 * (i + 1); // Different sizes for different streams
+                    let data = vec![j as u8; size];
+                    let msg = Bytes::from(data);
+                    stream.send_message(msg.clone()).await.unwrap();
+                    let response = stream.receive_message().await.unwrap();
+                    assert_eq!(response, msg);
+                }
+                let _ = stream.close().await;
         });
         handles.push(handle);
     }
