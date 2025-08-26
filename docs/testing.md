@@ -6,28 +6,28 @@ This document outlines the testing procedures for QuicCrunch, covering unit test
 
 ### Unit Tests
 
-Run the basic test suite:
+Run the basic test suite (inside devShell):
 ```bash
-cargo test
+nix develop -c cargo test
 ```
 
 Run tests with logging enabled:
 ```bash
-RUST_LOG=debug cargo test -- --nocapture
+RUST_LOG=debug nix develop -c cargo test -- --nocapture
 ```
 
 ### Integration Tests
 
 Run integration tests specifically:
 ```bash
-cargo test --test integration_transport
+nix develop -c cargo test --test integration_transport
 ```
 
 ### Property-Based Tests
 
 QuicCrunch uses proptest for property-based testing:
 ```bash
-cargo test --test prop_frame
+nix develop -c cargo test --test prop_frame
 ```
 
 ## Test Categories
@@ -136,23 +136,41 @@ Use the test server implementation:
 use quiccrunch::test_utils::TestServer;
 ```
 
+## Linting and formatting
+
+Run both before submitting changes:
+
+```bash
+nix develop -c cargo fmt --all
+nix develop -c cargo clippy --all-targets --all-features -- -D warnings
+```
+
+Policies:
+- No `unwrap`, `expect`, or `panic!` in non-test code.
+- Treat all clippy warnings as errors in CI.
+- Use `thiserror` for public error types.
+
+## Headless plotting
+
+Plotting in tests runs headless to be CI-safe. Ensure:
+```bash
+HEADLESS_PLOT=1 nix develop -c cargo test
+```
+This disables font rendering and writes PNG buffers directly.
+
+## Privileged scaling tests (opt-in)
+
+The scaling tests require root privileges and specific hardware. They are excluded from the default suite. To run:
+```bash
+sudo -E nix develop -c cargo test --features scaling-tests --test scaling_benchmark -- --test-threads=1 --nocapture
+```
+
 ## Continuous Integration
 
-### GitHub Actions Workflow
-
-Tests are run on every pull request:
-1. Unit tests
-2. Integration tests
-3. Property tests
-4. Linting checks
-5. Documentation tests
-
-### Local CI Checks
-
-Run the same checks locally:
-```bash
-./scripts/check.sh
-```
+Recommended CI steps:
+1. cargo fmt --all -- --check
+2. cargo clippy --all-targets --all-features -- -D warnings
+3. cargo test (without scaling-tests)
 
 ## Test Coverage
 

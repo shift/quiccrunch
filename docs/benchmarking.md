@@ -45,13 +45,15 @@ This document describes the benchmark methodology used in QuicCrunch for measuri
 Run all benchmarks:
 ```bash
 # Basic benchmark suite
-cargo bench
+nix develop -c cargo bench
 
 # Single benchmark category
-cargo bench --bench transport
+nix develop -c cargo bench --bench transport
 
-# System scaling tests (requires root)
-sudo ./scripts/run_scaling_benchmark.sh
+# System scaling tests (opt-in, requires sudo)
+sudo -E nix develop -c bash scripts/run_scaling_benchmark.sh
+# or run directly
+sudo -E nix develop -c cargo test --features scaling-tests --test scaling_benchmark -- --test-threads=1 --nocapture
 ```
 
 ### Advanced Usage

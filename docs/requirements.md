@@ -43,3 +43,13 @@ A high-performance RPC framework leveraging QUIC transport and Cap'n Proto seria
 - Easy integration with common Rust frameworks
 - Clear error messages
 - Comprehensive logging
+
+### Static checks
+- rustfmt (edition 2021) for formatting
+- clippy with `-D warnings` for linting
+
+Local commands:
+```bash
+nix develop -c cargo fmt --all
+nix develop -c cargo clippy --all-targets --all-features -- -D warnings
+```

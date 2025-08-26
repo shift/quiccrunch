@@ -234,13 +234,19 @@ Security is enabled by default:
 Run the test suite:
 
 ```bash
-cargo test
+nix develop -c cargo test
+```
+
+Scaling tests (require sudo and specific hardware) are excluded by default. Opt in with:
+
+```bash
+sudo -E nix develop -c cargo test --features scaling-tests --test scaling_benchmark -- --test-threads=1 --nocapture
 ```
 
 Run benchmarks:
 
 ```bash
-cargo bench
+nix develop -c cargo bench
 ```
 
 ## License
@@ -255,3 +261,38 @@ at your option.
 ## Contributing
 
 We welcome contributions! Please feel free to submit a Pull Request.
+
+## Coding standards
+
+This project enforces a consistent Rust style and safety baseline:
+
+- Formatting: rustfmt (edition 2021, grouped imports)
+- Linting: clippy in CI with -D warnings
+- Safety: forbid(unsafe_code) at crate level
+- Error handling: thiserror for public error types
+- Logging/telemetry: tracing; optional OpenTelemetry via `telemetry` feature
+- Testing: unit, property-based (proptest), and integration tests; headless plotting via `HEADLESS_PLOT=1`
+
+Run locally:
+```bash
+# Format
+nix develop -c cargo fmt --all
+
+# Lint (treat warnings as errors)
+nix develop -c cargo clippy --all-targets --all-features -- -D warnings
+
+# Tests (safe default)
+nix develop -c cargo test
+
+# Scaling benchmark (requires sudo; opt-in)
+sudo -E nix develop -c cargo test --features scaling-tests --test scaling_benchmark -- --test-threads=1 --nocapture
+```
+
+Guidelines (short version):
+- No unwrap/expect/panic in library code; bubble errors with Result and thiserror.
+- Avoid blocking in async; prefer Tokio APIs.
+- Keep messages under `TransportSettings.stream_receive_window`; enforced in `QuicStream`.
+- Plotters in CI must be headless: set `HEADLESS_PLOT=1`.
+- Feature flags:
+  - `telemetry` to enable OpenTelemetry tracing
+  - `scaling-tests` to run privileged scaling tests
