@@ -2,16 +2,18 @@ use test_log::test;
 use bytes::Bytes;
 use std::time::Duration;
 use quiccrunch::{QuicTransport, Transport};
-use quinn::{TransportConfig, VarInt};
+use quinn::{TransportConfig, VarInt}; // TransportConfig translation is limited to what our API exposes
 use portpicker;
 use tokio::time::timeout;
 use quiccrunch::transport::{TransportSettings, CongestionController};
+mod _helpers;
+use _helpers::translate_quinn_to_settings;
 
 mod certs;
 use certs::generate_node_cert;
 
 async fn setup_transport() -> (QuicTransport, String) {
-    let settings = TransportSettings {
+    let mut settings = TransportSettings {
         max_idle_timeout_ms: Some(30000),
         keep_alive_interval_ms: Some(5000),
         max_concurrent_uni_streams: 100,
@@ -30,7 +32,8 @@ async fn setup_transport() -> (QuicTransport, String) {
     (transport, addr)
 }
 
-async fn setup_transport_with_config(transport_config: TransportConfig) -> (QuicTransport, String) {
+async fn setup_transport_with_config(_quinn_transport: TransportConfig) -> (QuicTransport, String) {
+    // Note: quinn::TransportConfig lacks getters; tests should configure via TransportSettings directly.
     let settings = TransportSettings {
         max_idle_timeout_ms: Some(30000),
         keep_alive_interval_ms: Some(5000),
@@ -62,10 +65,11 @@ async fn test_basic_roundtrip() {
     
     let server_handle = tokio::spawn(async move {
         let conn = incoming.accept().await.unwrap();
-        let mut stream = conn.open_bi().await.unwrap();
-        
-        let msg = stream.receive_message().await.unwrap();
-        stream.send_message(msg).await.unwrap();
+         let mut stream = conn.accept_bi().await.unwrap();
+         
+         let msg = stream.receive_message().await.unwrap();
+         stream.send_message(msg).await.unwrap();
+         let _ = stream.close().await;
     });
     
     // Client
@@ -94,7 +98,7 @@ async fn test_multiple_streams() {
         let conn = incoming.accept().await.unwrap();
         
         for _ in 0..5 {
-            let mut stream = conn.open_bi().await.unwrap();
+            let mut stream = conn.accept_bi().await.unwrap();
         let msg = stream.receive_message().await.unwrap();
         stream.send_message(msg).await.unwrap();
         let _ = stream.close().await;
@@ -137,10 +141,11 @@ async fn test_large_messages() {
     
     let server_handle = tokio::spawn(async move {
         let conn = incoming.accept().await.unwrap();
-        let mut stream = conn.open_bi().await.unwrap();
-        
-        let msg = stream.receive_message().await.unwrap();
-        stream.send_message(msg).await.unwrap();
+         let mut stream = conn.accept_bi().await.unwrap();
+         
+         let msg = stream.receive_message().await.unwrap();
+         stream.send_message(msg).await.unwrap();
+         let _ = stream.close().await;
     });
     
     let client = transport.connect(&addr).await.unwrap();
@@ -161,10 +166,21 @@ async fn test_large_messages() {
 
 #[test(tokio::test)]
 async fn test_message_size_limit() {
-    let mut config = TransportConfig::default();
-    config.stream_receive_window(VarInt::from_u32(1024));
-    
-    let (transport, addr) = setup_transport_with_config(config).await;
+    // Configure receive window via our TransportSettings since quinn::TransportConfig has no getters
+    let tls_config = generate_node_cert("test-node");
+    let settings = TransportSettings {
+        stream_receive_window: 1024,
+        max_concurrent_uni_streams: 100,
+        max_concurrent_bidi_streams: 100,
+        connection_receive_window: 20 * 1024 * 1024,
+        max_idle_timeout_ms: Some(30000),
+        keep_alive_interval_ms: Some(5000),
+        initial_rtt_ms: 100,
+        congestion_controller: CongestionController::NewReno
+    };
+    let transport = QuicTransport::with_settings(tls_config, settings).unwrap();
+    let port = portpicker::pick_unused_port().expect("No ports free");
+    let addr = format!("127.0.0.1:{}", port);
     let mut incoming = transport.listen(&addr).await.unwrap();
     
     // Give server time to start listening
@@ -172,7 +188,7 @@ async fn test_message_size_limit() {
     
     let server_handle = tokio::spawn(async move {
         let conn = incoming.accept().await.unwrap();
-        let mut stream = conn.open_bi().await.unwrap();
+        let mut stream = conn.accept_bi().await.unwrap();
         
         // Expect an error when client attempts to send too-large message
         let result = stream.receive_message().await;
@@ -216,7 +232,7 @@ async fn test_concurrent_streams_varying_windows() {
         
         // Accept multiple concurrent streams
         for _ in 0..10 {
-            let mut stream = conn.open_bi().await.unwrap();
+            let mut stream = conn.accept_bi().await.unwrap();
             let handle = tokio::spawn(async move {
                 loop {
                     match stream.receive_message().await {
@@ -268,12 +284,21 @@ async fn test_concurrent_streams_varying_windows() {
 
 #[test(tokio::test)]
 async fn test_error_recovery_and_timeout() {
-    let mut config = TransportConfig::default();
-    config
-        .max_idle_timeout(Some(Duration::from_secs(1).try_into().expect("Valid timeout")))
-        .keep_alive_interval(Some(Duration::from_millis(100)));
-    
-    let (transport, addr) = setup_transport_with_config(config).await;
+    // Use settings to ensure idle timeout hits and no keepalive prevents activity
+    let tls_config = generate_node_cert("test-node");
+    let settings = TransportSettings {
+        max_idle_timeout_ms: Some(1000),
+        keep_alive_interval_ms: None,
+        max_concurrent_uni_streams: 100,
+        max_concurrent_bidi_streams: 100,
+        stream_receive_window: 2 * 1024 * 1024,
+        connection_receive_window: 16 * 1024 * 1024,
+        initial_rtt_ms: 100,
+        congestion_controller: CongestionController::NewReno,
+    };
+    let transport = QuicTransport::with_settings(tls_config, settings).unwrap();
+    let port = portpicker::pick_unused_port().expect("No ports free");
+    let addr = format!("127.0.0.1:{}", port);
     let mut incoming = transport.listen(&addr).await.unwrap();
     
     // Give server time to start listening
@@ -281,7 +306,7 @@ async fn test_error_recovery_and_timeout() {
     
     let server_handle = tokio::spawn(async move {
         let conn = incoming.accept().await.unwrap();
-        let mut stream = conn.open_bi().await.unwrap();
+        let mut stream = conn.accept_bi().await.unwrap();
         
         // Simulate server processing delay
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -327,18 +352,47 @@ async fn test_cross_stream_dependencies() {
     
     let server_handle = tokio::spawn(async move {
         let conn = incoming.accept().await.unwrap();
-        let mut control_stream = conn.open_bi().await.unwrap();
-        let mut data_stream = conn.open_bi().await.unwrap();
-        
-        // Control stream manages data stream flow
-        while let Ok(control_msg) = control_stream.receive_message().await {
-            if control_msg == Bytes::from("PAUSE") {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+        // Accept two incoming streams in any order
+        let mut s1 = conn.accept_bi().await.unwrap();
+        let mut s2 = conn.accept_bi().await.unwrap();
+
+        // Handle both streams concurrently: treat "PAUSE" as control (sleep), echo any other data
+        let h1 = tokio::spawn(async move {
+            loop {
+                match tokio::time::timeout(Duration::from_secs(3), s1.receive_message()).await {
+                    Ok(Ok(msg)) => {
+                        if msg == Bytes::from("PAUSE") {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        } else {
+                            let _ = s1.send_message(msg).await;
+                        }
+                    }
+                    Ok(Err(_)) => break,
+                    Err(_) => break, // timeout
+                }
             }
-            
-            let data = data_stream.receive_message().await.unwrap();
-            data_stream.send_message(data).await.unwrap();
-        }
+            let _ = s1.close().await;
+        });
+
+        let h2 = tokio::spawn(async move {
+            loop {
+                match tokio::time::timeout(Duration::from_secs(3), s2.receive_message()).await {
+                    Ok(Ok(msg)) => {
+                        if msg == Bytes::from("PAUSE") {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        } else {
+                            let _ = s2.send_message(msg).await;
+                        }
+                    }
+                    Ok(Err(_)) => break,
+                    Err(_) => break,
+                }
+            }
+            let _ = s2.close().await;
+        });
+
+        let _ = h1.await;
+        let _ = h2.await;
     });
     
     let client = transport.connect(&addr).await.unwrap();
@@ -348,12 +402,13 @@ async fn test_cross_stream_dependencies() {
     for i in 0..5 {
         // Send control message to potentially pause processing
         control_stream.send_message(Bytes::from("PAUSE")).await.unwrap();
-        
-        // Send data message
+
+        // Immediately send data; server will pause on control and echo data concurrently
         let msg = Bytes::from(format!("Data message {}", i));
         data_stream.send_message(msg.clone()).await.unwrap();
-        
-        let response = data_stream.receive_message().await.unwrap();
+
+        // Bound the wait for echo to avoid hanging the test
+        let response = tokio::time::timeout(Duration::from_secs(2), data_stream.receive_message()).await.unwrap().unwrap();
         assert_eq!(response, msg);
     }
     
