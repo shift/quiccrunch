@@ -3,8 +3,23 @@ use tokio::runtime::Runtime;
 use quiccrunch::test_utils::scaling::FrequencyScaling;
 use quiccrunch::test_utils::plotting;
 
+// This test requires sudo privileges and hardware access; exclude from default suite.
+// Opt-in by running: `cargo test --features scaling-tests --test scaling_benchmark`
+#[cfg(feature = "scaling-tests")]
 #[test]
 fn run_frequency_scaling() {
+    // If not root or required tools are missing, skip gracefully
+    if nix::unistd::Uid::effective().as_raw() != 0 {
+        eprintln!("skipping: requires root privileges (sudo)");
+        return;
+    }
+    for tool in ["cpupower", "sensors", "dmidecode"] {
+        if which::which(tool).is_err() {
+            eprintln!("skipping: required tool '{}' not found in PATH", tool);
+            return;
+        }
+    }
+
     // Try to create runtime
     let rt = Runtime::new().expect("Failed to create tokio runtime");
 

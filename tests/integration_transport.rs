@@ -5,7 +5,7 @@ use quiccrunch::{QuicTransport, Transport};
 use quinn::{TransportConfig, VarInt};
 use portpicker;
 use tokio::time::timeout;
-use quiccrunch::transport::{TransportSettings, CongestionController, TlsConfig};
+use quiccrunch::transport::{TransportSettings, CongestionController};
 
 mod certs;
 use certs::generate_node_cert;
@@ -170,8 +170,9 @@ async fn test_message_size_limit() {
         let conn = incoming.accept().await.unwrap();
         let mut stream = conn.open_bi().await.unwrap();
         
-        let msg = stream.receive_message().await.unwrap();
-        stream.send_message(msg).await.unwrap();
+        // Expect an error when client attempts to send too-large message
+        let result = stream.receive_message().await;
+        assert!(result.is_err());
     });
     
     let client = transport.connect(&addr).await.unwrap();
@@ -183,8 +184,11 @@ async fn test_message_size_limit() {
     let result = stream.send_message(large_msg).await;
     
     assert!(result.is_err());
+    // Close the stream to ensure the server receives EOF and exits
+    let _ = stream.close().await;
     
-    server_handle.abort();
+    // Wait for server with timeout
+    timeout(Duration::from_secs(5), server_handle).await.unwrap().unwrap();
 }
 
 #[test(tokio::test)]

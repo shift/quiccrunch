@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 use plotters::prelude::*;
-use plotters::style::{FontDesc, FontFamily, FontStyle};
+use plotters::style::{FontDesc, FontFamily};
 use plotters::series::LineSeries;
 
 #[derive(Debug)]
@@ -49,7 +49,7 @@ impl PowerTimeSeries {
 }
 
 use std::path::Path;
-use thiserror::Error;
+// use thiserror::Error;
 
 #[derive(Debug)]
 pub enum PowerVizError {
@@ -141,10 +141,10 @@ impl PowerVisualizer {
             .set_label_area_size(LabelAreaPosition::Right, 60)
             .set_label_area_size(LabelAreaPosition::Bottom, 40);
 
-        // Only add caption if font drawing is allowed
-        let allow_text = std::env::var("PLOTTERS_ALLOW_FONT_ERROR").unwrap_or_default() != "1";
-        if allow_text {
-            chart_builder = chart_builder.caption(title, caption_font);
+        // Headless guard: skip all text rendering when HEADLESS_PLOT=1
+        let headless = std::env::var("HEADLESS_PLOT").unwrap_or_default() == "1";
+        if !headless {
+            chart_builder = chart_builder.caption(title, ("", 0).into_font());
         }
 
         let mut chart = chart_builder.build_cartesian_2d(
@@ -156,55 +156,83 @@ impl PowerVisualizer {
                 -5f64..105f64 // Wider range for temperature scale
             );
 
-        chart
-            .configure_mesh()
-            .disable_mesh()
-            .x_desc("Time (seconds)")
-            .y_desc("Power (Watts)")
-            .axis_style(BLACK.mix(0.8).stroke_width(2))
-            .draw()?;
+        if !headless {
+            chart.configure_mesh()
+                .x_desc("Time (seconds)")
+                .y_desc("Power (Watts)")
+                .axis_style(BLACK.mix(0.8).stroke_width(2))
+                .draw()?;
+        }
 
-        chart.draw_series(LineSeries::new(
+        let mut series = chart.draw_series(LineSeries::new(
             data.timestamps.iter().zip(&data.package_power)
                 .map(|(t, p)| (t.as_secs_f64(), *p)),
             RED.mix(0.9).stroke_width(2)
-        ))?.label("Package Power")
-          .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED.mix(0.9)));
+        ))?;
+        if !headless {
+            series = series.label("Package Power")
+                .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED.mix(0.9)));
+        }
 
-        chart.draw_series(LineSeries::new(
+        let mut series2 = chart.draw_series(LineSeries::new(
             data.timestamps.iter().zip(&data.dram_power)
                 .map(|(t, p)| (t.as_secs_f64(), *p)),
             BLUE.mix(0.9).stroke_width(2)
-        ))?.label("DRAM Power")
-          .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE.mix(0.9)));
+        ))?;
+        if !headless {
+            series2 = series2.label("DRAM Power")
+                .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE.mix(0.9)));
+        }
 
-        chart.draw_secondary_series(LineSeries::new(
+        let mut series3 = chart.draw_secondary_series(LineSeries::new(
             data.timestamps.iter().zip(&data.cpu_temp)
                 .map(|(t, temp)| (t.as_secs_f64(), *temp)),
             GREEN.mix(0.8).stroke_width(2)
-        ))?.label("CPU Temperature (°C)")
-          .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], GREEN.mix(0.8)));
+        ))?;
+        if !headless {
+            series3 = series3.label("CPU Temperature (°C)")
+                .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], GREEN.mix(0.8)));
+        }
 
-        chart.configure_series_labels()
-            .background_style(WHITE.mix(0.8))
-            .border_style(BLACK)
-            .position(SeriesLabelPosition::UpperRight)
-            .draw()?;
+        if !headless {
+            chart.configure_series_labels()
+                .background_style(WHITE.mix(0.8))
+                .border_style(BLACK)
+                .position(SeriesLabelPosition::UpperRight)
+                .draw()?;
+        }
 
-        root.present()?;
+        // Ensure drawing is finalized before writing
+        drop(chart);
+        drop(root);
+        // Persist the buffer to file
+        let path = Path::new(&self.output_dir)
+            .join(format!("power_time_series_{}.png", title.to_lowercase().replace(" ", "_")));
+        std::fs::write(&path, &buffer)?;
         Ok(())
+
+
     }
 
+    fn get_power_range(&self, data: &PowerTimeSeries) -> (f64, f64) {
+        let min_power = data.package_power.iter()
+            .chain(data.dram_power.iter())
+            .fold(f64::MAX, |a, &b| a.min(b));
+        let max_power = data.package_power.iter()
+            .chain(data.dram_power.iter())
+            .fold(f64::MIN, |a, &b| a.max(b));
+        (min_power, max_power)
+    }
     pub fn plot_power_comparison(&self, profiles: &HashMap<String, PowerTimeSeries>) -> Result<()> {
         if profiles.is_empty() {
             return Err(PowerVizError::NoDataError("No profiles available for comparison".into()));
         }
-        
+
         let path = Path::new(&self.output_dir).join("power_comparison.png");
-        
+
         const WIDTH: u32 = 1024;
         const HEIGHT: u32 = 768;
-        
+
         let mut buffer = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
         let root = BitMapBackend::with_buffer(&mut buffer, (WIDTH, HEIGHT))
             .into_drawing_area();
@@ -234,46 +262,47 @@ impl PowerVisualizer {
             .set_label_area_size(LabelAreaPosition::Left, 60)
             .set_label_area_size(LabelAreaPosition::Bottom, 40);
 
-        if std::env::var("PLOTTERS_ALLOW_FONT_ERROR").unwrap_or_default() != "1" {
-            chart_builder = chart_builder.caption("Power Consumption Comparison", caption_font);
+        let headless = std::env::var("HEADLESS_PLOT").unwrap_or_default() == "1";
+        if !headless {
+            chart_builder = chart_builder.caption("Power Consumption Comparison", ("", 0).into_font());
         }
 
         let mut chart = chart_builder.build_cartesian_2d(0f64..max_time, min_power..max_power)?;
 
-        chart
-            .configure_mesh()
-            .x_desc("Time (seconds)")
-            .y_desc("Total Power (Watts)")
-            .draw()?;
+        if !headless {
+            chart.configure_mesh()
+                .x_desc("Time (seconds)")
+                .y_desc("Total Power (Watts)")
+                .draw()?;
+        }
 
         for (i, (name, data)) in profiles.iter().enumerate() {
             let color = Palette99::pick(i).mix(0.9);
-            chart.draw_series(LineSeries::new(
+            let mut ds = chart.draw_series(LineSeries::new(
                 data.timestamps.iter().zip(data.package_power.iter().zip(&data.dram_power))
                     .map(|(t, (p, d))| (t.as_secs_f64(), p + d)),
                 color.stroke_width(2)
-            ))?.label(name)
-              .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color));
+            ))?;
+            if !headless {
+                ds = ds.label(name)
+                    .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color));
+            }
         }
 
-        chart.configure_series_labels()
-            .background_style(WHITE.mix(0.8))
-            .border_style(BLACK)
-            .position(SeriesLabelPosition::UpperRight)
-            .draw()?;
+        if !headless {
+            chart.configure_series_labels()
+                .background_style(WHITE.mix(0.8))
+                .border_style(BLACK)
+                .position(SeriesLabelPosition::UpperRight)
+                .draw()?;
+        }
 
-        root.present()?;
+        // Ensure chart/root dropped before writing buffer
+        drop(chart);
+        drop(root);
+        // Persist buffer to file
+        std::fs::write(&path, &buffer)?;
         Ok(())
-    }
-
-    fn get_power_range(&self, data: &PowerTimeSeries) -> (f64, f64) {
-        let min_power = data.package_power.iter()
-            .chain(data.dram_power.iter())
-            .fold(f64::MAX, |a, &b| a.min(b));
-        let max_power = data.package_power.iter()
-            .chain(data.dram_power.iter())
-            .fold(f64::MIN, |a, &b| a.max(b));
-        (min_power, max_power)
     }
 }
 
@@ -313,6 +342,7 @@ mod tests {
 
     #[test]
     fn test_power_visualizer() -> Result<()> {
+        std::env::set_var("HEADLESS_PLOT", "1");
         let test_dir = "target/test_power_viz";
         
         // Create test data
@@ -349,6 +379,7 @@ mod tests {
 
     #[test]
     fn test_plotting_range() -> Result<()> {
+        std::env::set_var("HEADLESS_PLOT", "1");
         let test_dir = "target/test_power_viz_range";
         let viz = PowerVisualizer::new(test_dir)?;
         

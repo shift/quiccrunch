@@ -3,7 +3,7 @@ mod types;
 
 use tokio::process::Command;
 use error::{BenchError, Result};
-use crate::transport::{TransportSettings, CongestionController};
+use crate::transport::TransportSettings;
 
 pub use types::*;
 

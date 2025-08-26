@@ -18,16 +18,23 @@ use {
 pub struct QuicStream {
     send: SendStream,
     recv: RecvStream,
+    max_message_size: usize,
 }
 
 impl QuicStream {
     /// Create a new QuicStream
-    pub fn new(send: SendStream, recv: RecvStream) -> Self {
-        Self { send, recv }
+    pub fn new(send: SendStream, recv: RecvStream, max_message_size: usize) -> Self {
+        Self { send, recv, max_message_size }
     }
 
     /// Send a message over the stream with flow control
     pub async fn send_message(&mut self, data: Bytes) -> crate::Result<()> {
+        // Enforce application-level max message size (aligned with stream_receive_window)
+        if data.len() > self.max_message_size {
+            return Err(crate::TransportError::StreamError(format!(
+                "Message size {} exceeds limit {}", data.len(), self.max_message_size
+            )));
+        }
         #[cfg(feature = "telemetry")]
         let span = info_span!("quiccrunch.send", message_size = %data.len());
         
@@ -67,8 +74,8 @@ impl QuicStream {
             }
         }
 
-        // Ensure all data is flushed
-        self.send.finish().await
+        // Ensure all data is flushed (do not finish the stream to allow multiple messages)
+        self.send.flush().await
             .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
 
         #[cfg(feature = "telemetry")]
@@ -112,6 +119,11 @@ impl QuicStream {
 
         // Parse message length and prepare buffer
         let msg_len = u32::from_le_bytes(header) as usize;
+        if msg_len > self.max_message_size {
+            return Err(crate::TransportError::StreamError(format!(
+                "Announced message size {} exceeds limit {}", msg_len, self.max_message_size
+            )));
+        }
         let mut buffer = Vec::with_capacity(msg_len);
         let mut bytes_read = 0;
 

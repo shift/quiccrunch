@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use quiccrunch::transport::{QuicTransport, Transport, TlsConfig, TransportSettings};
+    use quiccrunch::transport::{QuicTransport, Transport, TransportSettings};
     use quiccrunch::test_utils::certs::generate_node_cert;
     use tokio::test;
     use bytes::Bytes;
     use std::time::Duration;
     use tokio::time::timeout;
-    use quinn::VarInt;
-    use portpicker;
+    // use quinn::VarInt;
+    // use portpicker;
 
     // Helper function to create test data of specified size
     fn create_test_data(size: usize) -> Bytes {
@@ -258,7 +258,13 @@ mod tests {
         let result = stream.send_message(large_msg).await;
         
         assert!(result.is_err());
+        // Close the stream to signal EOF to the server so it doesn't hang on receive
+        let _ = stream.close().await;
         
-        let _ = server_handle.await;
+        // Wait for server with timeout to prevent hangs
+        tokio::time::timeout(Duration::from_secs(5), server_handle)
+            .await
+            .expect("server task timed out")
+            .unwrap();
     }
 }

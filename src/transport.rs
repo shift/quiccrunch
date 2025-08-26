@@ -149,7 +149,7 @@ impl QuinnCtx {
         let conn = tokio::time::timeout(Duration::from_secs(10), connecting).await
             .map_err(|_| crate::TransportError::ConnectionFailed("Connection timeout".into()))?
             .map_err(|e| crate::TransportError::ConnectionFailed(e.to_string()))?;
-        Ok(Connection { inner: ConnectionInner::Quinn(conn) })
+        Ok(Connection { inner: ConnectionInner::Quinn(conn), max_message_size: self.settings.stream_receive_window as usize })
     }
 
     async fn listen(&self, addr: &str) -> crate::Result<Incoming> {
@@ -170,7 +170,7 @@ impl QuinnCtx {
             socket,
             Arc::new(TokioRuntime)
         ).map_err(|e| crate::TransportError::ConnectionFailed(e.to_string()))?;
-        Ok(Incoming { inner: IncomingInner::Quinn(endpoint) })
+        Ok(Incoming { inner: IncomingInner::Quinn(endpoint), settings: self.settings.clone() })
     }
 }
 
@@ -254,10 +254,12 @@ pub struct CongestionState {
 #[derive(Clone)]
 pub struct Connection {
     inner: ConnectionInner,
+    max_message_size: usize,
 }
 
 pub struct Incoming {
     inner: IncomingInner,
+    settings: TransportSettings,
 }
 
 impl Connection {
@@ -294,7 +296,7 @@ impl Connection {
             ConnectionInner::Quinn(conn) => {
                 let (send, recv) = conn.accept_bi().await
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                Ok(crate::QuicStream::new(send, recv))
+                Ok(crate::QuicStream::new(send, recv, self.max_message_size))
             }
         }
     }
@@ -304,7 +306,7 @@ impl Connection {
             ConnectionInner::Quinn(conn) => {
                 let (send, recv) = conn.open_bi().await
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                Ok(crate::QuicStream::new(send, recv))
+                Ok(crate::QuicStream::new(send, recv, self.max_message_size))
             }
         }
     }
@@ -327,7 +329,7 @@ impl Incoming {
                     .ok_or_else(|| crate::TransportError::ConnectionFailed("No more incoming connections".into()))?
                     .await
                     .map_err(|e| crate::TransportError::ConnectionFailed(e.to_string()))?;
-                Ok(Connection { inner: ConnectionInner::Quinn(new_conn) })
+                Ok(Connection { inner: ConnectionInner::Quinn(new_conn), max_message_size: self.settings.stream_receive_window as usize })
             }
         }
     }

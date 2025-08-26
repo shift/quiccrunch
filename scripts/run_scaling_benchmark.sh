@@ -76,6 +76,6 @@ fi
 
 # Run the benchmark
 echo "Running scaling benchmark..."
-RUST_BACKTRACE=1 cargo test run_frequency_scaling -- --test-threads=1 --nocapture
+RUST_BACKTRACE=1 cargo test --features scaling-tests --test scaling_benchmark -- --test-threads=1 --nocapture
 
 echo "Benchmark complete!"
