@@ -27,25 +27,46 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
+            # Rust toolchain + editor support
             rustToolchain
+            rust-analyzer
+
+            # Build tooling and native deps
             pkg-config
             openssl
             cmake
+            llvm
+            clang
+            zlib
+            capnproto
+            protobuf
+            liburing
 
-            # Fonts for plotters
+            # Plotting/visualization
+            gnuplot
             fontconfig
             fontconfig.dev
             dejavu_fonts
             liberation_ttf
             noto-fonts
+            python3
+            python3Packages.pip
+            python3Packages.matplotlib
 
-            # Build dependencies
-            capnproto
-            
+            # Script utilities
+            jq
+            coreutils
+            bash
+
             # CPU frequency control tools
             linuxPackages.cpupower
             dmidecode
             lm_sensors
+          ];
+
+          nativeBuildInputs = with pkgs; [
+            cargo-nextest
+            cargo-llvm-cov
           ];
 
           shellHook = ''
@@ -58,6 +79,19 @@
               export XDG_DATA_DIRS="${pkgs.dejavu_fonts}/share:${pkgs.noto-fonts}/share:${pkgs.liberation_ttf}/share:$XDG_DATA_DIRS"
             fi
             fc-cache -f >/dev/null 2>&1 || true
+
+            export RUST_BACKTRACE=1
+            unset RUSTFLAGS # avoid cargo injecting bogus literal from nix develop
+
+            # Prefer pkg-config for OpenSSL discovery
+            if [ -z "$PKG_CONFIG_PATH" ]; then
+              export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig"
+            else
+              export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
+            fi
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+            export OPENSSL_LIB_DIR="${pkgs.openssl.out}/lib"
+            export OPENSSL_INCLUDE_DIR="${pkgs.openssl.dev}/include"
 
             # If no CPU frequency control access, warn but allow dev shell to continue
             if [ ! -w "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor" ]; then
