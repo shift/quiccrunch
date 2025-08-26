@@ -77,7 +77,7 @@ mod tests {
                 stream.send_message(Bytes::from(data)).await.unwrap();
             }
             // Close all streams to signal completion
-            for stream in streams {
+            for mut stream in streams {
                 let _ = stream.close().await;
             }
         });
