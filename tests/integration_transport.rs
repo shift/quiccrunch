@@ -95,8 +95,9 @@ async fn test_multiple_streams() {
         
         for _ in 0..5 {
             let mut stream = conn.open_bi().await.unwrap();
-            let msg = stream.receive_message().await.unwrap();
-            stream.send_message(msg).await.unwrap();
+        let msg = stream.receive_message().await.unwrap();
+        stream.send_message(msg).await.unwrap();
+        let _ = stream.close().await;
             let _ = stream.close().await;
         }
     });
