@@ -1,0 +1,121 @@
+[
+  {
+    "task_id": "FLOW-003",
+    "description": "Add integration tests for complex flow control scenarios",
+    "assigned_to": "StreamMaster",
+    "status": "in_progress",
+    "dependencies": [],
+    "input_files": [
+      "/home/shift/code/quiccrunch/tests/integration_transport.rs",
+      "/home/shift/code/quiccrunch/tests/flow_control_test.rs"
+    ],
+    "output_files": [
+      "/home/shift/code/quiccrunch/tests/integration_transport.rs"
+    ]
+  },
+  {
+    "task_id": "SYS-003",
+    "description": "Validate power efficiency metrics and governor testing",
+    "assigned_to": "PowerWatch", 
+    "status": "in_progress",
+    "dependencies": [],
+    "input_files": [
+      "/home/shift/code/quiccrunch/src/power.rs",
+      "/home/shift/code/quiccrunch/benches/power.rs"
+    ],
+    "output_files": [
+      "/home/shift/code/quiccrunch/benches/power.rs"
+    ]
+  },
+  {
+    "task_id": "PERF-003",
+    "description": "Verify full message size range in benchmarks",
+    "assigned_to": "MetricPro",
+    "status": "blocked",
+    "dependencies": ["FLOW-003"],
+    "input_files": [
+      "/home/shift/code/quiccrunch/benches/transport.rs",
+      "/home/shift/code/quiccrunch/benches/patterns.rs"
+    ],
+    "output_files": [
+      "/home/shift/code/quiccrunch/benches/transport.rs",
+      "/home/shift/code/quiccrunch/benches/patterns.rs" 
+    ]
+  },
+  {
+    "task_id": "DOC-003", 
+    "description": "Complete API documentation and usage examples",
+    "assigned_to": "DocCrafter",
+    "status": "blocked",
+    "dependencies": ["FLOW-003", "PERF-003", "SYS-003"],
+    "input_files": [
+      "/home/shift/code/quiccrunch/src/lib.rs",
+      "/home/shift/code/quiccrunch/examples"
+    ],
+    "output_files": [
+      "/home/shift/code/quiccrunch/docs/api.md",
+      "/home/shift/code/quiccrunch/examples/README.md"
+    ]
+  },
+  {
+    "task_id": "BUG-001",
+    "description": "Fix Transport Module Compilation Issues",
+    "assigned_to": "StreamMaster",
+    "status": "pending",
+    "dependencies": [],
+    "input_files": [
+      "/home/shift/code/quiccrunch/src/transport.rs"
+    ],
+    "output_files": [
+      "/home/shift/code/quiccrunch/src/transport.rs"
+    ]
+  },
+  {
+    "task_id": "BUG-002",
+    "description": "Fix Power Visualization Module",
+    "assigned_to": "PowerWatch",
+    "status": "pending",
+    "dependencies": [],
+    "input_files": [
+      "/home/shift/code/quiccrunch/src/test_utils/power_viz.rs"
+    ],
+    "output_files": [
+      "/home/shift/code/quiccrunch/src/test_utils/power_viz.rs"
+    ]
+  },
+  {
+    "task_id": "TEST-001",
+    "description": "Run Unit Tests After Fixes",
+    "assigned_to": "MetricPro",
+    "status": "blocked",
+    "dependencies": ["BUG-001", "BUG-002"],
+    "input_files": [
+      "/home/shift/code/quiccrunch/src/**/*.rs",
+      "/home/shift/code/quiccrunch/tests/**/*.rs"
+    ],
+    "output_files": []
+  },
+  {
+    "task_id": "TEST-002",
+    "description": "Run Integration Tests",
+    "assigned_to": "StreamMaster",
+    "status": "blocked",
+    "dependencies": ["TEST-001", "FLOW-003"],
+    "input_files": [
+      "/home/shift/code/quiccrunch/tests/integration_transport.rs",
+      "/home/shift/code/quiccrunch/tests/flow_control_test.rs"
+    ],
+    "output_files": []
+  },
+  {
+    "task_id": "TEST-003",
+    "description": "Run Performance and Power Benchmarks",
+    "assigned_to": "PowerWatch",
+    "status": "blocked",
+    "dependencies": ["TEST-002", "SYS-003", "PERF-003"],
+    "input_files": [
+      "/home/shift/code/quiccrunch/benches/**/*.rs"
+    ],
+    "output_files": []
+  }
+]
