@@ -2,12 +2,18 @@ use test_log::test;
 use bytes::Bytes;
 use std::time::Duration;
 use quiccrunch::{QuicTransport, Transport};
-use quinn::{TransportConfig, VarInt}; // TransportConfig translation is limited to what our API exposes
+// Note: avoid direct quinn dependency in tests; keep a shadow struct for compile-time only values
+#[allow(dead_code)]
+struct TransportConfig;
+#[allow(dead_code)]
+struct VarInt(u32);
+impl TransportConfig { fn default() -> Self { TransportConfig } }
+impl VarInt { fn from_u32(v: u32) -> Self { VarInt(v) } }
+// TransportConfig translation is limited to what our API exposes
 use portpicker;
 use tokio::time::timeout;
 use quiccrunch::transport::{TransportSettings, CongestionController};
 mod _helpers;
-use _helpers::translate_quinn_to_settings;
 
 mod certs;
 use certs::generate_node_cert;
@@ -32,7 +38,7 @@ async fn setup_transport() -> (QuicTransport, String) {
     (transport, addr)
 }
 
-async fn setup_transport_with_config(_quinn_transport: TransportConfig) -> (QuicTransport, String) {
+async fn setup_transport_with_config(_config_placeholder: TransportConfig) -> (QuicTransport, String) {
     // Note: quinn::TransportConfig lacks getters; tests should configure via TransportSettings directly.
     let settings = TransportSettings {
         max_idle_timeout_ms: Some(30000),
@@ -214,12 +220,7 @@ async fn test_message_size_limit() {
 #[test(tokio::test)]
 async fn test_concurrent_streams_varying_windows() {
     let mut config = TransportConfig::default();
-    config
-        .max_concurrent_uni_streams(VarInt::from_u32(1000))
-        .max_concurrent_bidi_streams(VarInt::from_u32(1000))
-        .stream_receive_window(VarInt::from_u32(2 * 1024 * 1024))  // 2MB per stream
-        .receive_window(VarInt::from_u32(16 * 1024 * 1024));       // 16MB connection window
-
+    // Placeholder no-op config; quinn::TransportConfig is not linked here.
     let (transport, addr) = setup_transport_with_config(config).await;
     let mut incoming = transport.listen(&addr).await.unwrap();
     
@@ -418,9 +419,7 @@ async fn test_cross_stream_dependencies() {
 
 #[test(tokio::test)]
 async fn test_connection_timeout() {
-    let mut config = TransportConfig::default();
-    config.max_idle_timeout(Some(Duration::from_secs(1).try_into().expect("Valid timeout")));
-    
+    let config = TransportConfig::default();
     let (transport, _addr) = setup_transport_with_config(config).await;
     
     let result = transport.connect("127.0.0.1:1").await;

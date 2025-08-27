@@ -2,13 +2,26 @@
 
 This directory contains examples demonstrating QuicCrunch usage:
 
-## Basic Examples
+## Easy-to-Use Client/Server Examples
 
-1. **basic.rs** - Basic client/server communication
+1. **simple_client.rs** - Basic QUIC client using high-level API
+2. **simple_server.rs** - Basic QUIC server using high-level API  
+3. **advanced_chat.rs** - Advanced client/server with JSON message handling
+
+## Low-Level Examples
+
+1. **basic.rs** - Basic client/server communication using transport layer
 2. **cert_utils.rs** - Certificate management utilities
 3. **configuration.rs** - Transport configuration
 4. **replace_grpc.rs** - gRPC replacement example
 5. **tracing.rs** - Tracing and instrumentation
+
+## Performance Testing Examples
+
+1. **interop_client.rs** - Interoperability testing client
+2. **interop_server.rs** - Interoperability testing server
+3. **performance_comparison.rs** - Performance comparison between backends
+4. **throughput_test.rs** - Throughput benchmarking
 
 ## Power Monitoring Examples
 
@@ -16,7 +29,29 @@ This directory contains examples demonstrating QuicCrunch usage:
 2. **power_scaling.rs** - Power scaling and frequency management
 3. **power_profiling.rs** - Application power profiling
 
-### Running Examples
+## Running Examples
+
+### Simple Client/Server
+
+```bash
+# Terminal 1: Start server
+cargo run --example simple_server
+
+# Terminal 2: Run client
+cargo run --example simple_client
+```
+
+### Advanced Chat Example
+
+```bash
+# Terminal 1: Start chat server
+cargo run --example advanced_chat server
+
+# Terminal 2: Run chat client
+cargo run --example advanced_chat client
+```
+
+### Performance Testing
 
 ```bash
 # Run basic example
@@ -27,6 +62,87 @@ cargo run --example power_monitoring
 
 # Run power scaling example
 cargo run --example power_scaling
+```
+
+## API Usage Guide
+
+### Quick Start: Simple Client
+
+```rust
+use quiccrunch::{QuicClient, Result};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let client = QuicClient::new()?;
+    let connection = client.connect("127.0.0.1:50051").await?;
+    let response = connection.request("Hello!").await?;
+    println!("Response: {}", String::from_utf8_lossy(&response));
+    Ok(())
+}
+```
+
+### Quick Start: Simple Server
+
+```rust
+use quiccrunch::{run_echo_server, Result};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    run_echo_server("127.0.0.1:50051").await
+}
+```
+
+### Custom Message Handler
+
+```rust
+use quiccrunch::{MessageHandler, run_server_with_handler, Result};
+use bytes::Bytes;
+
+#[derive(Clone)]
+struct MyHandler;
+
+impl MessageHandler for MyHandler {
+    type Response = Bytes;
+    
+    async fn handle(&self, message: Bytes) -> Bytes {
+        format!("Processed: {}", String::from_utf8_lossy(&message)).into()
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    run_server_with_handler("127.0.0.1:50051", MyHandler).await
+}
+```
+
+### Multiple Concurrent Streams
+
+```rust
+use quiccrunch::{QuicClient, Result};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let client = QuicClient::new()?;
+    let connection = client.connect("127.0.0.1:50051").await?;
+    
+    // Send multiple concurrent requests
+    let mut handles = Vec::new();
+    for i in 0..10 {
+        let connection = connection.clone();
+        let handle = tokio::spawn(async move {
+            connection.request(format!("Message {}", i)).await
+        });
+        handles.push(handle);
+    }
+    
+    // Wait for all responses
+    for handle in handles {
+        let response = handle.await??;
+        println!("Response: {}", String::from_utf8_lossy(&response));
+    }
+    
+    Ok(())
+}
 ```
 
 ### Power Monitoring Usage

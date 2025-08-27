@@ -1,7 +1,4 @@
-use std::path::Path;
-use tokio::runtime::Runtime;
-use quiccrunch::test_utils::scaling::FrequencyScaling;
-use quiccrunch::test_utils::plotting;
+#![cfg(feature = "visualization")]
 
 // This test requires sudo privileges and hardware access; exclude from default suite.
 // Opt-in by running: `cargo test --features scaling-tests --test scaling_benchmark`
