@@ -191,15 +191,6 @@ impl TquicCtx {
             max_message_size: self.settings.initial_max_stream_data_bidi_remote as usize,
         })
     }
-                }
-            }
-        });
-
-        Ok(crate::transport::Connection {
-            inner: crate::transport::ConnectionInner::Tquic(handle),
-            max_message_size: self.settings.initial_max_stream_data_bidi_remote as usize,
-        })
-    }
 
     pub async fn listen(&self, addr: &str) -> crate::Result<crate::transport::Incoming> {
         let bind_addr: SocketAddr = addr.parse()

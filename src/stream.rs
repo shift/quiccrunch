@@ -498,53 +498,6 @@ impl QuicStream {
                         Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
                     }
                 }
-                    let read_res = time::timeout(READ_TIMEOUT, rx).await;
-                    match read_res {
-                        Ok(Ok(Ok(Some(data)))) => {
-                            if data.len() != chunk_size {
-                                return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
-                            }
-                            #[cfg(feature = "memory-pools")]
-                            {
-                                #[cfg(feature = "simd-optimizations")]
-                                {
-                                    let features = crate::simd::CpuFeatures::detect();
-                                    if features.avx2 && data.len() >= 32 {
-                                        let current_len = pooled_buffer.len();
-                                        pooled_buffer.resize(current_len + chunk_size, 0);
-                                        crate::simd::fast_copy(&data, &mut pooled_buffer.as_mut_slice()[current_len..current_len + chunk_size]);
-                                    } else {
-                                        pooled_buffer.extend_from_slice(&data);
-                                    }
-                                }
-                                #[cfg(not(feature = "simd-optimizations"))]
-                                pooled_buffer.extend_from_slice(&data);
-                            }
-                            #[cfg(not(feature = "memory-pools"))]
-                            {
-                                #[cfg(feature = "simd-optimizations")]
-                                {
-                                    let features = crate::simd::CpuFeatures::detect();
-                                    if features.avx2 && data.len() >= 32 {
-                                        buffer.resize(bytes_read + chunk_size, 0);
-                                        crate::simd::fast_copy(&data, &mut buffer[bytes_read..bytes_read + chunk_size]);
-                                    } else {
-                                        buffer.extend_from_slice(&data);
-                                    }
-                                }
-                                #[cfg(not(feature = "simd-optimizations"))]
-                                buffer.extend_from_slice(&data);
-                            }
-                            bytes_read += chunk_size;
-                        },
-                        Ok(Ok(Ok(None))) => {
-                            return Err(crate::TransportError::StreamError("stream closed during read".into()));
-                        },
-                        Ok(Ok(Err(e))) => return Err(e),
-                        Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
-                        Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
-                    }
-                }
             }
         }
 
