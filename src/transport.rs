@@ -73,6 +73,8 @@ enum ConnectionInner {
     Quinn(quinn::Connection),
     #[cfg(feature = "backend-tquic")]
     Tquic(crate::transport::tquic::ConnHandle),
+    #[cfg(feature = "io-uring-advanced")]
+    IoUringAdvanced(crate::io_uring_advanced::Connection),
 }
 
 enum IncomingInner {
@@ -80,6 +82,8 @@ enum IncomingInner {
     Quinn(Endpoint),
     #[cfg(feature = "backend-tquic")]
     Tquic(crate::transport::tquic::IncomingHandle),
+    #[cfg(feature = "io-uring-advanced")]
+    IoUringAdvanced(crate::io_uring_advanced::Incoming),
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +95,8 @@ enum BackendImpl {
     Alt(QuinnCtx), // placeholder delegating to Quinn
     #[cfg(feature = "backend-tquic")]
     Tquic(crate::transport::tquic::TquicCtx),
+    #[cfg(feature = "io-uring-advanced")]
+    IoUringAdvanced(crate::io_uring_advanced::IoUringTransport),
 }
 
 #[cfg(feature = "backend-quinn")]
@@ -159,6 +165,31 @@ impl BackendImpl {
                     return Err(crate::TransportError::ConnectionFailed("backend-quinn not enabled".into()));
                 }
             }
+            crate::config::Backend::IoUringAdvanced => {
+                #[cfg(feature = "io-uring-advanced")]
+                {
+                    let io_uring_config = crate::io_uring_advanced::Config {
+                        enable_vectorized_io: true,
+                        enable_zero_copy: true,
+                        numa_awareness: true,
+                        coalesce_operations: true,
+                        buffer_pool_size: 1024 * 1024, // 1MB pool
+                        max_concurrent_ops: 1000,
+                        use_registered_buffers: true,
+                    };
+                    Ok(BackendImpl::IoUringAdvanced(crate::io_uring_advanced::IoUringTransport::new(tls_config, adv, io_uring_config)?))
+                }
+                #[cfg(not(feature = "io-uring-advanced"))]
+                {
+                    tracing::warn!("io-uring-advanced disabled; falling back to tQUIC");
+                    let tls = crate::transport::tquic::TlsConfig {
+                        cert: tls_config.cert.clone(),
+                        key: tls_config.key.clone(),
+                        ca_cert: tls_config.ca_cert.clone(),
+                    };
+                    Ok(BackendImpl::Tquic(crate::transport::tquic::TquicCtx::new(tls, adv)?))
+                }
+            }
         }
     }
 
@@ -192,6 +223,8 @@ impl BackendImpl {
             BackendImpl::Quinn(ctx) | BackendImpl::Alt(ctx) => ctx.connect(addr).await,
             #[cfg(feature = "backend-tquic")]
             BackendImpl::Tquic(ctx) => ctx.connect(addr).await,
+            #[cfg(feature = "io-uring-advanced")]
+            BackendImpl::IoUringAdvanced(ctx) => ctx.connect(addr).await,
         }
     }
 
@@ -201,6 +234,8 @@ impl BackendImpl {
             BackendImpl::Quinn(ctx) | BackendImpl::Alt(ctx) => ctx.listen(addr).await,
             #[cfg(feature = "backend-tquic")]
             BackendImpl::Tquic(ctx) => ctx.listen(addr).await,
+            #[cfg(feature = "io-uring-advanced")]
+            BackendImpl::IoUringAdvanced(ctx) => ctx.listen(addr).await,
         }
     }
 }
@@ -340,6 +375,8 @@ impl QuicTransport {
             BackendImpl::Alt(_) => "Quinn (Alt)",
             #[cfg(feature = "backend-tquic")]
             BackendImpl::Tquic(_) => "tQUIC",
+            #[cfg(feature = "io-uring-advanced")]
+            BackendImpl::IoUringAdvanced(_) => "io_uring Advanced",
         }
     }
 
@@ -426,10 +463,15 @@ impl Connection {
                 };
                 Ok(FlowControlInfo { path_stats, congestion_state, bandwidth_estimate })
             }
-    #[cfg(feature = "backend-tquic")]
-    ConnectionInner::Tquic(_) => {
+            #[cfg(feature = "backend-tquic")]
+            ConnectionInner::Tquic(_) => {
                 // TODO: expose tquic stats mapping when available
                 Err(crate::TransportError::StreamError("flow_control_status not supported for tquic yet".into()))
+            }
+            #[cfg(feature = "io-uring-advanced")]
+            ConnectionInner::IoUringAdvanced(_) => {
+                // TODO: implement flow control stats for io_uring_advanced
+                Err(crate::TransportError::StreamError("flow_control_status not supported for io_uring_advanced yet".into()))
             }
         }
     }
@@ -450,6 +492,10 @@ impl Connection {
                 let (send, recv) = rx.await.map_err(|_| crate::TransportError::StreamError("tquic accept_bi canceled".into()))??;
                 Ok(crate::QuicStream::new_tquic(send, recv, self.max_message_size))
             }
+            #[cfg(feature = "io-uring-advanced")]
+            ConnectionInner::IoUringAdvanced(conn) => {
+                conn.accept_bi().await
+            }
         }
     }
 
@@ -469,6 +515,10 @@ impl Connection {
                 let (send, recv) = rx.await.map_err(|_| crate::TransportError::StreamError("tquic open_bi canceled".into()))??;
                 Ok(crate::QuicStream::new_tquic(send, recv, self.max_message_size))
             }
+            #[cfg(feature = "io-uring-advanced")]
+            ConnectionInner::IoUringAdvanced(conn) => {
+                conn.open_bi().await
+            }
         }
     }
 }
@@ -483,6 +533,8 @@ impl Incoming {
                 .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to get local address: {}", e))),
             #[cfg(feature = "backend-tquic")]
             IncomingInner::Tquic(h) => Ok(h.local_addr.clone()),
+            #[cfg(feature = "io-uring-advanced")]
+            IncomingInner::IoUringAdvanced(h) => h.local_addr(),
         }
     }
 
@@ -503,6 +555,11 @@ impl Incoming {
                     Some(handle) => Ok(Connection { inner: ConnectionInner::Tquic(handle), max_message_size: self.settings.stream_receive_window as usize }),
                     None => Err(crate::TransportError::ConnectionFailed("No more incoming connections".into())),
                 }
+            }
+            #[cfg(feature = "io-uring-advanced")]
+            IncomingInner::IoUringAdvanced(h) => {
+                let conn = h.accept().await?;
+                Ok(Connection { inner: ConnectionInner::IoUringAdvanced(conn), max_message_size: self.settings.stream_receive_window as usize })
             }
         }
     }

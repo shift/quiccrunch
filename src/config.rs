@@ -12,6 +12,7 @@ pub enum CongestionControl {
 pub enum Backend {
     Tquic,
     Quinn,
+    IoUringAdvanced,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

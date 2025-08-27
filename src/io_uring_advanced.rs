@@ -18,6 +18,95 @@ use std::net::SocketAddr;
 use crate::memory::{PooledBuffer, MessageBuffer};
 use crate::simd;
 
+/// Configuration for io_uring transport optimizations
+#[derive(Clone)]
+pub struct Config {
+    pub enable_vectorized_io: bool,
+    pub enable_zero_copy: bool,
+    pub numa_awareness: bool,
+    pub coalesce_operations: bool,
+    pub buffer_pool_size: usize,
+    pub max_concurrent_ops: usize,
+    pub use_registered_buffers: bool,
+}
+
+/// Transport layer for io_uring backend
+#[derive(Clone, Debug)]
+pub struct IoUringTransport {
+    inner: Arc<IoUringAdvancedTransport>,
+    tls_config: crate::transport::TlsConfig,
+    settings: crate::config::QuicTransportSettings,
+    config: Config,
+}
+
+impl IoUringTransport {
+    pub fn new(
+        tls_config: crate::transport::TlsConfig,
+        settings: crate::config::QuicTransportSettings,
+        config: Config,
+    ) -> crate::Result<Self> {
+        let transport_config = TransportConfig {
+            ring_size: if config.max_concurrent_ops <= 512 { 1024 } else { 4096 },
+            buffer_size: if config.buffer_pool_size > 512 * 1024 { 256 * 1024 } else { 64 * 1024 },
+            buffer_count: config.max_concurrent_ops,
+            batch_size: if config.coalesce_operations { 128 } else { 16 },
+            use_sqpoll: true,
+            use_iopoll: false,
+            use_fixed_buffers: config.use_registered_buffers,
+            cpu_affinity: if config.numa_awareness { Some(0) } else { None },
+            numa_node: if config.numa_awareness { Some(0) } else { None },
+            prefetch_depth: if config.enable_vectorized_io { 32 } else { 8 },
+        };
+        
+        let inner = Arc::new(IoUringAdvancedTransport::new_transport(transport_config)?);
+        Ok(Self { inner, tls_config, settings, config })
+    }
+    
+    pub async fn connect(&self, addr: &str) -> crate::Result<Connection> {
+        // Delegate to inner transport and wrap result
+        let conn = self.inner.connect(addr).await?;
+        Ok(Connection { inner: conn })
+    }
+    
+    pub async fn listen(&self, addr: &str) -> crate::Result<Incoming> {
+        // Delegate to inner transport and wrap result
+        let incoming = self.inner.listen(addr).await?;
+        Ok(Incoming { inner: incoming })
+    }
+}
+
+/// Connection wrapper for io_uring backend
+#[derive(Clone)]
+pub struct Connection {
+    inner: IoUringAdvancedConnection,
+}
+
+/// Incoming connection wrapper for io_uring backend
+pub struct Incoming {
+    inner: IoUringAdvancedIncoming,
+}
+
+impl Connection {
+    pub async fn accept_bi(&self) -> crate::Result<crate::QuicStream> {
+        self.inner.accept_bi().await
+    }
+    
+    pub async fn open_bi(&self) -> crate::Result<crate::QuicStream> {
+        self.inner.open_bi().await
+    }
+}
+
+impl Incoming {
+    pub fn local_addr(&self) -> crate::Result<String> {
+        self.inner.local_addr()
+    }
+    
+    pub async fn accept(&mut self) -> crate::Result<Connection> {
+        let conn = self.inner.accept().await?;
+        Ok(Connection { inner: conn })
+    }
+}
+
 /// High-performance io_uring transport with vectorized I/O and zero-copy
 pub struct IoUringAdvancedTransport {
     ring: IoUring,
@@ -26,6 +115,111 @@ pub struct IoUringAdvancedTransport {
     batch_processor: BatchProcessor,
     stats: Arc<TransportStats>,
     config: TransportConfig,
+}
+
+/// Connection type for io_uring advanced backend
+pub struct IoUringAdvancedConnection {
+    transport: Arc<IoUringAdvancedTransport>,
+    stream_id: u64,
+}
+
+/// Incoming connections type for io_uring advanced backend
+pub struct IoUringAdvancedIncoming {
+    transport: Arc<IoUringAdvancedTransport>,
+    local_addr: String,
+}
+
+impl IoUringAdvancedTransport {
+    pub fn new_transport(config: TransportConfig) -> crate::Result<Self> {
+        // Create io_uring instance
+        let ring = IoUring::new(config.ring_size)
+            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to create io_uring: {}", e)))?;
+        
+        // Create UDP socket
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
+            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to create socket: {}", e)))?;
+        
+        let buffer_pool = AdvancedBufferPool::new(&ring, &config)
+            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to create buffer pool: {}", e)))?;
+        let batch_processor = BatchProcessor::new(config.batch_size);
+        let stats = Arc::new(TransportStats::default());
+        
+        Ok(Self {
+            ring,
+            socket,
+            buffer_pool,
+            batch_processor,
+            stats,
+            config,
+        })
+    }
+    
+    pub async fn connect(&self, _addr: &str) -> crate::Result<IoUringAdvancedConnection> {
+        // Placeholder implementation - connect to server
+        Ok(IoUringAdvancedConnection {
+            transport: Arc::new(self.clone()),
+            stream_id: 1,
+        })
+    }
+    
+    pub async fn listen(&self, addr: &str) -> crate::Result<IoUringAdvancedIncoming> {
+        // Placeholder implementation - bind to address
+        Ok(IoUringAdvancedIncoming {
+            transport: Arc::new(self.clone()),
+            local_addr: addr.to_string(),
+        })
+    }
+}
+
+// Clone implementation to allow Arc wrapping
+impl Clone for IoUringAdvancedTransport {
+    fn clone(&self) -> Self {
+        // Note: This is a simplified clone for the transport layer integration
+        // In a real implementation, you'd need to handle shared state properly
+        Self {
+            ring: IoUring::new(self.config.ring_size).unwrap(),
+            socket: Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).unwrap(),
+            buffer_pool: AdvancedBufferPool::new(&self.ring, &self.config).unwrap(),
+            batch_processor: BatchProcessor::new(self.config.batch_size),
+            stats: Arc::clone(&self.stats),
+            config: self.config.clone(),
+        }
+    }
+}
+
+impl Clone for IoUringAdvancedConnection {
+    fn clone(&self) -> Self {
+        Self {
+            transport: Arc::clone(&self.transport),
+            stream_id: self.stream_id,
+        }
+    }
+}
+
+impl IoUringAdvancedConnection {
+    pub async fn accept_bi(&self) -> crate::Result<crate::QuicStream> {
+        // Placeholder implementation
+        Err(crate::TransportError::StreamError("accept_bi not yet implemented for io_uring_advanced".into()))
+    }
+    
+    pub async fn open_bi(&self) -> crate::Result<crate::QuicStream> {
+        // Placeholder implementation
+        Err(crate::TransportError::StreamError("open_bi not yet implemented for io_uring_advanced".into()))
+    }
+}
+
+impl IoUringAdvancedIncoming {
+    pub fn local_addr(&self) -> crate::Result<String> {
+        Ok(self.local_addr.clone())
+    }
+    
+    pub async fn accept(&mut self) -> crate::Result<IoUringAdvancedConnection> {
+        // Placeholder implementation
+        Ok(IoUringAdvancedConnection {
+            transport: Arc::clone(&self.transport),
+            stream_id: 2,
+        })
+    }
 }
 
 /// Configuration for io_uring transport optimizations
