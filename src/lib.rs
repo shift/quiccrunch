@@ -14,10 +14,39 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! QuicCrunch: A high-performance QUIC benchmarking framework using Cap'n Proto serialization
+//! QuicCrunch: A high-performance QUIC benchmarking framework with advanced optimizations
 //!
 //! This library provides comprehensive QUIC protocol benchmarking capabilities with support for
-//! multiple backends (Quinn and tQUIC), performance metrics collection, and visualization tools.
+//! multiple backends (Quinn and tQUIC), performance metrics collection, visualization tools,
+//! and cutting-edge performance optimizations including:
+//!
+//! ## Performance Features
+//! - **SIMD-accelerated operations** - Vectorized memory operations using AVX2/AVX-512
+//! - **Zero-copy I/O** - Memory-efficient data handling with buffer pools
+//! - **Lock-free channels** - High-concurrency stream multiplexing
+//! - **io_uring integration** - Direct kernel I/O bypass on Linux
+//! - **CPU-specific optimizations** - Runtime feature detection and tuning
+//! - **Memory pools** - Thread-local buffer management
+//!
+//! ## Usage Examples
+//!
+//! ### Basic benchmarking:
+//! ```rust,no_run
+//! use quiccrunch::{QuicClient, QuicServer};
+//! 
+//! // Start with optimized defaults
+//! let client = QuicClient::new()?;
+//! let server = QuicServer::new()?;
+//! ```
+//!
+//! ### High-performance configuration:
+//! ```rust,no_run
+//! use quiccrunch::optimizations::{CpuOptimizations, enable_high_performance};
+//! 
+//! // Initialize all optimizations
+//! let cpu_opts = CpuOptimizations::detect();
+//! enable_high_performance(&cpu_opts)?;
+//! ```
 
 mod error;
 pub mod transport;
@@ -29,12 +58,67 @@ pub mod config;
 pub mod client;
 pub mod server;
 
+// Performance optimization modules
+pub mod memory;
+pub mod simd;
+pub mod lockfree;
+pub mod adaptive; // New adaptive optimization module
+#[cfg(feature = "io-uring-advanced")]
+pub mod io_uring_optimized;
+#[cfg(feature = "io-uring-advanced")]
+pub mod io_uring_advanced;
+pub mod stream_optimized;
+pub mod cpu_optimizations;
+
+// Convenience module for all optimizations
+pub mod optimizations {
+    pub use crate::memory::{PooledBuffer, MessageBuffer, PoolStats, get_pool_stats};
+    pub use crate::simd::{CpuFeatures, fast_copy, fast_zero, decode_u32_array};
+    pub use crate::lockfree::{StreamHandle, ConnectionHandle, StreamStatsSnapshot, ConnectionStatsSnapshot};
+    #[cfg(feature = "io-uring-advanced")]
+    pub use crate::io_uring_advanced::{IoUringAdvancedTransport, TransportConfig, TransportStatsSnapshot};
+    pub use crate::stream_optimized::{OptimizedQuicStream, StreamConfig, BenchmarkResults};
+    pub use crate::cpu_optimizations::{CpuOptimizations, CpuBenchmarkResults, initialize_optimizations};
+    pub use crate::adaptive::{OptimizationStrategy, OptimizedBuffer, WorkloadConfig, allocate_optimized, copy_optimized};
+    
+    /// Enable all high-performance optimizations
+    pub fn enable_high_performance(cpu_opts: &CpuOptimizations) -> std::io::Result<()> {
+        cpu_opts.enable_huge_pages()?;
+        cpu_opts.set_performance_governor()?;
+        cpu_opts.disable_cpu_scaling()?;
+        println!("🚀 High-performance mode enabled!");
+        Ok(())
+    }
+    
+    /// Quick setup for maximum performance (combines optimization detection and enablement)
+    pub fn enable_maximum_performance() -> std::io::Result<CpuOptimizations> {
+        let cpu_opts = CpuOptimizations::detect();
+        enable_high_performance(&cpu_opts)?;
+        println!("💪 Maximum performance mode: SIMD={}, Memory pools={}, CPU optimizations=enabled", 
+                cfg!(feature = "simd-optimizations"), 
+                cfg!(feature = "memory-pools"));
+        Ok(cpu_opts)
+    }
+    
+    /// Quick benchmark of system capabilities
+    pub fn benchmark_system() -> CpuBenchmarkResults {
+        let cpu_opts = CpuOptimizations::detect();
+        let results = cpu_opts.benchmark_cpu_performance();
+        results.print_summary();
+        results
+    }
+}
+
 pub use error::{Result, TransportError};
 pub use transport::{QuicTransport, Transport, Connection, TlsConfig, Incoming};
 pub use stream::QuicStream;
 pub use metrics::{Metrics, Operation};
 pub use client::{QuicClient, QuicConnection};
 pub use server::{QuicServer, QuicListener, MessageHandler, EchoHandler, run_echo_server, run_server_with_handler};
+
+// Re-export optimized components for high-performance use cases
+pub use stream_optimized::OptimizedQuicStream;
+pub use optimizations::{enable_high_performance, enable_maximum_performance, benchmark_system};
 
 pub mod schema {
     pub mod frame_capnp {

@@ -1,0 +1,174 @@
+warning: Git tree '/home/shift/code/quiccrunch' is dirty
+Warning: No write access to CPU frequency controls.
+Run benchmarks with sudo for full frequency scaling support.
+warning: unused import: `std::sync::Arc`
+ --> src/transport.rs:1:5
+  |
+1 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `SocketAddr` and `UdpSocket`
+ --> src/transport.rs:3:16
+  |
+3 | use std::net::{SocketAddr, UdpSocket};
+  |                ^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused import: `tokio::io::AsyncWriteExt`
+ --> src/stream.rs:2:5
+  |
+2 | use tokio::io::AsyncWriteExt;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+  --> src/memory.rs:10:1
+   |
+10 | /// Thread-local buffer pool for reusing Vec<u8> allocations
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+   = note: `#[warn(unused_doc_comments)]` on by default
+
+warning: unused import: `unbounded`
+ --> src/lockfree.rs:9:34
+  |
+9 | use crossbeam_channel::{bounded, unbounded, Sender, Receiver, TryRecvError};
+  |                                  ^^^^^^^^^
+
+warning: unused import: `BytesMut`
+  --> src/stream_optimized.rs:10:20
+   |
+10 | use bytes::{Bytes, BytesMut};
+   |                    ^^^^^^^^
+
+warning: unused import: `tokio::time`
+  --> src/stream_optimized.rs:11:5
+   |
+11 | use tokio::time;
+   |     ^^^^^^^^^^^
+
+warning: unused import: `crate::simd`
+  --> src/stream_optimized.rs:13:5
+   |
+13 | use crate::simd;
+   |     ^^^^^^^^^^^
+
+warning: field `tls_config` is never read
+  --> src/transport/tquic.rs:60:5
+   |
+59 | pub struct TquicCtx {
+   |            -------- field in this struct
+60 |     tls_config: TlsConfig,
+   |     ^^^^^^^^^^
+   |
+   = note: `TquicCtx` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: field `connection_id` is never read
+   --> src/lockfree.rs:334:5
+    |
+333 | pub struct StreamProcessor {
+    |            --------------- field in this struct
+334 |     connection_id: u64,
+    |     ^^^^^^^^^^^^^
+
+warning: fields `send_buffer` and `recv_buffer` are never read
+  --> src/stream_optimized.rs:89:9
+   |
+87 |     Tquic { 
+   |     ----- fields in this variant
+88 |         handle: StreamHandle,
+89 |         send_buffer: Option<MessageBuffer>,
+   |         ^^^^^^^^^^^
+90 |         recv_buffer: Option<PooledBuffer>,
+   |         ^^^^^^^^^^^
+
+warning: variant `Optimized` is never constructed
+  --> src/stream_optimized.rs:92:5
+   |
+78 | enum StreamInner {
+   |      ----------- variant in this enum
+...
+92 |     Optimized {
+   |     ^^^^^^^^^
+
+warning: creating a shared reference to mutable static
+  --> src/cpu_optimizations.rs:29:33
+   |
+29 |         let features = unsafe { CPU_FEATURES.as_ref().unwrap().clone() };
+   |                                 ^^^^^^^^^^^^^^^^^^^^^ shared reference to mutable static
+   |
+   = note: for more information, see <https://doc.rust-lang.org/nightly/edition-guide/rust-2024/static-mut-references.html>
+   = note: shared references to mutable statics are dangerous; it's undefined behavior if the static is mutated or if a mutable reference is created for it while the shared reference lives
+   = note: `#[warn(static_mut_refs)]` on by default
+
+warning: `quiccrunch` (lib) generated 13 warnings (run `cargo fix --lib -p quiccrunch` to apply 7 suggestions)
+   Compiling quiccrunch v0.1.0 (/home/shift/code/quiccrunch)
+error[E0432]: unresolved import `quiccrunch::optimizations::reset_pool_stats`
+ --> examples/realistic_workloads.rs:8:65
+  |
+8 |     enable_maximum_performance, optimizations::{get_pool_stats, reset_pool_stats}
+  |                                                                 ^^^^^^^^^^^^^^^^
+  |                                                                 |
+  |                                                                 no `reset_pool_stats` in `optimizations`
+  |                                                                 help: a similar name exists in the module: `get_pool_stats`
+
+warning: unused import: `Connection`
+ --> examples/realistic_workloads.rs:7:42
+  |
+7 |     QuicTransport, Transport, TlsConfig, Connection,
+  |                                          ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `bincode`
+  --> examples/realistic_workloads.rs:78:56
+   |
+78 | ...                   let request: UserRequest = bincode::deserialize(&request_data).unwrap();
+   |                                                  ^^^^^^^ use of unresolved module or unlinked crate `bincode`
+   |
+   = help: if you wanted to use a crate named `bincode`, use `cargo add bincode` to add it to your `Cargo.toml`
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `bincode`
+  --> examples/realistic_workloads.rs:92:61
+   |
+92 | ...                   let response_data = Bytes::from(bincode::serialize(&response).unwrap());
+   |                                                       ^^^^^^^ use of unresolved module or unlinked crate `bincode`
+   |
+   = help: if you wanted to use a crate named `bincode`, use `cargo add bincode` to add it to your `Cargo.toml`
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `bincode`
+   --> examples/realistic_workloads.rs:132:48
+    |
+132 |                 let request_data = Bytes::from(bincode::serialize(&request).unwrap());
+    |                                                ^^^^^^^ use of unresolved module or unlinked crate `bincode`
+    |
+    = help: if you wanted to use a crate named `bincode`, use `cargo add bincode` to add it to your `Cargo.toml`
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `bincode`
+   --> examples/realistic_workloads.rs:136:47
+    |
+136 |                 let _response: UserResponse = bincode::deserialize(&response_data).unwrap();
+    |                                               ^^^^^^^ use of unresolved module or unlinked crate `bincode`
+    |
+    = help: if you wanted to use a crate named `bincode`, use `cargo add bincode` to add it to your `Cargo.toml`
+
+warning: unused variable: `ca_key`
+  --> examples/realistic_workloads.rs:45:19
+   |
+45 |     let (ca_cert, ca_key) = generate_ca_cert()?;
+   |                   ^^^^^^ help: if this is intentional, prefix it with an underscore: `_ca_key`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `ca_cert`
+   --> examples/realistic_workloads.rs:456:5
+    |
+456 |     ca_cert: &rustls::Certificate,
+    |     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_ca_cert`
+
+Some errors have detailed explanations: E0432, E0433.
+For more information about an error, try `rustc --explain E0432`.
+warning: `quiccrunch` (example "realistic_workloads") generated 3 warnings
+error: could not compile `quiccrunch` (example "realistic_workloads") due to 5 previous errors; 3 warnings emitted

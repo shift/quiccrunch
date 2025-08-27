@@ -2,12 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::net::{SocketAddr, UdpSocket};
 use rustls::{Certificate, PrivateKey};
-
-// Imports needed by Quinn backend
-#[cfg(feature = "backend-quinn")]
-use std::sync::Arc;
-#[cfg(feature = "backend-quinn")]
-use std::net::{SocketAddr, UdpSocket};
 #[cfg(feature = "backend-quinn")]
 use quinn::{Endpoint, ServerConfig, TransportConfig as QuinnTransportConfig, TokioRuntime, VarInt};
 #[cfg(feature = "backend-quinn")]
@@ -335,6 +329,18 @@ pub trait Transport: Send + Sync {
 impl QuicTransport {
     pub fn new(tls_config: TlsConfig) -> crate::Result<Self> {
         Self::with_settings(tls_config, TransportSettings::default())
+    }
+
+    /// Get information about which backend is currently active
+    pub fn backend_info(&self) -> &'static str {
+        match &self.backend {
+            #[cfg(feature = "backend-quinn")]
+            BackendImpl::Quinn(_) => "Quinn",
+            #[cfg(feature = "backend-quinn")]
+            BackendImpl::Alt(_) => "Quinn (Alt)",
+            #[cfg(feature = "backend-tquic")]
+            BackendImpl::Tquic(_) => "tQUIC",
+        }
     }
 
     pub fn with_settings(tls_config: TlsConfig, settings: TransportSettings) -> crate::Result<Self> {

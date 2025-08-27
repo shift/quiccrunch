@@ -2,10 +2,6 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::{time};
 use bytes::Bytes;
-
-// Import needed by Quinn backend
-#[cfg(feature = "backend-quinn")]
-use tokio::io::AsyncWriteExt;
 #[cfg(feature = "backend-quinn")]
 use quinn::{SendStream as QuinnSend, RecvStream as QuinnRecv};
 #[cfg(feature = "backend-tquic")]
@@ -91,12 +87,52 @@ impl QuicStream {
             StreamInner::Quinn { send, .. } => {
                 // Quinn send implements AsyncWrite; no local import needed
                 send.write_all(&header).await.map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                const CHUNK_SIZE: usize = 32_768;
+                const CHUNK_SIZE: usize = 262_144; // 256KB chunks for optimal throughput (increased from 32KB)
                 let mut remaining = data.as_ref();
                 while !remaining.is_empty() {
                     let chunk_size = remaining.len().min(CHUNK_SIZE);
                     let (chunk, rest) = remaining.split_at(chunk_size);
-                    if let Err(e) = send.write_all(chunk).await { return Err(crate::TransportError::StreamError(e.to_string())); }
+                    
+                    // Use SIMD-optimized sending if enabled
+                    #[cfg(feature = "simd-optimizations")]
+                    {
+                        if chunk_size >= 32 {
+                            // For large chunks, use memory pool for temporary buffer
+                            #[cfg(feature = "memory-pools")]
+                            {
+                                let mut pooled_chunk = crate::memory::PooledBuffer::get(chunk_size);
+                                pooled_chunk.resize(chunk_size, 0);
+                                let features = crate::simd::CpuFeatures::detect();
+                                if features.avx2 {
+                                    crate::simd::fast_copy(chunk, pooled_chunk.as_mut_slice());
+                                    if let Err(e) = send.write_all(pooled_chunk.as_slice()).await { 
+                                        return Err(crate::TransportError::StreamError(e.to_string())); 
+                                    }
+                                } else {
+                                    if let Err(e) = send.write_all(chunk).await { 
+                                        return Err(crate::TransportError::StreamError(e.to_string())); 
+                                    }
+                                }
+                            }
+                            #[cfg(not(feature = "memory-pools"))]
+                            {
+                                if let Err(e) = send.write_all(chunk).await { 
+                                    return Err(crate::TransportError::StreamError(e.to_string())); 
+                                }
+                            }
+                        } else {
+                            if let Err(e) = send.write_all(chunk).await { 
+                                return Err(crate::TransportError::StreamError(e.to_string())); 
+                            }
+                        }
+                    }
+                    #[cfg(not(feature = "simd-optimizations"))]
+                    {
+                        if let Err(e) = send.write_all(chunk).await { 
+                            return Err(crate::TransportError::StreamError(e.to_string())); 
+                        }
+                    }
+                    
                     if let Err(e) = send.flush().await { return Err(crate::TransportError::StreamError(e.to_string())); }
                     remaining = rest;
                 }
@@ -117,7 +153,7 @@ impl QuicStream {
                 let _ = rx.await.map_err(|_| crate::TransportError::StreamError("tquic write canceled".into()))??;
 
                 // Write data in chunks
-                const CHUNK_SIZE: usize = 32_768;
+                const CHUNK_SIZE: usize = 262_144; // 256KB chunks for optimal throughput (increased from 32KB)
                 let mut remaining = data.as_ref();
                 while !remaining.is_empty() {
                     let chunk_size = remaining.len().min(CHUNK_SIZE);
@@ -231,11 +267,15 @@ impl QuicStream {
                 "Announced message size {} exceeds limit {}", msg_len, self.max_message_size
             )));
         }
+        // Use memory pool for zero-allocation buffer management
+        #[cfg(feature = "memory-pools")]
+        let mut pooled_buffer = crate::memory::PooledBuffer::get(msg_len);
+        #[cfg(not(feature = "memory-pools"))]
         let mut buffer = Vec::with_capacity(msg_len);
         let mut bytes_read = 0;
 
         // Read message content in chunks with flow control
-        const CHUNK_SIZE: usize = 32_768; // 32KB chunks for better throughput
+        const CHUNK_SIZE: usize = 262_144; // 256KB chunks for optimal throughput (increased from 32KB)
         
         while bytes_read < msg_len {
             // Calculate next chunk size
@@ -250,7 +290,40 @@ impl QuicStream {
                     let read_res = time::timeout(READ_TIMEOUT, recv.read_exact(&mut chunk)).await;
                     match read_res {
                         Ok(Ok(_)) => {
-                            buffer.extend_from_slice(&chunk);
+                            #[cfg(feature = "memory-pools")]
+                            {
+                                // Use SIMD-optimized copy if available
+                                #[cfg(feature = "simd-optimizations")]
+                                {
+                                    let features = crate::simd::CpuFeatures::detect();
+                                    if features.avx2 && chunk.len() >= 32 {
+                                        // Resize buffer to accommodate new data
+                                        let current_len = pooled_buffer.len();
+                                        pooled_buffer.resize(current_len + chunk_size, 0);
+                                        crate::simd::fast_copy(&chunk, &mut pooled_buffer.as_mut_slice()[current_len..current_len + chunk_size]);
+                                    } else {
+                                        pooled_buffer.extend_from_slice(&chunk);
+                                    }
+                                }
+                                #[cfg(not(feature = "simd-optimizations"))]
+                                pooled_buffer.extend_from_slice(&chunk);
+                            }
+                            #[cfg(not(feature = "memory-pools"))]
+                            {
+                                #[cfg(feature = "simd-optimizations")]
+                                {
+                                    let features = crate::simd::CpuFeatures::detect();
+                                    if features.avx2 && chunk.len() >= 32 {
+                                        // For Vec, we still benefit from SIMD copies
+                                        buffer.resize(bytes_read + chunk_size, 0);
+                                        crate::simd::fast_copy(&chunk, &mut buffer[bytes_read..bytes_read + chunk_size]);
+                                    } else {
+                                        buffer.extend_from_slice(&chunk);
+                                    }
+                                }
+                                #[cfg(not(feature = "simd-optimizations"))]
+                                buffer.extend_from_slice(&chunk);
+                            }
                             bytes_read += chunk_size;
                             
                             #[cfg(feature = "telemetry")]
@@ -291,7 +364,37 @@ impl QuicStream {
                             if data.len() != chunk_size {
                                 return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
                             }
-                            buffer.extend_from_slice(&data);
+                            #[cfg(feature = "memory-pools")]
+                            {
+                                #[cfg(feature = "simd-optimizations")]
+                                {
+                                    let features = crate::simd::CpuFeatures::detect();
+                                    if features.avx2 && data.len() >= 32 {
+                                        let current_len = pooled_buffer.len();
+                                        pooled_buffer.resize(current_len + chunk_size, 0);
+                                        crate::simd::fast_copy(&data, &mut pooled_buffer.as_mut_slice()[current_len..current_len + chunk_size]);
+                                    } else {
+                                        pooled_buffer.extend_from_slice(&data);
+                                    }
+                                }
+                                #[cfg(not(feature = "simd-optimizations"))]
+                                pooled_buffer.extend_from_slice(&data);
+                            }
+                            #[cfg(not(feature = "memory-pools"))]
+                            {
+                                #[cfg(feature = "simd-optimizations")]
+                                {
+                                    let features = crate::simd::CpuFeatures::detect();
+                                    if features.avx2 && data.len() >= 32 {
+                                        buffer.resize(bytes_read + chunk_size, 0);
+                                        crate::simd::fast_copy(&data, &mut buffer[bytes_read..bytes_read + chunk_size]);
+                                    } else {
+                                        buffer.extend_from_slice(&data);
+                                    }
+                                }
+                                #[cfg(not(feature = "simd-optimizations"))]
+                                buffer.extend_from_slice(&data);
+                            }
                             bytes_read += chunk_size;
                         },
                         Ok(Ok(Ok(None))) => {
@@ -308,6 +411,15 @@ impl QuicStream {
         #[cfg(feature = "telemetry")]
         info!(message_size = %msg_len, "Message received successfully");
 
-        Ok(Bytes::from(buffer))
+        {
+            #[cfg(feature = "memory-pools")]
+            {
+                Ok(Bytes::from(pooled_buffer.into_vec()))
+            }
+            #[cfg(not(feature = "memory-pools"))]
+            {
+                Ok(Bytes::from(buffer))
+            }
+        }
     }
 }

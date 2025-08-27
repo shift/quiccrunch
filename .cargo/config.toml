@@ -1,0 +1,16 @@
+# PERFORMANCE OPTIMIZATION BUILD FLAGS
+[build]
+rustflags = [
+    "-C", "target-cpu=native",     # Use all available CPU features
+    "-C", "opt-level=3",           # Maximum optimization
+    "-C", "lto=fat",               # Full link-time optimization
+    "-C", "codegen-units=1",       # Better optimization
+    "-C", "panic=abort",           # Faster panic handling
+]
+
+# Additional optimization flags for specific targets
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "target-feature=+avx2,+fma,+sse4.2",  # Enable SIMD features
+]

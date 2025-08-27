@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[path = "cert_utils.rs"]
 mod cert_utils;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("QuicCrunch High-Throughput Test");
     println!("===============================");

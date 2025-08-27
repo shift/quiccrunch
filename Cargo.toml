@@ -45,6 +45,13 @@ hdrhistogram = "7"
 chrono = { version = "0.4", features = ["serde"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 
+# PERFORMANCE OPTIMIZATION DEPENDENCIES
+crossbeam-channel = "0.5"        # Lock-free channels
+once_cell = "1.19"               # Lazy static initialization  
+num_cpus = "1.16"                # CPU detection
+libc = "0.2"                     # System calls for optimizations
+io-uring = { version = "0.6", optional = true }  # Advanced I/O
+
 # gRPC dependencies for comparison benchmarking
 tonic = { version = "0.10", optional = true }
 prost = { version = "0.12", optional = true }
@@ -138,11 +145,17 @@ backend-alt = []
 # Comparison feature for gRPC
 grpc-comparison = ["dep:tonic", "dep:prost", "dep:tower", "dep:tokio-stream"]
 
-# Default features - tQUIC is now the default backend
-default = ["tls", "visualization", "backend-tquic"]
+# Default features - tQUIC is now the default backend with performance optimizations
+default = ["tls", "visualization", "backend-tquic", "memory-pools", "simd-optimizations"]
 
 # Opt-in tests that require elevated privileges or special hardware
 scaling-tests = []
+
+# PERFORMANCE OPTIMIZATION FEATURES
+memory-pools = []                # Enable memory pooling optimizations
+simd-optimizations = []          # Enable SIMD operations
+lock-free-channels = []          # Enable lock-free channel optimizations
+io-uring-advanced = ["dep:io-uring"]  # Enable advanced io_uring transport
 
 # Misc feature flags
 telemetry = [
@@ -157,3 +170,19 @@ telemetry = [
 
 tls = []
 visualization = ["plotters"]
+
+# PERFORMANCE OPTIMIZATION PROFILES
+[profile.release]
+opt-level = 3                    # Maximum optimization
+lto = true                       # Link-time optimization
+codegen-units = 1               # Better optimization (slower compile)
+panic = "abort"                  # Smaller binaries, faster panics
+overflow-checks = false          # Disable overflow checks in release
+
+[profile.bench]
+inherits = "release"
+debug = true                     # Keep debug info for profiling
+
+[profile.dev]
+opt-level = 1                    # Some optimization for development
+overflow-checks = true           # Keep safety checks in development

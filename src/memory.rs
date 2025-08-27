@@ -1,0 +1,270 @@
+/// High-performance memory management for QuicCrunch
+/// 
+/// This module provides thread-local buffer pools and zero-copy operations
+/// to eliminate allocation overhead in hot paths.
+
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use bytes::{Bytes, BytesMut};
+
+/// Thread-local buffer pool for reusing Vec<u8> allocations
+thread_local! {
+    static BUFFER_POOL: RefCell<BufferPool> = RefCell::new(BufferPool::new());
+    static POOL_STATS: RefCell<PoolStats> = RefCell::new(PoolStats::default());
+}
+
+/// Size-based buffer pools to minimize allocation overhead
+struct BufferPool {
+    small_buffers: VecDeque<Vec<u8>>,    // < 4KB
+    medium_buffers: VecDeque<Vec<u8>>,   // 4KB - 64KB
+    large_buffers: VecDeque<Vec<u8>>,    // 64KB - 1MB
+    huge_buffers: VecDeque<Vec<u8>>,     // > 1MB
+}
+
+impl BufferPool {
+    const SMALL_THRESHOLD: usize = 4 * 1024;        // 4KB
+    const MEDIUM_THRESHOLD: usize = 64 * 1024;      // 64KB
+    const LARGE_THRESHOLD: usize = 1024 * 1024;     // 1MB
+    const MAX_POOL_SIZE: usize = 16;                // Max buffers per pool
+
+    fn new() -> Self {
+        Self {
+            small_buffers: VecDeque::new(),
+            medium_buffers: VecDeque::new(),
+            large_buffers: VecDeque::new(),
+            huge_buffers: VecDeque::new(),
+        }
+    }
+
+    fn get_buffer(&mut self, size: usize) -> Vec<u8> {
+        let pool = match size {
+            s if s <= Self::SMALL_THRESHOLD => &mut self.small_buffers,
+            s if s <= Self::MEDIUM_THRESHOLD => &mut self.medium_buffers,
+            s if s <= Self::LARGE_THRESHOLD => &mut self.large_buffers,
+            _ => &mut self.huge_buffers,
+        };
+
+        if let Some(mut buffer) = pool.pop_front() {
+            buffer.clear();
+            if buffer.capacity() >= size {
+                // Reuse existing buffer - this is a hit!
+                POOL_STATS.with(|stats| {
+                    stats.borrow_mut().pool_hits += 1;
+                });
+                buffer.reserve(size.saturating_sub(buffer.capacity()));
+                return buffer;
+            }
+        }
+
+        // Allocate new buffer - this is a miss
+        POOL_STATS.with(|stats| {
+            let mut s = stats.borrow_mut();
+            s.pool_misses += 1;
+            s.allocations += 1;
+        });
+        Vec::with_capacity(size)
+    }
+
+    fn return_buffer(&mut self, buffer: Vec<u8>) {
+        POOL_STATS.with(|stats| {
+            stats.borrow_mut().deallocations += 1;
+        });
+
+        let pool = match buffer.capacity() {
+            c if c <= Self::SMALL_THRESHOLD => &mut self.small_buffers,
+            c if c <= Self::MEDIUM_THRESHOLD => &mut self.medium_buffers,
+            c if c <= Self::LARGE_THRESHOLD => &mut self.large_buffers,
+            _ => &mut self.huge_buffers,
+        };
+
+        if pool.len() < Self::MAX_POOL_SIZE {
+            pool.push_back(buffer);
+        }
+        // Otherwise, let buffer drop to free memory
+    }
+}
+
+/// RAII wrapper for pooled buffers
+pub struct PooledBuffer {
+    buffer: Vec<u8>,
+}
+
+impl PooledBuffer {
+    /// Get a buffer from the thread-local pool
+    pub fn get(size: usize) -> Self {
+        let buffer = BUFFER_POOL.with(|pool| {
+            pool.borrow_mut().get_buffer(size)
+        });
+        Self { buffer }
+    }
+
+    /// Get the underlying buffer
+    pub fn as_slice(&self) -> &[u8] {
+        &self.buffer
+    }
+
+    /// Get mutable access to the buffer
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.buffer
+    }
+
+    /// Convert to Vec<u8>, consuming the wrapper
+    pub fn into_vec(mut self) -> Vec<u8> {
+        std::mem::take(&mut self.buffer)
+    }
+
+    /// Get current length
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Get capacity
+    pub fn capacity(&self) -> usize {
+        self.buffer.capacity()
+    }
+
+    /// Resize the buffer
+    pub fn resize(&mut self, new_len: usize, value: u8) {
+        self.buffer.resize(new_len, value);
+    }
+
+    /// Extend from slice
+    pub fn extend_from_slice(&mut self, slice: &[u8]) {
+        self.buffer.extend_from_slice(slice);
+    }
+
+    /// Clear the buffer
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+    }
+}
+
+impl Drop for PooledBuffer {
+    fn drop(&mut self) {
+        let buffer = std::mem::take(&mut self.buffer);
+        BUFFER_POOL.with(|pool| {
+            pool.borrow_mut().return_buffer(buffer);
+        });
+    }
+}
+
+/// Zero-copy message buffer for high-performance I/O
+pub struct MessageBuffer {
+    data: BytesMut,
+    header_written: bool,
+}
+
+impl MessageBuffer {
+    /// Create new message buffer with capacity
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            data: BytesMut::with_capacity(capacity + 4), // +4 for header
+            header_written: false,
+        }
+    }
+
+    /// Write message header (length)
+    pub fn write_header(&mut self, length: u32) {
+        if !self.header_written {
+            self.data.extend_from_slice(&length.to_le_bytes());
+            self.header_written = true;
+        }
+    }
+
+    /// Write data to the buffer
+    pub fn write_data(&mut self, data: &[u8]) {
+        self.data.extend_from_slice(data);
+    }
+
+    /// Get the complete message as Bytes (zero-copy)
+    pub fn into_bytes(self) -> Bytes {
+        self.data.freeze()
+    }
+
+    /// Get current data length (excluding header)
+    pub fn data_len(&self) -> usize {
+        if self.header_written {
+            self.data.len() - 4
+        } else {
+            self.data.len()
+        }
+    }
+
+    /// Reserve additional capacity
+    pub fn reserve(&mut self, additional: usize) {
+        self.data.reserve(additional);
+    }
+}
+
+/// Statistics for memory pool usage
+#[derive(Debug, Default, Clone)]
+pub struct PoolStats {
+    pub allocations: u64,
+    pub deallocations: u64,
+    pub pool_hits: u64,
+    pub pool_misses: u64,
+}
+
+impl PoolStats {
+    /// Get hit rate as percentage
+    pub fn hit_rate(&self) -> f64 {
+        if self.pool_hits + self.pool_misses == 0 {
+            0.0
+        } else {
+            (self.pool_hits as f64) / ((self.pool_hits + self.pool_misses) as f64) * 100.0
+        }
+    }
+}
+
+/// Get thread-local pool statistics
+pub fn get_pool_stats() -> PoolStats {
+    POOL_STATS.with(|stats| stats.borrow().clone())
+}
+
+/// Reset thread-local pool statistics
+pub fn reset_pool_stats() {
+    POOL_STATS.with(|stats| {
+        *stats.borrow_mut() = PoolStats::default();
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_buffer_pool_reuse() {
+        let buffer1 = PooledBuffer::get(1024);
+        let ptr1 = buffer1.as_slice().as_ptr();
+        drop(buffer1);
+
+        let buffer2 = PooledBuffer::get(1024);
+        let ptr2 = buffer2.as_slice().as_ptr();
+        
+        // Should reuse the same buffer
+        assert_eq!(ptr1, ptr2);
+    }
+
+    #[test]
+    fn test_message_buffer() {
+        let mut msg = MessageBuffer::with_capacity(1024);
+        msg.write_header(100);
+        msg.write_data(b"Hello, World!");
+        
+        assert_eq!(msg.data_len(), 13);
+        
+        let bytes = msg.into_bytes();
+        assert_eq!(bytes.len(), 17); // 4 bytes header + 13 bytes data
+    }
+
+    #[test]
+    fn test_size_categories() {
+        let small = PooledBuffer::get(1024);
+        let medium = PooledBuffer::get(32 * 1024);
+        let large = PooledBuffer::get(512 * 1024);
+        
+        assert!(small.capacity() >= 1024);
+        assert!(medium.capacity() >= 32 * 1024);
+        assert!(large.capacity() >= 512 * 1024);
+    }
+}
