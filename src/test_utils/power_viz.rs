@@ -4,7 +4,7 @@ use plotters::prelude::*;
 use plotters::style::{FontDesc, FontFamily};
 use plotters::series::LineSeries;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PowerTimeSeries {
     timestamps: Vec<Duration>,
     package_power: Vec<f64>,
@@ -15,13 +15,7 @@ pub struct PowerTimeSeries {
 
 impl PowerTimeSeries {
     pub fn new() -> Self {
-        Self {
-            timestamps: Vec::new(),
-            package_power: Vec::new(),
-            dram_power: Vec::new(),
-            cpu_freq: Vec::new(),
-            cpu_temp: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn calculate_efficiency(&self) -> Vec<f64> {
@@ -133,7 +127,7 @@ impl PowerVisualizer {
         let (min_power, max_power) = self.get_power_range(data);
 
         // Use a deterministic font family that Plotters bundles support for
-        let caption_font: FontDesc = (FontFamily::SansSerif, 12).into_font();
+        let _caption_font: FontDesc = (FontFamily::SansSerif, 12).into_font();
         let mut builder_binding = ChartBuilder::on(&root);
         let mut chart_builder = builder_binding
             .margin(10)
@@ -164,33 +158,33 @@ impl PowerVisualizer {
                 .draw()?;
         }
 
-        let mut series = chart.draw_series(LineSeries::new(
+        let series = chart.draw_series(LineSeries::new(
             data.timestamps.iter().zip(&data.package_power)
                 .map(|(t, p)| (t.as_secs_f64(), *p)),
             RED.mix(0.9).stroke_width(2)
         ))?;
         if !headless {
-            series = series.label("Package Power")
+            let _ = series.label("Package Power")
                 .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED.mix(0.9)));
         }
 
-        let mut series2 = chart.draw_series(LineSeries::new(
+        let series2 = chart.draw_series(LineSeries::new(
             data.timestamps.iter().zip(&data.dram_power)
                 .map(|(t, p)| (t.as_secs_f64(), *p)),
             BLUE.mix(0.9).stroke_width(2)
         ))?;
         if !headless {
-            series2 = series2.label("DRAM Power")
+            let _ = series2.label("DRAM Power")
                 .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE.mix(0.9)));
         }
 
-        let mut series3 = chart.draw_secondary_series(LineSeries::new(
+        let series3 = chart.draw_secondary_series(LineSeries::new(
             data.timestamps.iter().zip(&data.cpu_temp)
                 .map(|(t, temp)| (t.as_secs_f64(), *temp)),
             GREEN.mix(0.8).stroke_width(2)
         ))?;
         if !headless {
-            series3 = series3.label("CPU Temperature (°C)")
+            let _ = series3.label("CPU Temperature (°C)")
                 .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], GREEN.mix(0.8)));
         }
 
@@ -206,9 +200,7 @@ impl PowerVisualizer {
         drop(chart);
         drop(root);
         // Persist the buffer to file
-        let path = Path::new(&self.output_dir)
-            .join(format!("power_time_series_{}.png", title.to_lowercase().replace(" ", "_")));
-        std::fs::write(&path, &buffer)?;
+        let _ = std::fs::write(&path, &buffer);
         Ok(())
 
 
@@ -255,7 +247,7 @@ impl PowerVisualizer {
                 (min.min(series_min), max.max(series_max))
             });
 
-        let caption_font: FontDesc = (FontFamily::SansSerif, 12).into_font();
+        let _caption_font: FontDesc = (FontFamily::SansSerif, 12).into_font();
         let mut builder_binding = ChartBuilder::on(&root);
         let mut chart_builder = builder_binding
             .margin(10)
@@ -278,13 +270,13 @@ impl PowerVisualizer {
 
         for (i, (name, data)) in profiles.iter().enumerate() {
             let color = Palette99::pick(i).mix(0.9);
-            let mut ds = chart.draw_series(LineSeries::new(
+            let ds = chart.draw_series(LineSeries::new(
                 data.timestamps.iter().zip(data.package_power.iter().zip(&data.dram_power))
                     .map(|(t, (p, d))| (t.as_secs_f64(), p + d)),
                 color.stroke_width(2)
             ))?;
             if !headless {
-                ds = ds.label(name)
+                let _ = ds.label(name)
                     .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color));
             }
         }

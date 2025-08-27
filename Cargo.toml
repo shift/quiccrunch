@@ -2,11 +2,30 @@
 name = "quiccrunch"
 version = "0.1.0"
 edition = "2021"
-description = "High-performance RPC library using QUIC and Cap'n Proto"
+authors = ["QuicCrunch Contributors"]
+description = "High-performance QUIC benchmarking framework with Cap'n Proto serialization and dual backend support"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/shift/quickcrunch"
+homepage = "https://github.com/shift/quickcrunch"
+documentation = "https://docs.rs/quiccrunch"
+readme = "README.md"
+keywords = ["quic", "capnproto", "benchmarking", "networking", "performance"]
+categories = ["network-programming", "development-tools::profiling", "api-bindings"]
+exclude = [
+    "backend_comparison/",
+    "json_test/", 
+    "test_results/",
+    "profiling_results/",
+    "*.log",
+    "tquic_*",
+    "backend_comparison_summary.txt"
+]
 
 [dependencies]
-quinn = "0.10.2"
+quinn = { version = "0.10.2", optional = true }
+tquic = { version = "1.6.0", optional = true }
+tempfile = "3"
+socket2 = { version = "0.5", features = ["all"] }
 plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "svg_backend", "line_series"], optional = true }
 tokio = { version = "1.35.1", features = ["full"] }
 capnp = "0.18.10"
@@ -21,15 +40,22 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 parking_lot = "0.12"
 lazy_static = "1.4"
+clap = { version = "4", features = ["derive"] }
+hdrhistogram = "7"
+chrono = { version = "0.4", features = ["serde"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 
-# Optional OpenTelemetry support
+# gRPC dependencies for comparison benchmarking
+tonic = { version = "0.10", optional = true }
+prost = { version = "0.12", optional = true }
+tower = { version = "0.4", optional = true }
+tokio-stream = { version = "0.1", optional = true }
 opentelemetry = { version = "0.21", optional = true }
 opentelemetry_sdk = { version = "0.21", optional = true }
 opentelemetry-semantic-conventions = { version = "0.13", optional = true }
 opentelemetry-http = { version = "0.10", optional = true }
 opentelemetry-jaeger = { version = "0.20", optional = true }
 tracing-opentelemetry = { version = "0.22", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 
 # Dependencies for examples
 [dev-dependencies.opentelemetry]
@@ -68,10 +94,23 @@ features = ["env-filter"]
  cucumber = { version = "0.21", features = ["macros"] }
  which = "6"
  nix = { version = "0.29", default-features = false, features = ["user"] }
+ clap = { version = "4", features = ["derive"] }
+ hdrhistogram = "7"
+ # gRPC dependencies for comparison benchmarking
+ tonic = "0.10"
+ prost = "0.12"
+ tower = "0.4"
+ tokio-stream = "0.1"
+ futures = "0.3"
 
 
 [build-dependencies]
 capnpc = "0.18.0"
+tonic-build = "0.10"
+
+[[bin]]
+name = "benchmark"
+path = "src/bin/benchmark.rs"
 
 [[bench]]
 name = "transport"
@@ -90,18 +129,22 @@ name = "io_uring_comparison"
 harness = false
 
 [features]
-# Backends
-backend-quinn = []
+# Backends map to optional deps (mutually exclusive at compile time)
+backend-quinn = ["dep:quinn"]
+backend-tquic = ["dep:tquic"]
+# Keep placeholder for a potential third backend
 backend-alt = []
 
-# Default features
-default = ["tls", "visualization", "backend-quinn"]
+# Comparison feature for gRPC
+grpc-comparison = ["dep:tonic", "dep:prost", "dep:tower", "dep:tokio-stream"]
+
+# Default features - tQUIC is now the default backend
+default = ["tls", "visualization", "backend-tquic"]
 
 # Opt-in tests that require elevated privileges or special hardware
 scaling-tests = []
 
-tls = []
-visualization = ["plotters"]
+# Misc feature flags
 telemetry = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
@@ -111,3 +154,6 @@ telemetry = [
     "dep:tracing-opentelemetry",
     "dep:tracing-subscriber"
 ]
+
+tls = []
+visualization = ["plotters"]

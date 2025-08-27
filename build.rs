@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=schema/frame.capnp");
+    println!("cargo:rerun-if-changed=proto/benchmark.proto");
     println!("cargo:rerun-if-changed=build.rs");
     
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
@@ -29,4 +30,14 @@ fn main() {
     );
     
     std::fs::write(generated_file, fixed_content).unwrap();
+    
+    // Compile Protocol Buffers for gRPC comparison
+    if std::path::Path::new("proto/benchmark.proto").exists() {
+        tonic_build::configure()
+            .build_server(true)
+            .build_client(true)
+            .out_dir(&out_dir)
+            .compile(&["proto/benchmark.proto"], &["proto"])
+            .expect("Failed to compile protobuf schema");
+    }
 }

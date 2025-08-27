@@ -53,3 +53,8 @@ pub fn generate_node_cert(node_name: &str) -> TlsConfig {
         ca_cert: rustls::Certificate(ca_cert_der),
     }
 }
+
+/// Generate a self-signed certificate for testing (alias for generate_node_cert)
+pub fn generate_self_signed_cert(name: &str) -> Result<TlsConfig, Box<dyn std::error::Error>> {
+    Ok(generate_node_cert(name))
+}

@@ -1,0 +1,21 @@
+{
+  "timestamp": "2025-08-27T12:16:00.265257753Z",
+  "backend": "quinn",
+  "test_case": "flood",
+  "configuration": {
+    "concurrency": 20,
+    "duration_s": 5,
+    "message_size": 64
+  },
+  "metrics": {
+    "concurrency": 20,
+    "duration_s": 10.009667901,
+    "mean_latency_us": 0.0,
+    "message_size": 64,
+    "messages_per_second": 0.0,
+    "p99_latency_us": 0.0,
+    "throughput_mbps": 0.0,
+    "total_bytes": 0,
+    "total_messages": 0
+  }
+}

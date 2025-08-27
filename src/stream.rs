@@ -2,6 +2,10 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::{time};
 use bytes::Bytes;
+
+// Import needed by Quinn backend
+#[cfg(feature = "backend-quinn")]
+use tokio::io::AsyncWriteExt;
 #[cfg(feature = "backend-quinn")]
 use quinn::{SendStream as QuinnSend, RecvStream as QuinnRecv};
 #[cfg(feature = "backend-tquic")]

@@ -17,8 +17,8 @@ mod tests {
     #[test]
     async fn test_stream_flow_control() {
         let tls_config = generate_node_cert("test-node");
-        let server = QuicTransport::new(tls_config.clone()).unwrap();
-        let client = QuicTransport::new(tls_config).unwrap();
+        let server = QuicTransport::with_settings_advanced(tls_config.clone(), quiccrunch::config::QuicTransportSettings::default()).unwrap();
+        let client = QuicTransport::with_settings_advanced(tls_config, quiccrunch::config::QuicTransportSettings::default()).unwrap();
         
         let mut listener = server.listen("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -55,8 +55,8 @@ mod tests {
     #[test]
     async fn test_connection_flow_control() {
         let tls_config = generate_node_cert("test-node");
-        let server = QuicTransport::new(tls_config.clone()).unwrap();
-        let client = QuicTransport::new(tls_config).unwrap();
+        let server = QuicTransport::with_settings_advanced(tls_config.clone(), quiccrunch::config::QuicTransportSettings::default()).unwrap();
+        let client = QuicTransport::with_settings_advanced(tls_config, quiccrunch::config::QuicTransportSettings::default()).unwrap();
         
         let mut listener = server.listen("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -103,8 +103,8 @@ mod tests {
     #[test]
     async fn test_backpressure_handling() {
         let tls_config = generate_node_cert("test-node");
-        let server = QuicTransport::new(tls_config.clone()).unwrap();
-        let client = QuicTransport::new(tls_config).unwrap();
+        let server = QuicTransport::with_settings_advanced(tls_config.clone(), quiccrunch::config::QuicTransportSettings::default()).unwrap();
+        let client = QuicTransport::with_settings_advanced(tls_config, quiccrunch::config::QuicTransportSettings::default()).unwrap();
         
         let mut listener = server.listen("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -201,8 +201,8 @@ mod tests {
     #[test]
     async fn test_flow_control_error_conditions() {
         let tls_config = generate_node_cert("test-node");
-        let server = QuicTransport::new(tls_config.clone()).unwrap();
-        let client = QuicTransport::new(tls_config).unwrap();
+        let server = QuicTransport::with_settings_advanced(tls_config.clone(), quiccrunch::config::QuicTransportSettings::default()).unwrap();
+        let client = QuicTransport::with_settings_advanced(tls_config, quiccrunch::config::QuicTransportSettings::default()).unwrap();
         
         let mut listener = server.listen("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

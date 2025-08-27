@@ -4,7 +4,7 @@ use plotters::series::LineSeries;
 use super::scaling::ScalingTestResult;
 
 fn plot_error_to_io_error<E: std::fmt::Display>(err: E) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, err.to_string())
+    std::io::Error::other(err.to_string())
 }
 
 pub fn plot_efficiency_curves(results: &[ScalingTestResult], output_dir: &Path) -> std::io::Result<()> {

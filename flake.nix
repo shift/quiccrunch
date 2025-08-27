@@ -52,6 +52,8 @@
             python3
             python3Packages.pip
             python3Packages.matplotlib
+	    linuxPackages.perf
+	    cargo-flamegraph
 
             # Script utilities
             jq

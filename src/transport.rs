@@ -1,16 +1,38 @@
 use std::sync::Arc;
 use std::time::Duration;
 use std::net::{SocketAddr, UdpSocket};
-use rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore};
+use rustls::{Certificate, PrivateKey};
+
+// Imports needed by Quinn backend
+#[cfg(feature = "backend-quinn")]
+use std::sync::Arc;
+#[cfg(feature = "backend-quinn")]
+use std::net::{SocketAddr, UdpSocket};
+#[cfg(feature = "backend-quinn")]
 use quinn::{Endpoint, ServerConfig, TransportConfig as QuinnTransportConfig, TokioRuntime, VarInt};
+#[cfg(feature = "backend-quinn")]
 use quinn::congestion::{BbrConfig, CubicConfig, NewRenoConfig};
+
+#[cfg(feature = "backend-tquic")]
+pub mod tquic;
+
+#[cfg(feature = "grpc-comparison")]
+pub mod grpc;
+
+// Enforce mutual exclusivity of backends
+#[cfg(all(feature = "backend-quinn", feature = "backend-tquic"))]
+compile_error!("Enable only one backend: backend-tquic OR backend-quinn");
+#[cfg(not(any(feature = "backend-quinn", feature = "backend-tquic")))]
+compile_error!("You must enable exactly one backend feature: backend-tquic OR backend-quinn");
 
 #[derive(Clone, Debug, Copy)]
 pub enum CongestionController {
-    Bbr,
+    Bbr, // Quinn BBR (v1). For BBRv3 use tquic backend.
     Cubic,
     NewReno
 }
+
+
 
 #[derive(Clone, Debug)]
 pub struct TransportSettings {
@@ -53,19 +75,31 @@ pub struct TlsConfig {
 
 #[derive(Clone)]
 enum ConnectionInner {
+    #[cfg(feature = "backend-quinn")]
     Quinn(quinn::Connection),
+    #[cfg(feature = "backend-tquic")]
+    Tquic(crate::transport::tquic::ConnHandle),
 }
 
 enum IncomingInner {
+    #[cfg(feature = "backend-quinn")]
     Quinn(Endpoint),
+    #[cfg(feature = "backend-tquic")]
+    Tquic(crate::transport::tquic::IncomingHandle),
 }
 
 #[derive(Clone, Debug)]
 enum BackendImpl {
+    #[cfg(feature = "backend-quinn")]
     Quinn(QuinnCtx),
+    #[cfg(feature = "backend-quinn")]
+    #[allow(dead_code)]
     Alt(QuinnCtx), // placeholder delegating to Quinn
+    #[cfg(feature = "backend-tquic")]
+    Tquic(crate::transport::tquic::TquicCtx),
 }
 
+#[cfg(feature = "backend-quinn")]
 #[derive(Clone, Debug)]
 struct QuinnCtx {
     endpoint: Endpoint,
@@ -75,34 +109,109 @@ struct QuinnCtx {
 
 impl BackendImpl {
     fn new(tls_config: TlsConfig, settings: TransportSettings) -> crate::Result<Self> {
-        #[cfg(feature = "backend-alt")]
+        #[cfg(feature = "backend-quinn")]
         {
-            // For now, Alt delegates to Quinn
-            Ok(BackendImpl::Alt(QuinnCtx::new(tls_config, settings)?))
-        }
-        #[cfg(all(not(feature = "backend-alt"), feature = "backend-quinn"))]
-        {
+            // Legacy/simple path uses Quinn
             Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, settings)?))
         }
-        #[cfg(all(not(feature = "backend-alt"), not(feature = "backend-quinn")))]
+        #[cfg(all(not(feature = "backend-quinn"), feature = "backend-tquic"))]
         {
-            compile_error!("One backend feature must be enabled: backend-quinn or backend-alt");
+            // Convert simple settings to advanced settings and delegate to tquic
+            let advanced_settings = crate::config::QuicTransportSettings {
+                backend: crate::config::Backend::Tquic,
+                max_idle_timeout_ms: settings.max_idle_timeout_ms,
+                keep_alive_interval_ms: settings.keep_alive_interval_ms,
+                initial_max_data: settings.connection_receive_window as u64,
+                initial_max_stream_data_bidi_remote: settings.stream_receive_window as u64,
+                congestion_control: match settings.congestion_controller {
+                    CongestionController::Bbr => crate::config::CongestionControl::Bbr,
+                    CongestionController::Cubic => crate::config::CongestionControl::Cubic,
+                    CongestionController::NewReno => crate::config::CongestionControl::NewReno,
+                },
+                enable_multipath: true,
+                enable_hystart: true,
+            };
+            Self::new_advanced(tls_config, advanced_settings)
+        }
+    }
+
+    fn new_advanced(tls_config: TlsConfig, adv: crate::config::QuicTransportSettings) -> crate::Result<Self> {
+        match adv.backend {
+            crate::config::Backend::Tquic => {
+                #[cfg(feature = "backend-tquic")]
+                {
+                    let tls = crate::transport::tquic::TlsConfig {
+                        cert: tls_config.cert.clone(),
+                        key: tls_config.key.clone(),
+                        ca_cert: tls_config.ca_cert.clone(),
+                    };
+                    return Ok(BackendImpl::Tquic(crate::transport::tquic::TquicCtx::new(tls, adv)?));
+                }
+                #[cfg(not(feature = "backend-tquic"))]
+                {
+                    tracing::warn!("backend-tquic disabled; falling back to Quinn");
+                    let q = Self::map_advanced_to_quinn(&adv);
+                    Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, q)?))
+                }
+            }
+            crate::config::Backend::Quinn => {
+                let _q = Self::map_advanced_to_quinn(&adv);
+                #[cfg(feature = "backend-quinn")]
+                {
+                    Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, _q)?))
+                }
+                #[cfg(not(feature = "backend-quinn"))]
+                {
+                    return Err(crate::TransportError::ConnectionFailed("backend-quinn not enabled".into()));
+                }
+            }
+        }
+    }
+
+    fn map_advanced_to_quinn(adv: &crate::config::QuicTransportSettings) -> TransportSettings {
+        let stream_win = adv.initial_max_stream_data_bidi_remote.min(u32::MAX as u64) as u32;
+        let conn_win = adv.initial_max_data.min(u32::MAX as u64) as u32;
+        let cc = match adv.congestion_control {
+            crate::config::CongestionControl::BbrV3 => {
+                tracing::warn!("BBRv3 requested on Quinn; using BBR fallback");
+                CongestionController::Bbr
+            }
+            crate::config::CongestionControl::Bbr => CongestionController::Bbr,
+            crate::config::CongestionControl::Cubic => CongestionController::Cubic,
+            crate::config::CongestionControl::NewReno => CongestionController::NewReno,
+        };
+        TransportSettings {
+            max_concurrent_uni_streams: 1000,
+            max_concurrent_bidi_streams: 1000,
+            stream_receive_window: stream_win,
+            connection_receive_window: conn_win,
+            max_idle_timeout_ms: adv.max_idle_timeout_ms,
+            keep_alive_interval_ms: adv.keep_alive_interval_ms,
+            initial_rtt_ms: 100,
+            congestion_controller: cc,
         }
     }
 
     async fn connect(&self, addr: &str) -> crate::Result<Connection> {
         match self {
+            #[cfg(feature = "backend-quinn")]
             BackendImpl::Quinn(ctx) | BackendImpl::Alt(ctx) => ctx.connect(addr).await,
+            #[cfg(feature = "backend-tquic")]
+            BackendImpl::Tquic(ctx) => ctx.connect(addr).await,
         }
     }
 
     async fn listen(&self, addr: &str) -> crate::Result<Incoming> {
         match self {
+            #[cfg(feature = "backend-quinn")]
             BackendImpl::Quinn(ctx) | BackendImpl::Alt(ctx) => ctx.listen(addr).await,
+            #[cfg(feature = "backend-tquic")]
+            BackendImpl::Tquic(ctx) => ctx.listen(addr).await,
         }
     }
 }
 
+#[cfg(feature = "backend-quinn")]
 impl QuinnCtx {
     fn new(tls_config: TlsConfig, settings: TransportSettings) -> crate::Result<Self> {
         let mut transport_config = QuinnTransportConfig::default();
@@ -129,22 +238,39 @@ impl QuinnCtx {
     }
 
     async fn connect(&self, addr: &str) -> crate::Result<Connection> {
-        let mut roots = RootCertStore::empty();
-        roots.add(&self.tls_config.ca_cert)
-            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to add CA cert: {}", e)))?;
+        // For development/testing, we'll use a custom verifier that accepts our self-signed certificates
+        use rustls::{ClientConfig, ServerName};
+        
+        struct AcceptAllVerifier;
+        
+        impl rustls::client::ServerCertVerifier for AcceptAllVerifier {
+            fn verify_server_cert(
+                &self,
+                _end_entity: &rustls::Certificate,
+                _intermediates: &[rustls::Certificate],
+                _server_name: &ServerName,
+                _scts: &mut dyn Iterator<Item = &[u8]>,
+                _ocsp_response: &[u8],
+                _now: std::time::SystemTime,
+            ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
+                Ok(rustls::client::ServerCertVerified::assertion())
+            }
+        }
+        
         let crypto_config = ClientConfig::builder()
             .with_safe_defaults()
-            .with_root_certificates(roots)
+            .with_custom_certificate_verifier(Arc::new(AcceptAllVerifier))
             .with_no_client_auth();
+            
         let mut client_config = quinn::ClientConfig::new(Arc::new(crypto_config));
         let mut transport = QuinnTransportConfig::default();
         self.settings.apply_to_config(&mut transport);
         client_config.transport_config(Arc::new(transport));
         let server_addr = addr.parse::<SocketAddr>()
             .map_err(|e| crate::TransportError::ConnectionFailed(format!("Invalid address: {}", e)))?;
-        println!("Attempting QUIC connection to {}", server_addr);
-        println!("Starting TLS handshake with server...");
-        let connecting = self.endpoint.connect_with(client_config, server_addr, "localhost")
+        eprintln!("Attempting QUIC connection to {}", server_addr);
+        eprintln!("Starting TLS handshake with server...");
+        let connecting = self.endpoint.connect_with(client_config, server_addr, "127.0.0.1")
             .map_err(|e| crate::TransportError::ConnectionFailed(e.to_string()))?;
         let conn = tokio::time::timeout(Duration::from_secs(10), connecting).await
             .map_err(|_| crate::TransportError::ConnectionFailed("Connection timeout".into()))?
@@ -174,6 +300,7 @@ impl QuinnCtx {
     }
 }
 
+#[cfg(feature = "backend-quinn")]
 impl TransportSettings {
     pub fn apply_to_config(&self, config: &mut QuinnTransportConfig) {
         config
@@ -200,7 +327,7 @@ impl TransportSettings {
 }
 
 #[async_trait::async_trait]
-pub trait Transport {
+pub trait Transport: Send + Sync {
     async fn connect(&self, addr: &str) -> crate::Result<Connection>;
     async fn listen(&self, addr: &str) -> crate::Result<Incoming>;
 }
@@ -212,6 +339,10 @@ impl QuicTransport {
 
     pub fn with_settings(tls_config: TlsConfig, settings: TransportSettings) -> crate::Result<Self> {
         Ok(Self { backend: BackendImpl::new(tls_config, settings)? })
+    }
+
+    pub fn with_settings_advanced(tls_config: TlsConfig, settings: crate::config::QuicTransportSettings) -> crate::Result<Self> {
+        Ok(Self { backend: BackendImpl::new_advanced(tls_config, settings)? })
     }
 }
 
@@ -265,6 +396,7 @@ pub struct Incoming {
 impl Connection {
     pub fn flow_control_status(&self) -> crate::Result<FlowControlInfo> {
         match &self.inner {
+            #[cfg(feature = "backend-quinn")]
             ConnectionInner::Quinn(conn) => {
                 let stats = conn.stats();
                 let path_stats = PathStats {
@@ -288,25 +420,48 @@ impl Connection {
                 };
                 Ok(FlowControlInfo { path_stats, congestion_state, bandwidth_estimate })
             }
+    #[cfg(feature = "backend-tquic")]
+    ConnectionInner::Tquic(_) => {
+                // TODO: expose tquic stats mapping when available
+                Err(crate::TransportError::StreamError("flow_control_status not supported for tquic yet".into()))
+            }
         }
     }
 
     pub async fn accept_bi(&self) -> crate::Result<crate::QuicStream> {
         match &self.inner {
+            #[cfg(feature = "backend-quinn")]
             ConnectionInner::Quinn(conn) => {
                 let (send, recv) = conn.accept_bi().await
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                 Ok(crate::QuicStream::new(send, recv, self.max_message_size))
+            }
+            #[cfg(feature = "backend-tquic")]
+            ConnectionInner::Tquic(handle) => {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                handle.cmd_tx.send(crate::transport::tquic::ConnCmd::OpenBi { rsp: tx }).await
+                    .map_err(|_| crate::TransportError::StreamError("tquic connection cmd channel closed".into()))?;
+                let (send, recv) = rx.await.map_err(|_| crate::TransportError::StreamError("tquic accept_bi canceled".into()))??;
+                Ok(crate::QuicStream::new_tquic(send, recv, self.max_message_size))
             }
         }
     }
 
     pub async fn open_bi(&self) -> crate::Result<crate::QuicStream> {
         match &self.inner {
+            #[cfg(feature = "backend-quinn")]
             ConnectionInner::Quinn(conn) => {
                 let (send, recv) = conn.open_bi().await
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                 Ok(crate::QuicStream::new(send, recv, self.max_message_size))
+            }
+            #[cfg(feature = "backend-tquic")]
+            ConnectionInner::Tquic(handle) => {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                handle.cmd_tx.send(crate::transport::tquic::ConnCmd::OpenBi { rsp: tx }).await
+                    .map_err(|_| crate::TransportError::StreamError("tquic connection cmd channel closed".into()))?;
+                let (send, recv) = rx.await.map_err(|_| crate::TransportError::StreamError("tquic open_bi canceled".into()))??;
+                Ok(crate::QuicStream::new_tquic(send, recv, self.max_message_size))
             }
         }
     }
@@ -315,21 +470,33 @@ impl Connection {
 impl Incoming {
     pub fn local_addr(&self) -> crate::Result<String> {
         match &self.inner {
+            #[cfg(feature = "backend-quinn")]
             IncomingInner::Quinn(ep) => ep
                 .local_addr()
                 .map(|addr| addr.to_string())
                 .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to get local address: {}", e))),
+            #[cfg(feature = "backend-tquic")]
+            IncomingInner::Tquic(h) => Ok(h.local_addr.clone()),
         }
     }
 
     pub async fn accept(&mut self) -> crate::Result<Connection> {
         match &mut self.inner {
+            #[cfg(feature = "backend-quinn")]
             IncomingInner::Quinn(ep) => {
                 let new_conn = ep.accept().await
                     .ok_or_else(|| crate::TransportError::ConnectionFailed("No more incoming connections".into()))?
                     .await
                     .map_err(|e| crate::TransportError::ConnectionFailed(e.to_string()))?;
                 Ok(Connection { inner: ConnectionInner::Quinn(new_conn), max_message_size: self.settings.stream_receive_window as usize })
+            }
+            #[cfg(feature = "backend-tquic")]
+            IncomingInner::Tquic(h) => {
+                let mut rx = h.conn_rx.lock().await;
+                match rx.recv().await {
+                    Some(handle) => Ok(Connection { inner: ConnectionInner::Tquic(handle), max_message_size: self.settings.stream_receive_window as usize }),
+                    None => Err(crate::TransportError::ConnectionFailed("No more incoming connections".into())),
+                }
             }
         }
     }

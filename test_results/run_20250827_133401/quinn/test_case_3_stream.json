@@ -1,0 +1,31 @@
+🚀 QuicCrunch Benchmark Client
+==============================
+Target: 127.0.0.1:50055
+Backend: quinn
+Test: Bulk Data Streaming (Bandwidth)
+Data size: 1.00 GiB
+Chunk size: 65536 bytes
+
+Attempting QUIC connection to 127.0.0.1:50055
+Starting TLS handshake with server...
+Starting stream test...
+Total data: 1073741824 bytes (1.00 GiB)
+✅ Stream test completed in 8.33s
+{
+  "timestamp": "2025-08-27T11:34:30.336212793Z",
+  "backend": "quinn",
+  "test_case": "stream",
+  "configuration": {
+    "chunk_size": 65536,
+    "size_gib": 1.0
+  },
+  "metrics": {
+    "chunk_rate_per_s": 1967.7932239075403,
+    "chunk_size": 65536,
+    "chunks_transferred": 16384,
+    "duration_s": 8.326078066,
+    "size_gib": 1.0,
+    "throughput_gbps": 1.0316903737760366,
+    "total_bytes": 1073741824
+  }
+}

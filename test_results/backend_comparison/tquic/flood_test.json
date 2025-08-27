@@ -1,0 +1,23 @@
+Warning: No write access to CPU frequency controls.
+Run benchmarks with sudo for full frequency scaling support.
+{
+  "timestamp": "2025-08-27T12:16:58.033814161Z",
+  "backend": "tquic",
+  "test_case": "flood",
+  "configuration": {
+    "duration_s": 5,
+    "concurrency": 20,
+    "message_size": 64
+  },
+  "metrics": {
+    "duration_s": 5.0002374,
+    "concurrency": 20,
+    "message_size": 64,
+    "total_messages": 281866,
+    "messages_per_second": 56370.523527542915,
+    "total_bytes": 18039424,
+    "throughput_mbps": 28.861708046101974,
+    "mean_latency_us": 349.23091114871926,
+    "p99_latency_us": 485.0
+  }
+}

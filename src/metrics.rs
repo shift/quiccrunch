@@ -145,7 +145,7 @@ impl TimeSeries {
         
         let variance = values.iter()
             .map(|&x| {
-                let diff = if x > mean { x - mean } else { mean - x };
+                let diff = x.abs_diff(mean);
                 diff * diff
             })
             .sum::<u64>() / values.len() as u64;

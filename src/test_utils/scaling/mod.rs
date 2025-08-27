@@ -4,6 +4,9 @@ mod types;
 use tokio::process::Command;
 use error::{BenchError, Result};
 use crate::transport::TransportSettings;
+#[cfg(feature = "backend-quinn")]
+#[allow(unused_imports)]
+use quinn as _quinn_unused_to_force_feature;
 
 pub use types::*;
 
@@ -218,7 +221,7 @@ impl FrequencyScaling {
             self.set_frequency(config.frequency_mhz).await?;
             
             // Run performance test and collect metrics
-            let result = self.run_single_test(&config).await?;
+            let result = self.run_single_test(config).await?;
             results.push(result);
         }
         
@@ -276,13 +279,9 @@ impl FrequencyScaling {
         println!("Generating TLS certificates...");
         let tls_config = certs::generate_node_cert("test-node");
         
-        println!("Configuring transport...");
-        let mut transport_config = quinn::TransportConfig::default();
-        transport_config
-            .max_idle_timeout(Some(quinn::VarInt::from_u32(30_000).into())) // 30 second timeout
-            .keep_alive_interval(Some(std::time::Duration::from_secs(2)))
-            .initial_rtt(std::time::Duration::from_millis(100));
-            
+        println!("Configuring transport settings (backend-neutral)...");
+        let _transport_settings = TransportSettings::default();
+        
         println!("Initializing QUIC transport...");
         let transport_settings = TransportSettings::default();
         let transport = QuicTransport::with_settings(tls_config, transport_settings).map_err(|e| {

@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{self, Read};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::metrics::{Metric, MetricValue, MetricError, MetricUnit};
 use std::error::Error;
@@ -36,6 +36,67 @@ impl std::fmt::Display for PowerError {
 
 impl Error for PowerError {}
 
+#[derive(Debug, Clone)]
+pub struct PowerData {
+    pub cpu_power: f64,        // CPU package power in watts
+    pub dram_power: f64,       // DRAM power in watts
+    pub cpu_frequency: f64,    // CPU frequency in MHz
+    pub cpu_temperature: f64,  // CPU temperature in Celsius
+    pub timestamp: Instant,    // When this sample was taken
+}
+
+impl PowerData {
+    pub fn total_power(&self) -> f64 {
+        self.cpu_power + self.dram_power
+    }
+    
+    pub fn power_efficiency(&self) -> f64 {
+        if self.cpu_frequency > 0.0 {
+            self.total_power() / self.cpu_frequency
+        } else {
+            0.0
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PowerMetrics {
+    samples: Vec<PowerData>,
+}
+
+impl PowerMetrics {
+    pub fn new() -> Self {
+        Self {
+            samples: Vec::new(),
+        }
+    }
+    
+    pub fn record_sample(&mut self, sample: &PowerData) {
+        self.samples.push(sample.clone());
+    }
+    
+    pub fn average_power(&self) -> f64 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+        self.samples.iter().map(|s| s.total_power()).sum::<f64>() / self.samples.len() as f64
+    }
+    
+    pub fn average_cpu_power(&self) -> f64 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+        self.samples.iter().map(|s| s.cpu_power).sum::<f64>() / self.samples.len() as f64
+    }
+    
+    pub fn average_dram_power(&self) -> f64 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+        self.samples.iter().map(|s| s.dram_power).sum::<f64>() / self.samples.len() as f64
+    }
+}
+
 pub struct PowerMonitor {
     // RAPL MSR paths
     package_energy_path: String,
@@ -51,16 +112,44 @@ pub struct PowerMonitor {
 
 impl PowerMonitor {
     pub fn new() -> io::Result<Self> {
+        // Try to find ThinkPad temperature sensor first
+        let cpu_temp_path = Self::find_thinkpad_temp_sensor()
+            .unwrap_or_else(|| "/sys/class/thermal/thermal_zone5/temp".to_string());
+            
         Ok(Self {
             package_energy_path: "/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj".to_string(),
             dram_energy_path: "/sys/class/powercap/intel-rapl/intel-rapl:0/intel-rapl:0:2/energy_uj".to_string(),
             cpu_freq_path: "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq".to_string(),
-            cpu_temp_path: "/sys/class/thermal/thermal_zone0/temp".to_string(),
+            cpu_temp_path,
             cpu_governor_path: "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor".to_string(),
             last_read: Instant::now(),
             last_package_energy: 0.0,
             last_dram_energy: 0.0,
         })
+    }
+
+    // Find ThinkPad temperature sensor
+    fn find_thinkpad_temp_sensor() -> Option<String> {
+        use std::fs;
+        
+        // Look for thinkpad hwmon sensor
+        if let Ok(entries) = fs::read_dir("/sys/class/hwmon") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name_path = path.join("name");
+                
+                if let Ok(name) = fs::read_to_string(&name_path) {
+                    if name.trim() == "thinkpad" {
+                        // Look for CPU temperature input
+                        let temp_path = path.join("temp1_input");
+                        if temp_path.exists() {
+                            return Some(temp_path.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     // Safe read from sysfs file
@@ -83,40 +172,83 @@ impl PowerMonitor {
         })
     }
 
-    // Get CPU package power consumption in watts
-    pub fn get_package_power(&mut self) -> io::Result<f64> {
-        let current_energy = self.read_sysfs_value(&self.package_energy_path)?;
+    // Sample all power and performance metrics at once
+    pub fn sample(&mut self) -> io::Result<PowerData> {
         let now = Instant::now();
         let duration = now.duration_since(self.last_read);
         
-        let power = if self.last_package_energy > 0.0 {
-            let energy_diff = current_energy - self.last_package_energy;
-            energy_diff / duration.as_secs_f64() / 1_000_000.0 // Convert μJ to W
+        // Read current energy values
+        let current_package_energy = self.read_sysfs_value(&self.package_energy_path)?;
+        let current_dram_energy = self.read_sysfs_value(&self.dram_energy_path)?;
+        
+        // Calculate power consumption only if we have previous readings and sufficient time has passed
+        let cpu_power = if self.last_package_energy > 0.0 && duration.as_secs_f64() > 0.1 {
+            let energy_diff = if current_package_energy >= self.last_package_energy {
+                current_package_energy - self.last_package_energy
+            } else {
+                // Handle counter overflow - RAPL counters are 32-bit and wrap around
+                // Max value is about 2^32 microjoules = ~4295 joules
+                let max_uj = 4_294_967_296.0;
+                (max_uj - self.last_package_energy) + current_package_energy
+            };
+            let power_watts = energy_diff / duration.as_secs_f64() / 1_000_000.0;
+            // Sanity check: Intel CPUs range from low-power mobile (~1W) to high-end Xeon (~500W+)
+            if power_watts >= 0.0 && power_watts <= 600.0 {
+                power_watts
+            } else {
+                0.0 // Invalid reading, return 0
+            }
         } else {
             0.0
         };
-
-        self.last_package_energy = current_energy;
+        
+        let dram_power = if self.last_dram_energy > 0.0 && duration.as_secs_f64() > 0.1 {
+            let energy_diff = if current_dram_energy >= self.last_dram_energy {
+                current_dram_energy - self.last_dram_energy
+            } else {
+                // Handle counter overflow
+                let max_uj = 4_294_967_296.0;
+                (max_uj - self.last_dram_energy) + current_dram_energy
+            };
+            let power_watts = energy_diff / duration.as_secs_f64() / 1_000_000.0;
+            // Sanity check: Server DRAM can be substantial but 50W+ is extremely rare
+            if power_watts >= 0.0 && power_watts <= 100.0 {
+                power_watts
+            } else {
+                0.0 // Invalid reading, return 0
+            }
+        } else {
+            0.0
+        };
+        
+        // Update last readings
+        self.last_package_energy = current_package_energy;
+        self.last_dram_energy = current_dram_energy;
         self.last_read = now;
-        Ok(power)
+        
+        // Read other metrics
+        let cpu_frequency = self.get_cpu_frequency()?;
+        let cpu_temperature = self.get_cpu_temperature()?;
+        
+        Ok(PowerData {
+            cpu_power,
+            dram_power,
+            cpu_frequency,
+            cpu_temperature,
+            timestamp: now,
+        })
     }
 
-    // Get DRAM power consumption in watts 
+    // Get CPU package power consumption in watts (backward compatibility)
+    pub fn get_package_power(&mut self) -> io::Result<f64> {
+        let sample = self.sample()?;
+        Ok(sample.cpu_power)
+    }
+
+    // Get DRAM power consumption in watts (backward compatibility)
     pub fn get_dram_power(&mut self) -> io::Result<f64> {
-        let current_energy = self.read_sysfs_value(&self.dram_energy_path)?;
-        let now = Instant::now();
-        let duration = now.duration_since(self.last_read);
-
-        let power = if self.last_dram_energy > 0.0 {
-            let energy_diff = current_energy - self.last_dram_energy;
-            energy_diff / duration.as_secs_f64() / 1_000_000.0 // Convert μJ to W
-        } else {
-            0.0
-        };
-
-        self.last_dram_energy = current_energy;
-        self.last_read = now;
-        Ok(power)
+        let sample = self.sample()?;
+        Ok(sample.dram_power)
     }
 
     // Get current CPU frequency in MHz
@@ -222,6 +354,7 @@ impl PowerMonitor {
 mod tests {
     use super::*;
     use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn test_power_monitor_creation() {

@@ -221,6 +221,27 @@ QuicCrunch is designed for high performance:
 - Efficient binary protocol
 - Minimal allocations in hot paths
 
+### Power Monitoring
+
+QuicCrunch includes built-in power monitoring capabilities:
+
+```rust
+use quiccrunch::power::{PowerMonitor, PowerMetrics};
+
+// Initialize power monitoring
+let power_monitor = PowerMonitor::new()?;
+let mut metrics = PowerMetrics::new();
+
+// Monitor during operations
+let power_data = power_monitor.sample()?;
+metrics.record_sample(&power_data);
+
+// Analyze efficiency
+println!("Power efficiency: {:.3} W/MHz", power_data.power_efficiency());
+```
+
+See `docs/POWER_MONITORING_REPORT.md` for detailed analysis and results.
+
 ## Security
 
 Security is enabled by default:

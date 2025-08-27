@@ -1,0 +1,1 @@
+{"timestamp": "2025-08-27T11:34:05.898379682Z", "backend": "quinn", "test_case": "latency", "configuration": {"iterations": 5, "message_size": 64}, "metrics": {"mean_us": 156.2, "p99_us": 234.5}}
