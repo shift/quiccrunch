@@ -42,6 +42,8 @@ enum StreamInner {
     Quinn { send: QuinnSend, recv: QuinnRecv },
     #[cfg(feature = "backend-tquic")]
     Tquic { send: TquicSend, recv: TquicRecv },
+    #[cfg(feature = "lock-free-channels")]
+    LockFree { handle: crate::lockfree::StreamHandle },
 }
 
 impl QuicStream {
@@ -60,6 +62,12 @@ impl QuicStream {
     #[cfg(feature = "backend-tquic")]
     pub fn new_tquic(send: TquicSend, recv: TquicRecv, max_message_size: usize) -> Self {
         Self { inner: StreamInner::Tquic { send, recv }, max_message_size }
+    }
+    
+    /// Create a new QuicStream (Lock-free)
+    #[cfg(feature = "lock-free-channels")]
+    pub fn new_lockfree(handle: crate::lockfree::StreamHandle, max_message_size: usize) -> Self {
+        Self { inner: StreamInner::LockFree { handle }, max_message_size }
     }
 
     /// Send a message over the stream with flow control
@@ -171,6 +179,22 @@ impl QuicStream {
                     remaining = rest;
                 }
             }
+            #[cfg(feature = "lock-free-channels")]
+            StreamInner::LockFree { handle } => {
+                // Use lock-free stream handle for optimal performance
+                handle.write(bytes::Bytes::from(header.to_vec()), false).await?;
+                
+                // Write data in optimized chunks using lock-free channels
+                const CHUNK_SIZE: usize = 262_144; // 256KB chunks
+                let mut remaining = data.as_ref();
+                while !remaining.is_empty() {
+                    let chunk_size = remaining.len().min(CHUNK_SIZE);
+                    let (chunk, rest) = remaining.split_at(chunk_size);
+                    
+                    handle.write(bytes::Bytes::from(chunk.to_vec()), false).await?;
+                    remaining = rest;
+                }
+            }
         }
 
         #[cfg(feature = "telemetry")]
@@ -242,6 +266,30 @@ impl QuicStream {
                 }).await {
                     return Err(crate::TransportError::StreamError("tquic read channel closed".into()));
                 }
+                let header_result = time::timeout(READ_TIMEOUT, rx).await;
+                match header_result {
+                    Ok(Ok(Ok(Some(mut data)))) if data.len() >= 4 => {
+                        header.copy_from_slice(&data[..4]);
+                    },
+                    Ok(Ok(Ok(None))) => return Err(crate::TransportError::StreamError("tquic stream closed".into())),
+                    Ok(Ok(Err(e))) => return Err(e),
+                    Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
+                    Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
+                }
+            }
+            #[cfg(feature = "lock-free-channels")]
+            StreamInner::LockFree { handle } => {
+                // Use lock-free read for optimal performance
+                let header_result = time::timeout(READ_TIMEOUT, handle.read(4)).await;
+                match header_result {
+                    Ok(Ok(Some(data))) if data.len() >= 4 => {
+                        header.copy_from_slice(&data[..4]);
+                    },
+                    Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed".into())),
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
+                }
+            }
                 let header_result = time::timeout(READ_TIMEOUT, rx).await;
                 match header_result {
                     Ok(Ok(Ok(Some(data)))) => {
@@ -358,6 +406,98 @@ impl QuicStream {
                     }).await {
                         return Err(crate::TransportError::StreamError("tquic read channel closed".into()));
                     }
+                    let read_res = time::timeout(READ_TIMEOUT, rx).await;
+                    match read_res {
+                        Ok(Ok(Ok(Some(data)))) => {
+                            if data.len() != chunk_size {
+                                return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
+                            }
+                            #[cfg(feature = "memory-pools")]
+                            {
+                                #[cfg(feature = "simd-optimizations")]
+                                {
+                                    let features = crate::simd::CpuFeatures::detect();
+                                    if features.avx2 && data.len() >= 32 {
+                                        let current_len = pooled_buffer.len();
+                                        pooled_buffer.resize(current_len + chunk_size, 0);
+                                        crate::simd::fast_copy(&data, &mut pooled_buffer.as_mut_slice()[current_len..current_len + chunk_size]);
+                                    } else {
+                                        pooled_buffer.extend_from_slice(&data);
+                                    }
+                                }
+                                #[cfg(not(feature = "simd-optimizations"))]
+                                pooled_buffer.extend_from_slice(&data);
+                            }
+                            #[cfg(not(feature = "memory-pools"))]
+                            {
+                                #[cfg(feature = "simd-optimizations")]
+                                {
+                                    let features = crate::simd::CpuFeatures::detect();
+                                    if features.avx2 && data.len() >= 32 {
+                                        buffer.resize(bytes_read + chunk_size, 0);
+                                        crate::simd::fast_copy(&data, &mut buffer[bytes_read..bytes_read + chunk_size]);
+                                    } else {
+                                        buffer.extend_from_slice(&data);
+                                    }
+                                }
+                                #[cfg(not(feature = "simd-optimizations"))]
+                                buffer.extend_from_slice(&data);
+                            }
+                            bytes_read += chunk_size;
+                        },
+                        Ok(Ok(Ok(None))) => return Err(crate::TransportError::StreamError("tquic stream closed during read".into())),
+                        Ok(Ok(Err(e))) => return Err(e),
+                        Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
+                        Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
+                    }
+                }
+                #[cfg(feature = "lock-free-channels")]
+                StreamInner::LockFree { handle } => {
+                    // Use lock-free read for optimal chunk reading performance
+                    let read_res = time::timeout(READ_TIMEOUT, handle.read(chunk_size)).await;
+                    match read_res {
+                        Ok(Ok(Some(data))) => {
+                            if data.len() != chunk_size {
+                                return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
+                            }
+                            #[cfg(feature = "memory-pools")]
+                            {
+                                #[cfg(feature = "simd-optimizations")]
+                                {
+                                    let features = crate::simd::CpuFeatures::detect();
+                                    if features.avx2 && data.len() >= 32 {
+                                        let current_len = pooled_buffer.len();
+                                        pooled_buffer.resize(current_len + chunk_size, 0);
+                                        crate::simd::fast_copy(&data, &mut pooled_buffer.as_mut_slice()[current_len..current_len + chunk_size]);
+                                    } else {
+                                        pooled_buffer.extend_from_slice(&data);
+                                    }
+                                }
+                                #[cfg(not(feature = "simd-optimizations"))]
+                                pooled_buffer.extend_from_slice(&data);
+                            }
+                            #[cfg(not(feature = "memory-pools"))]
+                            {
+                                #[cfg(feature = "simd-optimizations")]
+                                {
+                                    let features = crate::simd::CpuFeatures::detect();
+                                    if features.avx2 && data.len() >= 32 {
+                                        buffer.resize(bytes_read + chunk_size, 0);
+                                        crate::simd::fast_copy(&data, &mut buffer[bytes_read..bytes_read + chunk_size]);
+                                    } else {
+                                        buffer.extend_from_slice(&data);
+                                    }
+                                }
+                                #[cfg(not(feature = "simd-optimizations"))]
+                                buffer.extend_from_slice(&data);
+                            }
+                            bytes_read += chunk_size;
+                        },
+                        Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed during read".into())),
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
+                    }
+                }
                     let read_res = time::timeout(READ_TIMEOUT, rx).await;
                     match read_res {
                         Ok(Ok(Ok(Some(data)))) => {

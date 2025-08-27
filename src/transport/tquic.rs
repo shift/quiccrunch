@@ -4,8 +4,37 @@ use std::net::SocketAddr;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use rustls::{Certificate, PrivateKey};
 
+// Import lock-free channel system
+use crate::lockfree::{StreamHandle, ConnectionHandle, StreamCommand, ConnectionCommand, StreamBackend, ConnectionChannels};
+
 // Re-export the TquicStreamHandle from stream module
 use crate::stream::TquicStreamHandle;
+
+/// Bridge backend that implements StreamBackend for our tQUIC system
+struct TquicStreamBackend {
+    bridge: StreamBridge,
+}
+
+#[async_trait::async_trait]
+impl StreamBackend for TquicStreamBackend {
+    async fn write(&mut self, stream_id: u64, data: bytes::Bytes, _fin: bool) -> Result<(), crate::TransportError> {
+        self.bridge.write(stream_id, &data).await;
+        Ok(())
+    }
+
+    async fn read(&mut self, stream_id: u64, buffer_size: usize) -> Result<Option<bytes::Bytes>, crate::TransportError> {
+        if let Some(data) = self.bridge.read(stream_id, buffer_size).await {
+            Ok(Some(bytes::Bytes::from(data)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn close(&mut self, _stream_id: u64) -> Result<(), crate::TransportError> {
+        // For now, just return success
+        Ok(())
+    }
+}
 
 // Stream commands for tQUIC stream operations
 #[derive(Debug)]
@@ -41,10 +70,10 @@ pub struct TlsConfig {
     pub ca_cert: Certificate,
 }
 
-// Handle for tQUIC connection
+// Handle for tQUIC connection (now using lock-free channels)
 #[derive(Clone, Debug)]
 pub struct ConnHandle {
-    pub cmd_tx: mpsc::Sender<ConnCmd>,
+    pub connection_handle: ConnectionHandle,
     pub _connection_id: u64,
 }
 
@@ -54,7 +83,7 @@ pub struct IncomingHandle {
     pub local_addr: String,
 }
 
-// Main tQUIC context
+// Main tQUIC context (enhanced with lock-free channels)
 #[derive(Clone, Debug)]
 pub struct TquicCtx {
     tls_config: TlsConfig,
@@ -112,7 +141,7 @@ impl StreamBridge {
 }
 
 impl TquicCtx {
-    pub fn new(tls_config: TlsConfig, settings: crate::config::QuicTransportSettings) -> crate::Result<Self> {
+    pub fn new(tls_config: TlsConfig, settings: crate::config::QuicTransportSettings) -> crate::Result<Self> {        
         Ok(Self {
             tls_config,
             settings,
@@ -124,39 +153,44 @@ impl TquicCtx {
         let _server_addr = addr.parse::<SocketAddr>()
             .map_err(|e| crate::TransportError::ConnectionFailed(format!("Invalid address: {}", e)))?;
 
-        // Create command channels for the connection
-        let (cmd_tx, mut cmd_rx) = mpsc::channel::<ConnCmd>(100);
+        // Create connection using lock-free channel system
         let connection_id = 1; // For now, use a simple ID
+        
+        let (connection_handle, channels) = ConnectionHandle::new(
+            connection_id,
+            1000,  // write_capacity
+            1000,  // read_capacity
+            100,   // close_capacity
+        );
 
         let handle = ConnHandle {
-            cmd_tx,
+            connection_handle,
             _connection_id: connection_id,
         };
 
-        let bridge = self.bridge.clone();
+        // Create and start the lock-free stream processor for this connection
+        let backend = TquicStreamBackend {
+            bridge: self.bridge.clone(),
+        };
         
-        // Spawn connection task to handle commands - keep it running indefinitely
+        let processor = crate::lockfree::StreamProcessor::new(
+            connection_id,
+            channels,
+            Box::new(backend),
+        );
+        
+        // Spawn the processor to handle stream operations
         tokio::spawn(async move {
-            while let Some(cmd) = cmd_rx.recv().await {
-                match cmd {
-                    ConnCmd::OpenBi { rsp } => {
-                        let stream_id = bridge.get_next_stream_id().await;
-                        
-                        let (send_cmd_tx, send_cmd_rx) = mpsc::channel::<StreamCmd>(100);
-                        let (recv_cmd_tx, recv_cmd_rx) = mpsc::channel::<StreamCmd>(100);
-                        
-                        let send_stream = TquicStreamHandle::new(stream_id, send_cmd_tx);
-                        let recv_stream = TquicStreamHandle::new(stream_id, recv_cmd_tx);
+            if let Err(e) = processor.run().await {
+                eprintln!("Stream processor error: {:?}", e);
+            }
+        });
 
-                        // Spawn stream handlers
-                        let send_bridge = bridge.clone();
-                        tokio::spawn(Self::handle_send_stream(send_cmd_rx, send_bridge));
-                        
-                        let recv_bridge = bridge.clone();
-                        tokio::spawn(Self::handle_recv_stream(recv_cmd_rx, recv_bridge));
-                        
-                        let _ = rsp.send(Ok((send_stream, recv_stream)));
-                    }
+        Ok(crate::transport::Connection { 
+            inner: crate::transport::ConnectionInner::Tquic(handle), 
+            max_message_size: self.settings.initial_max_stream_data_bidi_remote as usize,
+        })
+    }
                 }
             }
         });

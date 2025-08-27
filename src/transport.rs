@@ -224,7 +224,10 @@ impl BackendImpl {
             #[cfg(feature = "backend-tquic")]
             BackendImpl::Tquic(ctx) => ctx.connect(addr).await,
             #[cfg(feature = "io-uring-advanced")]
-            BackendImpl::IoUringAdvanced(ctx) => ctx.connect(addr).await,
+            BackendImpl::IoUringAdvanced(ctx) => {
+                let conn = ctx.connect(addr).await?;
+                Ok(Connection { inner: ConnectionInner::IoUringAdvanced(conn.inner), max_message_size: 65536 })
+            }
         }
     }
 
@@ -235,7 +238,22 @@ impl BackendImpl {
             #[cfg(feature = "backend-tquic")]
             BackendImpl::Tquic(ctx) => ctx.listen(addr).await,
             #[cfg(feature = "io-uring-advanced")]
-            BackendImpl::IoUringAdvanced(ctx) => ctx.listen(addr).await,
+            BackendImpl::IoUringAdvanced(ctx) => {
+                let incoming = ctx.listen(addr).await?;
+                Ok(Incoming { 
+                    inner: IncomingInner::IoUringAdvanced(incoming.inner), 
+                    settings: TransportSettings { 
+                        max_concurrent_uni_streams: 1000,
+                        max_concurrent_bidi_streams: 1000,
+                        stream_receive_window: 65536,
+                        connection_receive_window: 65536 * 4,
+                        max_idle_timeout_ms: Some(30000),
+                        keep_alive_interval_ms: Some(10000),
+                        initial_rtt_ms: 100,
+                        congestion_controller: CongestionController::NewReno,
+                    }
+                })
+            }
         }
     }
 }
@@ -486,11 +504,13 @@ impl Connection {
             }
             #[cfg(feature = "backend-tquic")]
             ConnectionInner::Tquic(handle) => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                handle.cmd_tx.send(crate::transport::tquic::ConnCmd::OpenBi { rsp: tx }).await
-                    .map_err(|_| crate::TransportError::StreamError("tquic connection cmd channel closed".into()))?;
-                let (send, recv) = rx.await.map_err(|_| crate::TransportError::StreamError("tquic accept_bi canceled".into()))??;
-                Ok(crate::QuicStream::new_tquic(send, recv, self.max_message_size))
+                // Use lock-free connection handle to open a new stream
+                let stream_handle = handle.connection_handle.open_stream().await
+                    .map_err(|e| crate::TransportError::StreamError(format!("Failed to open stream: {:?}", e)))?;
+                
+                // For now, create a simple QuicStream that wraps the lock-free stream handle
+                // In a real implementation, you'd want to integrate this more deeply
+                Ok(crate::QuicStream::new_lockfree(stream_handle, self.max_message_size))
             }
             #[cfg(feature = "io-uring-advanced")]
             ConnectionInner::IoUringAdvanced(conn) => {
@@ -509,11 +529,12 @@ impl Connection {
             }
             #[cfg(feature = "backend-tquic")]
             ConnectionInner::Tquic(handle) => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                handle.cmd_tx.send(crate::transport::tquic::ConnCmd::OpenBi { rsp: tx }).await
-                    .map_err(|_| crate::TransportError::StreamError("tquic connection cmd channel closed".into()))?;
-                let (send, recv) = rx.await.map_err(|_| crate::TransportError::StreamError("tquic open_bi canceled".into()))??;
-                Ok(crate::QuicStream::new_tquic(send, recv, self.max_message_size))
+                // Use lock-free connection handle to open a new stream
+                let stream_handle = handle.connection_handle.open_stream().await
+                    .map_err(|e| crate::TransportError::StreamError(format!("Failed to open stream: {:?}", e)))?;
+                
+                // For now, create a simple QuicStream that wraps the lock-free stream handle
+                Ok(crate::QuicStream::new_lockfree(stream_handle, self.max_message_size))
             }
             #[cfg(feature = "io-uring-advanced")]
             ConnectionInner::IoUringAdvanced(conn) => {

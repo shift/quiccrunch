@@ -19,7 +19,7 @@ use crate::memory::{PooledBuffer, MessageBuffer};
 use crate::simd;
 
 /// Configuration for io_uring transport optimizations
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub enable_vectorized_io: bool,
     pub enable_zero_copy: bool,
@@ -108,6 +108,7 @@ impl Incoming {
 }
 
 /// High-performance io_uring transport with vectorized I/O and zero-copy
+#[derive(Debug)]
 pub struct IoUringAdvancedTransport {
     ring: IoUring,
     socket: Socket,
