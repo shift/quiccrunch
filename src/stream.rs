@@ -184,14 +184,36 @@ impl QuicStream {
                 // Use lock-free stream handle for optimal performance
                 handle.write(bytes::Bytes::from(header.to_vec()), false).await?;
                 
-                // Write data in optimized chunks using lock-free channels
+                // Write data in optimized chunks using adaptive optimization
                 const CHUNK_SIZE: usize = 262_144; // 256KB chunks
                 let mut remaining = data.as_ref();
                 while !remaining.is_empty() {
                     let chunk_size = remaining.len().min(CHUNK_SIZE);
                     let (chunk, rest) = remaining.split_at(chunk_size);
                     
+                    // Adaptive optimization based on chunk characteristics
+                    #[cfg(feature = "adaptive-optimizations")]
+                    {
+                        let mut buffer = crate::adaptive::allocate_optimized(chunk.len());
+                        buffer.copy_from_slice(chunk);
+                        handle.write(bytes::Bytes::from(buffer.into_vec()), false).await?;
+                    }
+                    #[cfg(all(not(feature = "adaptive-optimizations"), feature = "simd-optimizations"))]
+                    {
+                        let features = crate::simd::CpuFeatures::detect();
+                        if features.avx2 && chunk.len() >= 32 {
+                            // Use zero-allocation SIMD-optimized copy for large data
+                            let mut simd_buffer = Vec::with_capacity(chunk.len());
+                            unsafe { simd_buffer.set_len(chunk.len()); }
+                            crate::simd::fast_copy(chunk, &mut simd_buffer);
+                            handle.write(bytes::Bytes::from(simd_buffer), false).await?;
+                        } else {
+                            handle.write(bytes::Bytes::from(chunk.to_vec()), false).await?;
+                        }
+                    }
+                    #[cfg(all(not(feature = "adaptive-optimizations"), not(feature = "simd-optimizations")))]
                     handle.write(bytes::Bytes::from(chunk.to_vec()), false).await?;
+                    
                     remaining = rest;
                 }
             }
@@ -222,6 +244,11 @@ impl QuicStream {
                     return Err(crate::TransportError::StreamError("tquic stream shutdown channel closed".into()));
                 }
                 rx.await.map_err(|_| crate::TransportError::StreamError("tquic shutdown canceled".into()))??;
+                Ok(())
+            }
+            #[cfg(feature = "lock-free-channels")]
+            StreamInner::LockFree { handle } => {
+                handle.close().await?;
                 Ok(())
             }
         }
@@ -271,6 +298,7 @@ impl QuicStream {
                     Ok(Ok(Ok(Some(mut data)))) if data.len() >= 4 => {
                         header.copy_from_slice(&data[..4]);
                     },
+                    Ok(Ok(Ok(Some(_)))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
                     Ok(Ok(Ok(None))) => return Err(crate::TransportError::StreamError("tquic stream closed".into())),
                     Ok(Ok(Err(e))) => return Err(e),
                     Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
@@ -285,24 +313,9 @@ impl QuicStream {
                     Ok(Ok(Some(data))) if data.len() >= 4 => {
                         header.copy_from_slice(&data[..4]);
                     },
+                    Ok(Ok(Some(_))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
                     Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed".into())),
                     Ok(Err(e)) => return Err(e),
-                    Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
-                }
-            }
-                let header_result = time::timeout(READ_TIMEOUT, rx).await;
-                match header_result {
-                    Ok(Ok(Ok(Some(data)))) => {
-                        if data.len() != 4 {
-                            return Err(crate::TransportError::StreamError("incomplete header read".into()));
-                        }
-                        header.copy_from_slice(&data[..4]);
-                    }
-                    Ok(Ok(Ok(None))) => {
-                        return Err(crate::TransportError::StreamError("stream closed during header read".into()));
-                    }
-                    Ok(Ok(Err(e))) => return Err(e),
-                    Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
                     Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
                 }
             }

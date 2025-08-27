@@ -502,7 +502,7 @@ impl Connection {
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                 Ok(crate::QuicStream::new(send, recv, self.max_message_size))
             }
-            #[cfg(feature = "backend-tquic")]
+            #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             ConnectionInner::Tquic(handle) => {
                 // Use lock-free connection handle to open a new stream
                 let stream_handle = handle.connection_handle.open_stream().await
@@ -511,6 +511,11 @@ impl Connection {
                 // For now, create a simple QuicStream that wraps the lock-free stream handle
                 // In a real implementation, you'd want to integrate this more deeply
                 Ok(crate::QuicStream::new_lockfree(stream_handle, self.max_message_size))
+            }
+            #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+            ConnectionInner::Tquic(handle) => {
+                // Fallback to standard tquic implementation when lock-free channels are disabled
+                unimplemented!("Standard tquic implementation without lock-free channels not yet implemented")
             }
             #[cfg(feature = "io-uring-advanced")]
             ConnectionInner::IoUringAdvanced(conn) => {
@@ -527,7 +532,7 @@ impl Connection {
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                 Ok(crate::QuicStream::new(send, recv, self.max_message_size))
             }
-            #[cfg(feature = "backend-tquic")]
+            #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             ConnectionInner::Tquic(handle) => {
                 // Use lock-free connection handle to open a new stream
                 let stream_handle = handle.connection_handle.open_stream().await
@@ -535,6 +540,11 @@ impl Connection {
                 
                 // For now, create a simple QuicStream that wraps the lock-free stream handle
                 Ok(crate::QuicStream::new_lockfree(stream_handle, self.max_message_size))
+            }
+            #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+            ConnectionInner::Tquic(handle) => {
+                // Fallback to standard tquic implementation when lock-free channels are disabled
+                unimplemented!("Standard tquic implementation without lock-free channels not yet implemented")
             }
             #[cfg(feature = "io-uring-advanced")]
             ConnectionInner::IoUringAdvanced(conn) => {

@@ -130,6 +130,29 @@ impl OptimizedBuffer {
             OptimizedBuffer::Pooled(buffer) => buffer.capacity(),
         }
     }
+    
+    /// Copy data into this buffer
+    pub fn copy_from_slice(&mut self, data: &[u8]) {
+        match self {
+            OptimizedBuffer::Standard(vec) => {
+                vec.clear();
+                vec.extend_from_slice(data);
+            }
+            #[cfg(feature = "memory-pools")]
+            OptimizedBuffer::Pooled(buffer) => {
+                buffer.as_mut_slice()[..data.len()].copy_from_slice(data);
+            }
+        }
+    }
+    
+    /// Convert into Vec<u8>
+    pub fn into_vec(self) -> Vec<u8> {
+        match self {
+            OptimizedBuffer::Standard(vec) => vec,
+            #[cfg(feature = "memory-pools")]
+            OptimizedBuffer::Pooled(buffer) => buffer.into_vec(),
+        }
+    }
 }
 
 /// Performance configuration for different workload types

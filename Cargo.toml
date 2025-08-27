@@ -155,6 +155,7 @@ scaling-tests = []
 memory-pools = []                # Enable memory pooling optimizations
 simd-optimizations = []          # Enable SIMD operations
 lock-free-channels = []          # Enable lock-free channel optimizations
+adaptive-optimizations = []      # Enable adaptive optimization strategy selection
 io-uring-advanced = ["dep:io-uring"]  # Enable advanced io_uring transport
 
 # Misc feature flags

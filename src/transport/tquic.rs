@@ -210,9 +210,12 @@ impl TquicCtx {
             // Simulate an incoming connection after a short delay
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             
-            let (cmd_tx, _cmd_rx) = mpsc::channel::<ConnCmd>(100);
+            let (_cmd_tx, _cmd_rx) = mpsc::channel::<ConnCmd>(100);
+            
+            // Create connection handle for lock-free channels with default capacities
+            let (connection_handle, _channels) = ConnectionHandle::new(2, 1000, 1000, 100);
             let incoming_handle = ConnHandle {
-                cmd_tx,
+                connection_handle,
                 _connection_id: 2,
             };
             
