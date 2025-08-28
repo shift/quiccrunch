@@ -1,4 +1,82 @@
-# TODO: QuicCrunch Performance Investigation & Optimization
+# TODO: QuicCrunch RPC Implementation & Performance Optimization
+
+## 🎯 RPC FRAMEWORK IMPLEMENTATION STATUS
+
+### **PHASE 1: CORE RPC INFRASTRUCTURE** ✅ **COMPLETED**
+
+**Status:** Production-ready RPC foundation implemented following BDD approach
+
+#### ✅ **Critical Fixes Implemented:**
+- **RPC Server Connection Handler** - `RpcServer::handle_connection()` with concurrent stream handling
+- **Code Generation Macros** - Fixed broken `rpc_service!`, `rpc_params!`, `rpc_result!` macros  
+- **Timeout Handling** - Added `RpcContext::with_timeout()` and client-side timeout support
+- **Error Response System** - Comprehensive error handling with proper Cap'n Proto serialization
+- **BDD Test Suite** - Complete test coverage for core RPC functionality
+
+#### ✅ **BDD Implementation Approach:**
+- Created Given-When-Then test scenarios for all RPC patterns
+- Test-first development with commits after green tests
+- Comprehensive error handling validation
+- Integration with existing `StreamingRpcService` trait
+
+**Files Modified:**
+- `src/rpc.rs` - Core RPC server/client implementation
+- `src/rpc/codegen.rs` - Fixed and enhanced code generation macros
+- `tests/rpc_server_bdd.rs` - Server connection handling BDD tests
+- `tests/rpc_codegen_bdd.rs` - Code generation macro BDD tests  
+- `tests/rpc_timeout_bdd.rs` - Timeout handling BDD tests
+
+### **PHASE 2: STREAMING RPC INFRASTRUCTURE** ✅ **CORE COMPLETED**
+
+**Status:** Streaming framework implemented with ownership challenges identified
+
+#### ✅ **Streaming Features Implemented:**
+- **StreamingType Parsing** - Server-side parsing of unary/server/client/bidirectional streaming
+- **Stream Message Handling** - Comprehensive parsing of stream chunks, end markers, errors
+- **Client Streaming Methods** - `server_streaming_call()`, `client_streaming_call()`, `bidirectional_streaming_call()`
+- **Stream Infrastructure** - Enhanced `RpcStreamSink` and `RpcStreamReceiver` integration
+- **BDD Test Framework** - Complete streaming test scenarios with mock implementations
+
+#### 🔄 **Implementation Challenges Identified:**
+- **QuicStream Ownership** - Current `QuicStream` struct doesn't implement `Clone`, preventing stream splitting
+- **Stream Lifecycle Management** - Need bidirectional stream access for complex streaming patterns
+- **Connection Multiplexing** - Requires proper stream ID management across concurrent connections
+
+#### ✅ **Files Implemented:**
+- `src/rpc.rs` - Extended with streaming request processing and client methods
+- `tests/streaming_rpc_bdd.rs` - Comprehensive BDD tests for all streaming patterns
+- `schema/rpc.capnp` - Already contains complete streaming message definitions
+
+### **PHASE 3: NEXT PRIORITIES** 🔄 **IN PROGRESS**
+
+#### 🎯 **Critical: Resolve Stream Ownership Architecture**
+- **Issue:** `QuicStream` ownership conflicts prevent full streaming implementation
+- **Solution Options:**
+  1. Implement `Clone` for `QuicStream` with internal stream splitting
+  2. Redesign streaming API to work with borrowed stream references  
+  3. Create stream wrapper that allows safe concurrent access
+
+#### 🎯 **Developer Experience Enhancements**
+- **Procedural Macro Crate** - Extract code generation into dedicated `quiccrunch-macros` crate
+- **CLI Tools** - Add `quiccrunch-cli` for service generation and testing
+- **Documentation** - Generate comprehensive API docs with streaming examples
+
+#### 🎯 **Production Readiness**
+- **Service Registry Integration** - Connect streaming with existing discovery system
+- **Load Balancing** - Implement streaming-aware connection pooling
+- **Observability** - Add metrics and tracing for streaming operations
+
+### **IMPLEMENTATION SUMMARY:**
+
+✅ **Phase 1 (Complete):** Core RPC infrastructure with BDD tests  
+✅ **Phase 2 (Core Complete):** Streaming RPC framework with ownership challenges identified  
+🔄 **Phase 3 (Next):** Stream ownership resolution and developer experience  
+
+**Current State:** QuicCrunch now has a production-ready RPC framework for unary calls and a comprehensive streaming foundation ready for ownership architecture resolution.
+
+---
+
+## 🚨 PERFORMANCE OPTIMIZATION STATUS
 
 ## 🚨 CRITICAL ISSUE: Performance Regression Discovered
 
