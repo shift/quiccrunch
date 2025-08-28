@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use quiccrunch::power::PowerMonitor;
-use quiccrunch::test_utils::power_viz::{PowerTimeSeries, PowerVisualizer};
+use quiccrunch_core::power::PowerMonitor;
+use quiccrunch_core::test_utils::power_viz::{PowerTimeSeries, PowerVisualizer};
 use std::collections::HashMap;
 use std::process::Command;
 use std::thread;

@@ -18,6 +18,7 @@ fn test_macro_expansion() {
 }
 
 // Simple implementation for testing
+#[derive(Clone)]
 struct TestServiceImpl;
 
 impl TestService for TestServiceImpl {

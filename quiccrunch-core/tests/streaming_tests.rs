@@ -1,7 +1,7 @@
 //! Comprehensive streaming RPC tests
 
-use quiccrunch::rpc::*;
-use quiccrunch::{QuicTransport, TlsConfig};
+use quiccrunch_core::rpc::*;
+use quiccrunch_core::{QuicTransport, TlsConfig};
 use bytes::Bytes;
 use std::sync::Arc;
 use std::time::Duration;

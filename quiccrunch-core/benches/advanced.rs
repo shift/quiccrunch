@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use quiccrunch::{QuicTransport, Transport, TlsConfig};
+use quiccrunch_core::{QuicTransport, Transport, TlsConfig};
 use bytes::Bytes;
 use tokio::runtime::Runtime;
 use tokio::sync::Barrier;

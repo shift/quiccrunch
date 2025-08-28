@@ -9,7 +9,7 @@ use paste::paste;
 /// # Example
 /// 
 /// ```rust
-/// use quiccrunch::rpc_service;
+/// use quiccrunch_core::rpc_service;
 /// use bytes::Bytes;
 /// 
 /// rpc_service! {

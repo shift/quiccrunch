@@ -1,7 +1,7 @@
 //! Simple streaming tests that actually work
 
-use quiccrunch::simple_streaming::*;
-use quiccrunch::{QuicTransport, TlsConfig};
+use quiccrunch_core::simple_streaming::*;
+use quiccrunch_core::{QuicTransport, TlsConfig};
 use bytes::Bytes;
 use std::sync::Arc;
 use std::time::Duration;

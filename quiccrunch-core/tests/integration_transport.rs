@@ -1,7 +1,7 @@
 use test_log::test;
 use bytes::Bytes;
 use std::time::Duration;
-use quiccrunch::{QuicTransport, Transport};
+use quiccrunch_core::{QuicTransport, Transport};
 // Note: avoid direct quinn dependency in tests; keep a shadow struct for compile-time only values
 #[allow(dead_code)]
 struct TransportConfig;
@@ -12,7 +12,7 @@ impl VarInt { fn from_u32(v: u32) -> Self { VarInt(v) } }
 // TransportConfig translation is limited to what our API exposes
 use portpicker;
 use tokio::time::timeout;
-use quiccrunch::transport::{TransportSettings, CongestionController};
+use quiccrunch_core::transport::{TransportSettings, CongestionController};
 mod _helpers;
 
 mod certs;

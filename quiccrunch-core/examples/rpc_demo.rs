@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use quiccrunch::{
+use quiccrunch_core::{
     QuicTransport, TlsConfig,
     rpc::{RpcServer, RpcClient, RpcService, RpcContext, RpcResult, RpcError},
     rpc::discovery::{ServiceRegistry, DiscoveryClient, LoadBalancingStrategy},

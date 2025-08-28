@@ -19,7 +19,7 @@
 //! This example tests the tQUIC backend with comprehensive power monitoring,
 //! measuring power consumption, efficiency, and performance metrics.
 
-use quiccrunch::{QuicTransport, Transport, TlsConfig, power::PowerMonitor};
+use quiccrunch_core::{QuicTransport, Transport, TlsConfig, power::PowerMonitor};
 use std::error::Error;
 use std::time::{Duration, Instant};
 use tokio::time;

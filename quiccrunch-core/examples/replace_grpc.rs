@@ -1,4 +1,4 @@
-use quiccrunch::{QuicTransport, Transport, TlsConfig};
+use quiccrunch_core::{QuicTransport, Transport, TlsConfig};
 use std::error::Error;
 use bytes::Bytes;
 use tokio::sync::mpsc;

@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use quiccrunch::{QuicTransport, Transport, TlsConfig};
+use quiccrunch_core::{QuicTransport, Transport, TlsConfig};
 use bytes::Bytes;
 use tokio::runtime::Runtime;
 

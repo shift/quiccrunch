@@ -3,7 +3,7 @@
 /// This example demonstrates the performance improvements achieved by the
 /// integrated optimizations: memory pools, SIMD operations, and optimal configurations.
 
-use quiccrunch::{
+use quiccrunch_core::{
     QuicTransport, Transport, TlsConfig, Connection,
     enable_maximum_performance, optimizations::{CpuOptimizations, get_pool_stats}
 };

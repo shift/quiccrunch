@@ -1,4 +1,4 @@
-use quiccrunch::transport::TlsConfig;
+use quiccrunch_core::transport::TlsConfig;
 use rcgen::{CertificateParams, BasicConstraints, Certificate, IsCa, KeyPair, PKCS_ECDSA_P256_SHA256, SanType};
 use std::net::{Ipv4Addr, IpAddr};
 

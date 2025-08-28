@@ -3,7 +3,7 @@
 /// This benchmark compares performance with and without optimizations
 /// to quantify the actual performance improvements achieved.
 
-use quiccrunch::{
+use quiccrunch_core::{
     QuicTransport, Transport, TlsConfig,
     enable_maximum_performance, optimizations::{get_pool_stats, reset_pool_stats}
 };

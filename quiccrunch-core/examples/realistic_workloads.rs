@@ -3,7 +3,7 @@
 /// This test suite simulates real-world RPC patterns to validate
 /// the performance optimizations under realistic conditions.
 
-use quiccrunch::{
+use quiccrunch_core::{
     QuicTransport, Transport, TlsConfig, Connection,
     enable_maximum_performance, optimizations::{get_pool_stats, reset_pool_stats}
 };

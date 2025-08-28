@@ -16,7 +16,7 @@
 
 //! Simple QUIC server example using the high-level API
 
-use quiccrunch::{QuicServer, Result};
+use quiccrunch_core::{QuicServer, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

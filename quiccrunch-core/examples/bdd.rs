@@ -2,8 +2,8 @@ use bytes::Bytes;
 use cucumber::{given, when, then, World};
 use std::time::Duration;
 use tokio::time::timeout;
-use quiccrunch::{QuicTransport, Transport}; // Default backend may be tquic stubs; we force Quinn via features in CI
-use quiccrunch::transport::{TransportSettings, CongestionController};
+use quiccrunch_core::{QuicTransport, Transport}; // Default backend may be tquic stubs; we force Quinn via features in CI
+use quiccrunch_core::transport::{TransportSettings, CongestionController};
 
 mod certs;
 use certs::generate_node_cert;

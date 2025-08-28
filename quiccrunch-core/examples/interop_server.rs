@@ -1,8 +1,8 @@
 use std::time::Duration;
 use clap::Parser;
 use tokio::time::timeout;
-use quiccrunch::Transport; // bring trait into scope for listen()
-use quiccrunch::test_utils::certs; // use shared cert helper
+use quiccrunch_core::Transport; // bring trait into scope for listen()
+use quiccrunch_core::test_utils::certs; // use shared cert helper
 
 #[derive(Parser, Debug)]
 struct Args {

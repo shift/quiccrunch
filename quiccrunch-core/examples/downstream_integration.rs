@@ -17,7 +17,7 @@
 //! Complete example showing how downstream projects can integrate QuicCrunch
 //! This demonstrates various integration patterns and best practices
 
-use quiccrunch::{QuicClient, QuicServer, MessageHandler, run_server_with_handler, Result};
+use quiccrunch_core::{QuicClient, QuicServer, MessageHandler, run_server_with_handler, Result};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

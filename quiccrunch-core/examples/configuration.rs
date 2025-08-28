@@ -1,5 +1,5 @@
-use quiccrunch::{QuicTransport, Transport};
-use quiccrunch::transport::{TlsConfig, TransportSettings};
+use quiccrunch_core::{QuicTransport, Transport};
+use quiccrunch_core::transport::{TlsConfig, TransportSettings};
 use std::error::Error;
 use std::time::Duration;
 

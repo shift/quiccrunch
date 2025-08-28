@@ -13,7 +13,7 @@
 //! 
 //! ```rust
 //! use quiccrunch_macros::rpc_service;
-//! use quiccrunch::rpc::{RpcContext, RpcResult};
+//! use quiccrunch_core::rpc::{RpcContext, RpcResult};
 //! 
 //! #[rpc_service]
 //! trait Calculator {
@@ -63,7 +63,7 @@ mod utils;
 /// 
 /// ```rust
 /// use quiccrunch_macros::rpc_service;
-/// use quiccrunch::rpc::{RpcContext, RpcResult, RpcStreamSink, RpcStreamReceiver};
+/// use quiccrunch_core::rpc::{RpcContext, RpcResult, RpcStreamSink, RpcStreamReceiver};
 /// 
 /// #[rpc_service(name = "Calculator")]
 /// trait Calculator {
@@ -93,7 +93,7 @@ pub fn rpc_service(args: TokenStream, input: TokenStream) -> TokenStream {
 /// 
 /// ```rust
 /// use quiccrunch_macros::rpc_client;
-/// use quiccrunch::rpc::RpcClient;
+/// use quiccrunch_core::rpc::RpcClient;
 /// 
 /// #[rpc_client(service = "Calculator")]
 /// struct CalculatorClient {

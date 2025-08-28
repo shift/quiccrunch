@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use quiccrunch::{
+use quiccrunch_core::{
     QuicTransport,
     Transport,
     io_uring_optimized::IoUringOptimizedClient

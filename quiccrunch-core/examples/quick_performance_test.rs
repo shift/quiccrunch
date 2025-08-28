@@ -1,7 +1,7 @@
 /// Quick Performance Comparison Test
 /// Runs basic performance tests with and without optimizations
 
-use quiccrunch::{
+use quiccrunch_core::{
     QuicTransport, Transport, TlsConfig
 };
 use std::time::{Duration, Instant};

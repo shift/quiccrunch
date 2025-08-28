@@ -1,7 +1,7 @@
 /// Memory Pool Debug Test
 /// Tests memory pool behavior to understand cache miss issue
 
-use quiccrunch::optimizations::{PooledBuffer, get_pool_stats};
+use quiccrunch_core::optimizations::{PooledBuffer, get_pool_stats};
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

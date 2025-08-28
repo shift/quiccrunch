@@ -1,4 +1,4 @@
-use quiccrunch::power::PowerMonitor;
+use quiccrunch_core::power::PowerMonitor;
 use std::time::Duration;
 use tokio::time::sleep;
 

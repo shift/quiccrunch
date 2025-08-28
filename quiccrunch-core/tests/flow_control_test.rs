@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use quiccrunch::transport::{QuicTransport, Transport, TransportSettings};
-    use quiccrunch::test_utils::certs::generate_node_cert;
+    use quiccrunch_core::transport::{QuicTransport, Transport, TransportSettings};
+    use quiccrunch_core::test_utils::certs::generate_node_cert;
     use tokio::test;
     use bytes::Bytes;
     use std::time::Duration;

@@ -6,7 +6,7 @@ use bytes::Bytes;
 use serde::{Serialize, Deserialize};
 use async_trait::async_trait;
 
-use quiccrunch::{
+use quiccrunch_core::{
     rpc::{RpcService, RpcResult, RpcError, RpcContext},
     rpc_service, rpc_client, rpc_params, rpc_result,
 };

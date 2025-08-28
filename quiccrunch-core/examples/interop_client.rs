@@ -2,7 +2,7 @@ use std::time::Duration;
 use clap::Parser;
 use bytes::Bytes;
 use hdrhistogram::Histogram; // requires dev-dependency
-use quiccrunch::test_utils::certs;
+use quiccrunch_core::test_utils::certs;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -27,7 +27,7 @@ async fn main() -> quiccrunch::Result<()> {
     let adv = quiccrunch::config::QuicTransportSettings { backend: quiccrunch::config::Backend::Quinn, ..Default::default() };
     let transport = quiccrunch::transport::QuicTransport::with_settings_advanced(tls, adv)?;
 
-    use quiccrunch::Transport; // bring trait into scope
+    use quiccrunch_core::Transport; // bring trait into scope
     let conn = transport.connect(&args.addr).await?;
 
     let payload = Bytes::from(vec![0u8; args.size]);

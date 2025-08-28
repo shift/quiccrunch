@@ -10,11 +10,11 @@ use bytes::Bytes;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::StreamExt;
 
-use quiccrunch::rpc::{
+use quiccrunch_core::rpc::{
     RpcServer, RpcClient, StreamingRpcService, RpcContext, RpcStreamSink, 
     RpcStreamReceiver, StreamingRpcResult, RpcResult
 };
-use quiccrunch::{QuicStream, Connection};
+use quiccrunch_core::{QuicStream, Connection};
 
 /// Test streaming service that implements all streaming patterns
 struct TestStreamingService;

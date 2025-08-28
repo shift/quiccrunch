@@ -16,7 +16,7 @@
 
 //! Advanced QUIC client/server example with custom message handling
 
-use quiccrunch::{QuicClient, QuicServer, MessageHandler, Result};
+use quiccrunch_core::{QuicClient, QuicServer, MessageHandler, Result};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 

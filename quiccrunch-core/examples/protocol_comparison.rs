@@ -19,8 +19,8 @@
 //! This example demonstrates how to use QuicCrunch to compare QUIC and gRPC performance
 //! for the same workload patterns.
 
-use quiccrunch::{QuicTransport, Transport, TlsConfig};
-use quiccrunch::transport::grpc::GrpcTransport;
+use quiccrunch_core::{QuicTransport, Transport, TlsConfig};
+use quiccrunch_core::transport::grpc::GrpcTransport;
 use bytes::Bytes;
 use std::time::{Duration, Instant};
 use std::error::Error;

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use serde::{Serialize, Deserialize};
 use async_trait::async_trait;
 
-use quiccrunch::{
+use quiccrunch_core::{
     QuicTransport, TlsConfig, Transport,
     rpc::{RpcService, RpcServer, RpcClient, RpcContext, RpcResult, RpcError},
 };

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use quiccrunch::{
+use quiccrunch_core::{
     rpc::{RpcService, RpcServer, RpcClient, RpcContext, RpcResult, RpcError},
     QuicTransport, TlsConfig, Connection,
 };

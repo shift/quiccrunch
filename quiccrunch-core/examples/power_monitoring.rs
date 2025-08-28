@@ -1,4 +1,4 @@
-use quiccrunch::{power::PowerMonitor, Transport};
+use quiccrunch_core::{power::PowerMonitor, Transport};
 use std::time::Duration;
 use tokio::time;
 

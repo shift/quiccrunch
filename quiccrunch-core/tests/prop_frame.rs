@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use quiccrunch::schema::frame_capnp;
+    use quiccrunch_core::schema::frame_capnp;
     use proptest::prelude::*;
     use capnp::message::{Builder, HeapAllocator};
 

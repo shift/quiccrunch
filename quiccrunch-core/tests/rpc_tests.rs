@@ -7,7 +7,7 @@ use bytes::Bytes;
 use serde::{Serialize, Deserialize};
 use async_trait::async_trait;
 
-use quiccrunch::{
+use quiccrunch_core::{
     QuicTransport, TlsConfig,
     rpc::{RpcService, RpcServer, RpcClient, RpcContext, RpcResult, RpcError, PooledRpcClient},
     rpc::discovery::{ServiceRegistry, DiscoveryClient, LoadBalancingStrategy},
@@ -280,7 +280,7 @@ async fn test_service_discovery() {
 
 #[tokio::test]
 async fn test_load_balancing() {
-    use quiccrunch::rpc::discovery::LoadBalancer;
+    use quiccrunch_core::rpc::discovery::LoadBalancer;
     
     let endpoints = vec![
         quiccrunch::rpc::EndpointInfo {

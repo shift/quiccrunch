@@ -1,4 +1,4 @@
-use quiccrunch::{power::PowerMonitor, Transport};
+use quiccrunch_core::{power::PowerMonitor, Transport};
 use std::time::{Duration, Instant};
 
 async fn profile_operation<F, T>(

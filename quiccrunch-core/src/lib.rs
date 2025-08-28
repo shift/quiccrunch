@@ -32,7 +32,7 @@
 //!
 //! ### Basic benchmarking:
 //! ```rust,no_run
-//! use quiccrunch::{QuicClient, QuicServer};
+//! use quiccrunch_core::{QuicClient, QuicServer};
 //! 
 //! // Start with optimized defaults
 //! let client = QuicClient::new()?;
@@ -41,7 +41,7 @@
 //!
 //! ### High-performance configuration:
 //! ```rust,no_run
-//! use quiccrunch::optimizations::{CpuOptimizations, enable_high_performance};
+//! use quiccrunch_core::optimizations::{CpuOptimizations, enable_high_performance};
 //! 
 //! // Initialize all optimizations
 //! let cpu_opts = CpuOptimizations::detect();

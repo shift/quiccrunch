@@ -1,5 +1,5 @@
 use rcgen::{Certificate, CertificateParams, date_time_ymd, DistinguishedName, DnType, PKCS_ECDSA_P256_SHA256};
-use quiccrunch::TlsConfig;
+use quiccrunch_core::TlsConfig;
 
 
 pub fn generate_ca_cert() -> rustls::Certificate {

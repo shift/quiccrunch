@@ -1,6 +1,6 @@
-use quiccrunch::power::{PowerMonitor, PowerData};
-use quiccrunch::server::QuicServer;
-use quiccrunch::client::QuicClient;
+use quiccrunch_core::power::{PowerMonitor, PowerData};
+use quiccrunch_core::server::QuicServer;
+use quiccrunch_core::client::QuicClient;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use bytes::Bytes;

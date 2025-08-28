@@ -1,9 +1,9 @@
 /// Simple Memory and SIMD Performance Test
 /// Tests the core optimizations without complex networking
 
-use quiccrunch::optimizations::{PooledBuffer, get_pool_stats};
-use quiccrunch::simd;
-use quiccrunch::{QuicTransport, TlsConfig};
+use quiccrunch_core::optimizations::{PooledBuffer, get_pool_stats};
+use quiccrunch_core::simd;
+use quiccrunch_core::{QuicTransport, TlsConfig};
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

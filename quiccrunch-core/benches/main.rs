@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use quiccrunch::benches::{
+use quiccrunch_core::benches::{
     comparison::run_performance_matrix,
     report::TestReport,
 };

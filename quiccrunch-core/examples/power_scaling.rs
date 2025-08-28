@@ -1,5 +1,5 @@
-use quiccrunch::{power::PowerMonitor};
-use quiccrunch::transport::{QuicTransport, Transport, TransportSettings, TlsConfig};
+use quiccrunch_core::{power::PowerMonitor};
+use quiccrunch_core::transport::{QuicTransport, Transport, TransportSettings, TlsConfig};
 use std::time::Duration;
 use tokio::time;
 
