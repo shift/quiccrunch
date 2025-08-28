@@ -535,3 +535,594 @@ cargo run --example advanced_benchmark --features="ml-optimization,kernel-bypass
 - **Research-grade features** positioning for future standards
 
 **QuicCrunch has the potential to become the definitive high-performance QUIC implementation through systematic integration of its already-excellent optimization foundations.**
+
+---
+
+# 🚀 RPC FRAMEWORK COMPLETION ROADMAP
+
+> **Approach**: Behavior-Driven Development (BDD) with test-first implementation
+> **Strategy**: Complete each feature with passing tests before moving to next item  
+> **Commit Policy**: Commit after each green test to maintain working state
+
+## 🚨 CRITICAL: RPC Implementation Gaps Identified
+
+Based on comprehensive gap analysis, the RPC framework has excellent architecture but critical implementation gaps that prevent production use:
+
+### **Major Gaps Summary:**
+- ❌ **RPC Server Connection Handler Missing** - Core functionality incomplete
+- ❌ **Streaming RPC Partially Implemented** - Major feature gap
+- ❌ **Code Generation Macros Broken** - Developer experience poor
+- ❌ **Transport Integration Issues** - Reliability concerns
+- ❌ **Error Handling Incomplete** - Production readiness concerns
+
+---
+
+## 🎯 RPC PHASE 1: CORE INFRASTRUCTURE (Critical - Blocks Everything)
+
+### 1.1 Complete RPC Server Implementation 🚨
+**Priority**: P0 - Blocking all RPC functionality
+**Estimate**: 3-5 days
+**Files**: `src/rpc.rs`, `tests/rpc_tests.rs`
+
+#### BDD Scenarios:
+```gherkin
+Feature: RPC Server Connection Handling
+  
+  Scenario: Server accepts and processes RPC request
+    Given an RPC server is listening on port 8080
+    And a test service "Calculator" is registered  
+    When a client sends an "add" request with parameters {a: 5, b: 3}
+    Then the server should respond with result 8
+    And the connection should remain open for further requests
+
+  Scenario: Server handles malformed requests gracefully
+    Given an RPC server is running
+    When a client sends malformed Cap'n Proto data
+    Then the server should respond with InvalidRequest error
+    And the connection should remain stable
+
+  Scenario: Server routes requests to correct service
+    Given services "Calculator" and "UserService" are registered
+    When a client requests "Calculator.add"
+    Then only the Calculator service should receive the request
+    And UserService should not be invoked
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write BDD test for basic request handling
+- [ ] **Implement**: `RpcServer::handle_connection()` method (MISSING)
+- [ ] **Test**: Add malformed request handling test
+- [ ] **Implement**: Request parsing and validation
+- [ ] **Test**: Add service routing test  
+- [ ] **Implement**: Service dispatch logic
+- [ ] **Commit**: "feat: implement core RPC server connection handling"
+
+#### Definition of Done:
+- All BDD scenarios pass
+- Server can handle concurrent connections
+- Proper error responses for invalid requests
+- Clean connection cleanup on errors
+
+### 1.2 Fix Code Generation Macros 🚨
+**Priority**: P0 - Blocks developer experience
+**Estimate**: 2-3 days
+**Files**: `src/rpc/codegen.rs`
+
+#### BDD Scenarios:
+```gherkin
+Feature: RPC Service Code Generation
+
+  Scenario: Generate working service from macro
+    Given a service definition using rpc_service! macro
+    When the macro expands the service code
+    Then the generated service should compile without errors
+    And parameter serialization should work correctly
+    And method dispatch should route to correct functions
+
+  Scenario: Generated client calls work end-to-end
+    Given a service generated with rpc_service! macro
+    When a client generated with rpc_client! macro makes a call
+    Then the request should serialize correctly
+    And the response should deserialize correctly
+    And the correct service method should be invoked
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write test for basic macro expansion
+- [ ] **Fix**: Parameter extraction in `rpc_service!` macro (line 62 broken)
+- [ ] **Test**: Add serialization/deserialization test
+- [ ] **Implement**: Proper parameter and return type handling
+- [ ] **Test**: Add end-to-end macro test
+- [ ] **Implement**: Client macro improvements
+- [ ] **Commit**: "fix: complete rpc_service! macro implementation"
+
+### 1.3 Implement Timeout Handling 🔧
+**Priority**: P1 - Core reliability
+**Estimate**: 1-2 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: RPC Request Timeouts
+
+  Scenario: Request times out after specified duration
+    Given an RPC client with 100ms timeout
+    And a server with a slow service taking 200ms
+    When the client makes a request
+    Then the client should receive a Timeout error after 100ms
+    And the server should continue processing (fire-and-forget)
+
+  Scenario: Fast requests complete before timeout
+    Given an RPC client with 1000ms timeout
+    And a server with a fast service taking 50ms
+    When the client makes a request
+    Then the client should receive a successful response
+    And no timeout error should occur
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write timeout scenario test
+- [ ] **Implement**: Timeout handling in `RpcClient::call_with_context()`
+- [ ] **Test**: Add fast request test
+- [ ] **Implement**: Timeout cleanup and cancellation
+- [ ] **Commit**: "feat: implement RPC request timeouts"
+
+---
+
+## 🔄 RPC PHASE 2: STREAMING IMPLEMENTATION
+
+### 2.1 Complete Streaming RPC Infrastructure 🔄
+**Priority**: P1 - Major feature gap
+**Estimate**: 5-7 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: Streaming RPC Communication
+
+  Scenario: Server streaming - single request, multiple responses
+    Given a service with server streaming method "list_numbers" 
+    When a client requests numbers from 1 to 5
+    Then the server should stream 5 separate responses
+    And each response should contain one number in sequence
+    And the stream should end properly
+
+  Scenario: Client streaming - multiple requests, single response
+    Given a service with client streaming method "sum_numbers"
+    When a client streams numbers [1, 2, 3, 4, 5]
+    Then the server should receive all 5 numbers
+    And respond with sum 15 when client closes stream
+
+  Scenario: Bidirectional streaming
+    Given a service with bidirectional streaming method "chat"
+    When client sends "hello" and "world"
+    And server responds with "echo: hello" and "echo: world"
+    Then both sides should receive messages in order
+    And streams should remain open until explicitly closed
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write server streaming BDD test
+- [ ] **Implement**: Server streaming in `StreamingRpcService`
+- [ ] **Test**: Add client streaming BDD test
+- [ ] **Implement**: Client streaming support
+- [ ] **Test**: Add bidirectional streaming test
+- [ ] **Implement**: Bidirectional streaming coordination
+- [ ] **Test**: Add stream error handling test
+- [ ] **Implement**: Stream error recovery and cleanup
+- [ ] **Commit**: "feat: implement complete streaming RPC support"
+
+### 2.2 Stream Lifecycle Management 🔄
+**Priority**: P1 - Streaming reliability
+**Estimate**: 2-3 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: Stream Lifecycle Management
+
+  Scenario: Proper stream cleanup on client disconnect
+    Given an active bidirectional stream
+    When the client disconnects unexpectedly  
+    Then the server should detect the disconnect
+    And clean up stream resources
+    And notify the service implementation
+
+  Scenario: Stream sequence ordering
+    Given a server streaming scenario
+    When messages are sent out of network order
+    Then the client should receive messages in correct sequence
+    And missing messages should be detected and handled
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write stream cleanup test
+- [ ] **Implement**: Stream lifecycle tracking
+- [ ] **Test**: Add sequence ordering test
+- [ ] **Implement**: Message sequencing and ordering
+- [ ] **Commit**: "feat: implement stream lifecycle management"
+
+---
+
+## 🛠️ RPC PHASE 3: DEVELOPER EXPERIENCE
+
+### 3.1 Create Procedural Macro Crate 🛠️
+**Priority**: P2 - Developer productivity
+**Estimate**: 3-4 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: Procedural Macro Code Generation
+
+  Scenario: Derive RPC service from trait
+    Given a trait annotated with #[rpc_service]
+    When the procedural macro processes the trait
+    Then it should generate complete server implementation
+    And generate corresponding client stub
+    And handle all parameter types correctly
+
+  Scenario: Generate from Cap'n Proto schema
+    Given a Cap'n Proto service definition
+    When the build script runs code generation
+    Then it should create corresponding Rust traits
+    And implement serialization/deserialization
+    And generate documentation from schema comments
+```
+
+#### Implementation Steps:
+- [ ] **Setup**: Create `quiccrunch-codegen` crate
+- [ ] **Test**: Write basic procedural macro test
+- [ ] **Implement**: `#[rpc_service]` derive macro
+- [ ] **Test**: Add schema generation test
+- [ ] **Implement**: Cap'n Proto to Rust code generation
+- [ ] **Test**: Add documentation generation test
+- [ ] **Implement**: Documentation and attribute support
+- [ ] **Commit**: "feat: add procedural macro code generation"
+
+### 3.2 CLI Tools and Utilities 🛠️
+**Priority**: P2 - Developer productivity
+**Estimate**: 2-3 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: CLI Development Tools
+
+  Scenario: Test RPC service with CLI client
+    Given a running RPC server on localhost:8080
+    When I run "quiccrunch call Calculator.add --params {a:5,b:3}"
+    Then I should see "Result: 8" in the output
+    And the command should exit with code 0
+
+  Scenario: Generate service stub from schema
+    Given a Cap'n Proto schema file "calculator.capnp"
+    When I run "quiccrunch generate --input calculator.capnp --output src/"
+    Then service traits should be generated in src/
+    And client stubs should be generated
+    And the generated code should compile
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write CLI integration test
+- [ ] **Implement**: Basic CLI structure with clap
+- [ ] **Test**: Add service call test
+- [ ] **Implement**: `quiccrunch call` command
+- [ ] **Test**: Add code generation test
+- [ ] **Implement**: `quiccrunch generate` command
+- [ ] **Commit**: "feat: add CLI tools for development"
+
+---
+
+## 🛡️ RPC PHASE 4: PRODUCTION RELIABILITY
+
+### 4.1 Retry Logic and Circuit Breaker 🛡️
+**Priority**: P2 - Production reliability
+**Estimate**: 3-4 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: Automatic Retry and Circuit Breaking
+
+  Scenario: Automatic retry on transient failures
+    Given an RPC client configured with 3 retries
+    And a server that fails twice then succeeds
+    When the client makes a request
+    Then the client should retry the failed requests
+    And eventually receive a successful response
+    And total attempts should be 3
+
+  Scenario: Circuit breaker opens on repeated failures
+    Given an RPC client with circuit breaker (5 failures in 60s)
+    And a server that always fails
+    When the client makes 6 consecutive requests
+    Then the first 5 should be sent to server
+    And the 6th should fail immediately with CircuitOpen error
+    And no network request should be made for the 6th call
+
+  Scenario: Circuit breaker recovery
+    Given a circuit breaker in Open state
+    When the failure window expires
+    And the next request succeeds
+    Then the circuit breaker should transition to Closed state
+    And subsequent requests should flow normally
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write retry logic BDD test
+- [ ] **Implement**: Configurable retry mechanism
+- [ ] **Test**: Add circuit breaker test
+- [ ] **Implement**: Circuit breaker pattern
+- [ ] **Test**: Add recovery test
+- [ ] **Implement**: Circuit breaker recovery logic
+- [ ] **Commit**: "feat: implement retry logic and circuit breaker"
+
+### 4.2 Connection Health and Pooling 🛡️
+**Priority**: P2 - Scalability
+**Estimate**: 2-3 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: Connection Pool Health Management
+
+  Scenario: Unhealthy connections are removed from pool
+    Given a connection pool with 5 connections
+    And 2 connections become unhealthy
+    When a client requests a connection
+    Then only healthy connections should be returned
+    And unhealthy connections should be marked for removal
+
+  Scenario: Pool maintains minimum healthy connections
+    Given a connection pool configured for 3-10 connections
+    And current pool has 2 healthy connections
+    When pool health check runs
+    Then new connections should be created
+    And pool should reach minimum of 3 connections
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write connection health test
+- [ ] **Implement**: Connection health checking
+- [ ] **Test**: Add pool management test
+- [ ] **Implement**: Pool size management and connection replacement
+- [ ] **Commit**: "feat: implement connection pool health management"
+
+### 4.3 Authentication and Authorization 🛡️
+**Priority**: P2 - Security  
+**Estimate**: 4-5 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: RPC Authentication and Authorization
+
+  Scenario: JWT token authentication
+    Given an RPC server requiring JWT authentication
+    And a client with valid JWT token
+    When the client makes an authenticated request
+    Then the server should validate the JWT
+    And process the request normally
+
+  Scenario: Permission-based method access
+    Given a user with "read" permissions
+    And a service with methods requiring "write" permissions  
+    When the user calls a write method
+    Then the server should return PermissionDenied error
+    And the method should not be executed
+
+  Scenario: Service-level authentication
+    Given different services requiring different auth levels
+    When a client authenticates for "basic" level
+    Then they should access basic services
+    But be denied access to "admin" services
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write JWT authentication test
+- [ ] **Implement**: JWT token validation middleware
+- [ ] **Test**: Add permission-based access test
+- [ ] **Implement**: Role-based access control
+- [ ] **Test**: Add service-level auth test
+- [ ] **Implement**: Service authentication requirements
+- [ ] **Commit**: "feat: implement authentication and authorization"
+
+---
+
+## 🚀 RPC PHASE 5: ADVANCED FEATURES
+
+### 5.1 Interceptor/Middleware Framework 🚀
+**Priority**: P3 - Extensibility
+**Estimate**: 3-4 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: RPC Interceptor Framework
+
+  Scenario: Request logging interceptor
+    Given a logging interceptor is configured
+    When any RPC request is made
+    Then the request should be logged with timestamp
+    And response should be logged with duration
+    And errors should be logged with stack traces
+
+  Scenario: Multiple interceptors in chain
+    Given interceptors for [auth, logging, metrics]
+    When a request flows through the chain
+    Then auth should run first
+    Then logging should run second  
+    Then metrics should run third
+    And response should flow back through chain in reverse order
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write basic interceptor test
+- [ ] **Implement**: Interceptor trait and framework
+- [ ] **Test**: Add chaining test
+- [ ] **Implement**: Interceptor chain execution
+- [ ] **Test**: Add built-in interceptors test
+- [ ] **Implement**: Common interceptors (logging, metrics, auth)
+- [ ] **Commit**: "feat: implement interceptor/middleware framework"
+
+### 5.2 Service Reflection API 🚀
+**Priority**: P3 - Debugging and tooling
+**Estimate**: 2-3 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: Service Reflection and Introspection
+
+  Scenario: List available services
+    Given services "Calculator" and "UserService" are running
+    When a reflection request for service list is made
+    Then both services should be returned
+    And their methods should be listed
+    And parameter types should be described
+
+  Scenario: Get method documentation
+    Given a service method with documentation
+    When a reflection request for method info is made
+    Then parameter documentation should be returned
+    And return type information should be included
+    And example usage should be provided
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write service listing test
+- [ ] **Implement**: Service reflection API
+- [ ] **Test**: Add method documentation test
+- [ ] **Implement**: Method introspection and documentation
+- [ ] **Commit**: "feat: implement service reflection API"
+
+---
+
+## 📊 RPC PHASE 6: MONITORING AND OPERATIONS
+
+### 6.1 Enhanced Metrics and Tracing 📊
+**Priority**: P3 - Operations
+**Estimate**: 3-4 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: Distributed Tracing and Enhanced Metrics
+
+  Scenario: Distributed trace across service calls
+    Given service A calls service B which calls service C
+    When a request flows through all services
+    Then a single trace should connect all three calls
+    And each service should add its own span
+    And timing information should be preserved
+
+  Scenario: Custom metrics collection
+    Given a service that processes orders
+    When 100 orders are processed
+    Then order_count metric should increase by 100
+    And processing_time histogram should be updated
+    And service_health gauge should reflect current status
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write distributed tracing test
+- [ ] **Implement**: OpenTelemetry integration
+- [ ] **Test**: Add custom metrics test
+- [ ] **Implement**: Prometheus metrics export
+- [ ] **Commit**: "feat: implement enhanced metrics and tracing"
+
+### 6.2 Rate Limiting and DDoS Protection 📊
+**Priority**: P3 - Security/Reliability
+**Estimate**: 2-3 days
+
+#### BDD Scenarios:
+```gherkin
+Feature: Rate Limiting and DDoS Protection
+
+  Scenario: Per-client rate limiting
+    Given a rate limit of 10 requests per minute per client
+    When a client makes 15 requests in one minute
+    Then the first 10 requests should succeed
+    And the last 5 should be rejected with RateLimited error
+
+  Scenario: Service-level rate limiting
+    Given a service rate limit of 100 requests per minute
+    When multiple clients exceed the service limit
+    Then the service should reject excess requests
+    And maintain fair distribution among clients
+```
+
+#### Implementation Steps:
+- [ ] **Test**: Write rate limiting test
+- [ ] **Implement**: Token bucket rate limiter
+- [ ] **Test**: Add service-level limiting test
+- [ ] **Implement**: Service and global rate limiting
+- [ ] **Commit**: "feat: implement rate limiting and DDoS protection"
+
+---
+
+## 🧪 TESTING STRATEGY
+
+### BDD Test Structure
+Each feature should follow this test structure:
+
+```rust
+#[tokio::test]
+async fn test_feature_scenario() {
+    // Given - Setup test environment
+    let server = setup_test_server().await;
+    let client = setup_test_client().await;
+    
+    // When - Execute the action
+    let result = client.perform_action().await;
+    
+    // Then - Verify the outcome
+    assert_eq!(result.status, ExpectedStatus);
+    assert!(result.meets_criteria());
+}
+```
+
+### Commit Strategy
+- **Green Test Commits**: Commit immediately after each BDD scenario passes
+- **Commit Message Format**:
+  - `test: add BDD scenario for <feature>`
+  - `feat: implement <feature> to pass BDD tests`
+  - `fix: resolve failing test in <feature>`
+- **Branch Strategy**: Feature branches for each major component, merge after all BDD tests pass
+
+### Continuous Integration
+- All tests must pass before merging
+- Performance benchmarks should not regress
+- Code coverage should maintain >80%
+- Integration tests must pass against all QUIC backends
+
+---
+
+## 🎯 SUCCESS CRITERIA
+
+### RPC Phase 1 Complete When:
+- [ ] RPC server handles real client connections
+- [ ] Code generation macros work end-to-end
+- [ ] All existing tests pass
+- [ ] Basic timeout functionality works
+
+### RPC Phase 2 Complete When:
+- [ ] All three streaming patterns work (server, client, bidirectional)
+- [ ] Stream lifecycle management is robust
+- [ ] Streaming stress tests pass
+
+### Final RPC Success Criteria:
+- [ ] All BDD scenarios pass
+- [ ] Performance benchmarks show improvement over baseline
+- [ ] Documentation covers all public APIs
+- [ ] Examples demonstrate all major features
+- [ ] Ready for production use
+
+---
+
+## 🔄 INTEGRATION WITH PERFORMANCE ROADMAP
+
+The RPC framework completion should be integrated with the existing performance optimization roadmap:
+
+### **Phase Integration Strategy:**
+1. **Performance Phase 1** (QUIC optimizations) can proceed in parallel with **RPC Phase 1-2**
+2. **RPC Phase 3-4** should integrate with **Performance Phase 2** for optimal throughput
+3. **RPC Phase 5-6** aligns with **Performance Phase 3** for advanced features
+
+### **Combined Success Metrics:**
+- **Throughput**: 500+ MB/s with full RPC stack
+- **Latency**: <100μs for simple RPC calls
+- **Scaling**: Linear scaling across CPU cores
+- **Features**: Production-ready RPC framework with all modern patterns
+
+**Target**: Deliver both the fastest QUIC implementation AND the most feature-complete Rust RPC framework.

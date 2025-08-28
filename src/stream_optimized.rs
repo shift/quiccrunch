@@ -7,10 +7,9 @@
 /// - Zero-copy operations where possible
 
 use std::time::Duration;
-use bytes::{Bytes, BytesMut};
-use tokio::time;
+use bytes::Bytes;
 use crate::memory::{PooledBuffer, MessageBuffer};
-use crate::simd;
+// use crate::simd;
 use crate::lockfree::{StreamHandle, ConnectionHandle};
 
 /// Optimized QUIC stream with performance enhancements

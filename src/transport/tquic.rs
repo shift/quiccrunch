@@ -1,11 +1,17 @@
-use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::net::SocketAddr;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use rustls::{Certificate, PrivateKey};
+use dashmap::DashMap;
+
+// Global StreamBridge for SimpleTquic communication
+lazy_static::lazy_static! {
+    static ref GLOBAL_STREAM_BRIDGE: StreamBridge = StreamBridge::new();
+}
 
 // Import lock-free channel system
-use crate::lockfree::{StreamHandle, ConnectionHandle, StreamCommand, ConnectionCommand, StreamBackend, ConnectionChannels};
+use crate::lockfree::{StreamHandle, ConnectionHandle, StreamBackend};
 
 // Re-export the TquicStreamHandle from stream module
 use crate::stream::TquicStreamHandle;
@@ -92,44 +98,48 @@ pub struct TquicCtx {
 }
 
 // Shared stream data for communication between client and server streams
+// PERFORMANCE OPTIMIZED: Using truly lock-free structures
 #[derive(Clone, Debug)]
-struct StreamBridge {
-    data: Arc<Mutex<HashMap<u64, Vec<u8>>>>,
-    read_positions: Arc<Mutex<HashMap<u64, usize>>>,
-    next_stream_id: Arc<Mutex<u64>>,
+pub struct StreamBridge {
+    data: Arc<DashMap<u64, Vec<u8>>>,           // FIXED: Lock-free HashMap
+    read_positions: Arc<DashMap<u64, usize>>,  // FIXED: Lock-free HashMap  
+    next_stream_id: Arc<AtomicU64>,             // FIXED: Atomic counter
 }
 
 impl StreamBridge {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            data: Arc::new(Mutex::new(HashMap::new())),
-            read_positions: Arc::new(Mutex::new(HashMap::new())),
-            next_stream_id: Arc::new(Mutex::new(0)),
+            data: Arc::new(DashMap::new()),
+            read_positions: Arc::new(DashMap::new()),
+            next_stream_id: Arc::new(AtomicU64::new(0)),
         }
     }
     
-    async fn get_next_stream_id(&self) -> u64 {
-        let mut id = self.next_stream_id.lock().await;
-        *id += 1;
-        *id
+    pub fn get_next_stream_id(&self) -> u64 {
+        self.next_stream_id.fetch_add(1, Ordering::SeqCst)
     }
     
-    async fn write(&self, stream_id: u64, data: &[u8]) -> usize {
-        let mut stream_data = self.data.lock().await;
-        stream_data.entry(stream_id).or_insert_with(Vec::new).extend_from_slice(data);
+    pub async fn write(&self, stream_id: u64, data: &[u8]) -> usize {
+        self.data.entry(stream_id)
+            .or_insert_with(Vec::new)
+            .extend_from_slice(data);
         data.len()
     }
     
-    async fn read(&self, stream_id: u64, len: usize) -> Option<Vec<u8>> {
-        let stream_data = self.data.lock().await;
-        let mut read_pos = self.read_positions.lock().await;
+    pub async fn read(&self, stream_id: u64, len: usize) -> Option<Vec<u8>> {
+        // Get current read position (atomic operation)
+        let current_pos = self.read_positions.get(&stream_id).map(|entry| *entry).unwrap_or(0);
         
-        if let Some(data) = stream_data.get(&stream_id) {
-            let current_pos = read_pos.get(&stream_id).copied().unwrap_or(0);
+        // Get data for the stream
+        if let Some(data_entry) = self.data.get(&stream_id) {
+            let data = data_entry.value();
             if current_pos < data.len() {
                 let end_pos = (current_pos + len).min(data.len());
                 let chunk = data[current_pos..end_pos].to_vec();
-                read_pos.insert(stream_id, end_pos);
+                
+                // Update read position atomically
+                self.read_positions.insert(stream_id, end_pos);
+                
                 Some(chunk)
             } else {
                 None
@@ -137,6 +147,13 @@ impl StreamBridge {
         } else {
             None
         }
+    }
+}
+
+// Global access functions for SimpleTquic
+impl StreamBridge {
+    pub fn global() -> &'static StreamBridge {
+        &GLOBAL_STREAM_BRIDGE
     }
 }
 

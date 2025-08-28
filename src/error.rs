@@ -21,6 +21,12 @@ pub enum TransportError {
 
     #[error("Timeout error: {0}")]
     TimeoutError(#[from] tokio::time::error::Elapsed),
+    
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+    
+    #[error("Invalid message: {0}")]
+    InvalidMessage(String),
 }
 
 impl From<Box<dyn std::error::Error>> for TransportError {
@@ -32,6 +38,18 @@ impl From<Box<dyn std::error::Error>> for TransportError {
 impl From<serde_json::Error> for TransportError {
     fn from(err: serde_json::Error) -> Self {
         TransportError::ProtocolError(format!("JSON error: {}", err))
+    }
+}
+
+impl From<capnp::Error> for TransportError {
+    fn from(err: capnp::Error) -> Self {
+        TransportError::SerializationError(format!("Cap'n Proto error: {}", err))
+    }
+}
+
+impl From<capnp::NotInSchema> for TransportError {
+    fn from(err: capnp::NotInSchema) -> Self {
+        TransportError::SerializationError(format!("Cap'n Proto schema error: {}", err))
     }
 }
 

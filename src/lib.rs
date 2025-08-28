@@ -57,10 +57,12 @@ pub mod power;
 pub mod config;
 pub mod client;
 pub mod server;
+pub mod rpc;
 
 // Performance optimization modules
 pub mod memory;
 pub mod simd;
+// pub mod simple_streaming;
 pub mod lockfree;
 pub mod adaptive; // New adaptive optimization module
 #[cfg(feature = "io-uring-advanced")]
@@ -115,6 +117,7 @@ pub use stream::QuicStream;
 pub use metrics::{Metrics, Operation};
 pub use client::{QuicClient, QuicConnection};
 pub use server::{QuicServer, QuicListener, MessageHandler, EchoHandler, run_echo_server, run_server_with_handler};
+pub use rpc::{RpcService, RpcServer, RpcClient, PooledRpcClient, RpcConnectionPool, RpcError, RpcResult};
 
 // Re-export optimized components for high-performance use cases
 pub use stream_optimized::OptimizedQuicStream;
@@ -124,12 +127,30 @@ pub mod schema {
     pub mod frame_capnp {
         include!(concat!(env!("OUT_DIR"), "/schema/frame_capnp.rs"));
     }
+    
+    pub mod rpc_capnp {
+        include!(concat!(env!("OUT_DIR"), "/schema/rpc_capnp.rs"));
+    }
 
     // Re-export types
     pub use frame_capnp::{
         message_header,
         trace_context,
-
+    };
+    
+    pub use rpc_capnp::{
+        rpc_message,
+        rpc_request,
+        rpc_response,
+        rpc_error,
+        service_info,
+        endpoint,
+        method_info,
+        MessageType,
+        ErrorCode,
+        HealthStatus,
+        StreamingType,
+        LoadBalancingStrategy,
     };
 }
 
@@ -138,4 +159,19 @@ pub use schema::frame_capnp::{
     message_header,
     trace_context,
     frame,
+};
+
+pub use schema::rpc_capnp::{
+    rpc_message,
+    rpc_request,
+    rpc_response,
+    rpc_error,
+    service_info,
+    endpoint,
+    method_info,
+    MessageType,
+    ErrorCode,
+    HealthStatus,
+    StreamingType,
+    LoadBalancingStrategy,
 };

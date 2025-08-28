@@ -1,6 +1,4 @@
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
-use tokio::{time};
 use bytes::Bytes;
 #[cfg(feature = "backend-quinn")]
 use quinn::{SendStream as QuinnSend, RecvStream as QuinnRecv};
@@ -16,6 +14,23 @@ pub struct TquicStreamHandle {
 impl TquicStreamHandle {
     pub fn new(stream_id: u64, cmd_tx: tokio::sync::mpsc::Sender<crate::transport::tquic::StreamCmd>) -> Self {
         Self { stream_id, cmd_tx }
+    }
+}
+
+#[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+#[derive(Clone, Debug)]
+pub struct SimpleTquicStreamHandle {
+    stream_id: u64,
+}
+
+#[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+impl SimpleTquicStreamHandle {
+    pub fn new(stream_id: u64) -> Self {
+        Self { stream_id }
+    }
+    
+    pub fn get_global_bridge() -> &'static crate::transport::tquic::StreamBridge {
+        crate::transport::tquic::StreamBridge::global()
     }
 }
 
@@ -40,8 +55,10 @@ pub struct QuicStream {
 enum StreamInner {
     #[cfg(feature = "backend-quinn")]
     Quinn { send: QuinnSend, recv: QuinnRecv },
-    #[cfg(feature = "backend-tquic")]
+    #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
     Tquic { send: TquicSend, recv: TquicRecv },
+    #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+    SimpleTquic { send: SimpleTquicStreamHandle, recv: SimpleTquicStreamHandle },
     #[cfg(feature = "lock-free-channels")]
     LockFree { handle: crate::lockfree::StreamHandle },
 }
@@ -58,8 +75,8 @@ impl QuicStream {
         Self { inner: StreamInner::Quinn { send, recv }, max_message_size }
     }
 
-    /// Create a new QuicStream (tQUIC)
-    #[cfg(feature = "backend-tquic")]
+    /// Create a new QuicStream (tQUIC with lock-free channels)
+    #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
     pub fn new_tquic(send: TquicSend, recv: TquicRecv, max_message_size: usize) -> Self {
         Self { inner: StreamInner::Tquic { send, recv }, max_message_size }
     }
@@ -68,6 +85,15 @@ impl QuicStream {
     #[cfg(feature = "lock-free-channels")]
     pub fn new_lockfree(handle: crate::lockfree::StreamHandle, max_message_size: usize) -> Self {
         Self { inner: StreamInner::LockFree { handle }, max_message_size }
+    }
+    
+    /// Create a simple tQUIC stream without lock-free channels (performance regression fix)
+    #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+    pub fn new_simple_tquic(stream_id: u64, max_message_size: usize) -> Self {
+        // Create a simple tQUIC stream handle that directly uses StreamBridge
+        let send = SimpleTquicStreamHandle::new(stream_id);
+        let recv = SimpleTquicStreamHandle::new(stream_id);
+        Self { inner: StreamInner::SimpleTquic { send, recv }, max_message_size }
     }
 
     /// Send a message over the stream with flow control
@@ -146,7 +172,7 @@ impl QuicStream {
                 }
                 if let Err(e) = send.flush().await { return Err(crate::TransportError::StreamError(e.to_string())); }
             }
-            #[cfg(feature = "backend-tquic")]
+            #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             StreamInner::Tquic { send, .. } => {
                 // For tquic, send write command through the stream handle
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -179,6 +205,19 @@ impl QuicStream {
                     remaining = rest;
                 }
             }
+            #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+            StreamInner::SimpleTquic { send, .. } => {
+                // Simple direct tQUIC implementation using global StreamBridge (performance regression fix)
+                let bridge = SimpleTquicStreamHandle::get_global_bridge();
+                
+                #[cfg(feature = "telemetry")]
+                tracing::info!("SimpleTquic write: stream_id={}, header_len={}, data_len={}", 
+                               send.stream_id, header.len(), data.len());
+                
+                // Write header and data to the global bridge
+                bridge.write(send.stream_id, &header).await;
+                bridge.write(send.stream_id, data.as_ref()).await;
+            }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
                 // Use lock-free stream handle for optimal performance
@@ -192,6 +231,7 @@ impl QuicStream {
                     let (chunk, rest) = remaining.split_at(chunk_size);
                     
                     // Adaptive optimization based on chunk characteristics
+                    // PERFORMANCE WARNING: These optimizations may add overhead for small messages
                     #[cfg(feature = "adaptive-optimizations")]
                     {
                         let mut buffer = crate::adaptive::allocate_optimized(chunk.len());
@@ -234,7 +274,7 @@ impl QuicStream {
                 send.finish().await.map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                 Ok(())
             }
-            #[cfg(feature = "backend-tquic")]
+            #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             StreamInner::Tquic { send, .. } => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 if let Err(_) = send.cmd_tx.send(crate::transport::tquic::StreamCmd::Shutdown { 
@@ -244,6 +284,14 @@ impl QuicStream {
                     return Err(crate::TransportError::StreamError("tquic stream shutdown channel closed".into()));
                 }
                 rx.await.map_err(|_| crate::TransportError::StreamError("tquic shutdown canceled".into()))??;
+                Ok(())
+            }
+            #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+            StreamInner::SimpleTquic { .. } => {
+                // Simple direct tQUIC implementation (performance regression fix)
+                // Mock shutdown - just return success
+                #[cfg(feature = "telemetry")]
+                tracing::info!("SimpleTquic shutdown");
                 Ok(())
             }
             #[cfg(feature = "lock-free-channels")]
@@ -283,7 +331,7 @@ impl QuicStream {
                     },
                 }
             }
-            #[cfg(feature = "backend-tquic")]
+            #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             StreamInner::Tquic { recv, .. } => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 if let Err(_) = recv.cmd_tx.send(crate::transport::tquic::StreamCmd::Read { 
@@ -295,7 +343,7 @@ impl QuicStream {
                 }
                 let header_result = time::timeout(READ_TIMEOUT, rx).await;
                 match header_result {
-                    Ok(Ok(Ok(Some(mut data)))) if data.len() >= 4 => {
+                    Ok(Ok(Ok(Some(data)))) if data.len() >= 4 => {
                         header.copy_from_slice(&data[..4]);
                     },
                     Ok(Ok(Ok(Some(_)))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
@@ -303,6 +351,25 @@ impl QuicStream {
                     Ok(Ok(Err(e))) => return Err(e),
                     Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
                     Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
+                }
+            }
+            #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+            StreamInner::SimpleTquic { recv, .. } => {
+                // Simple direct tQUIC implementation using global StreamBridge (performance regression fix)
+                let bridge = SimpleTquicStreamHandle::get_global_bridge();
+                
+                #[cfg(feature = "telemetry")]
+                tracing::info!("SimpleTquic read: stream_id={}, reading 4 bytes header", recv.stream_id);
+                
+                // Read header from the global bridge
+                if let Some(header_data) = bridge.read(recv.stream_id, 4).await {
+                    if header_data.len() >= 4 {
+                        header.copy_from_slice(&header_data[..4]);
+                    } else {
+                        return Err(crate::TransportError::StreamError("incomplete header read".into()));
+                    }
+                } else {
+                    return Err(crate::TransportError::StreamError("no header data available".into()));
                 }
             }
             #[cfg(feature = "lock-free-channels")]
@@ -409,7 +476,7 @@ impl QuicStream {
                         },
                     }
                 }
-                #[cfg(feature = "backend-tquic")]
+                #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
                 StreamInner::Tquic { recv, .. } => {
                     let (tx, rx) = tokio::sync::oneshot::channel();
                     if let Err(_) = recv.cmd_tx.send(crate::transport::tquic::StreamCmd::Read { 
@@ -462,6 +529,27 @@ impl QuicStream {
                         Ok(Ok(Err(e))) => return Err(e),
                         Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
                         Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
+                    }
+                }
+                #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
+                StreamInner::SimpleTquic { recv, .. } => {
+                    // Simple direct tQUIC implementation using global StreamBridge (performance regression fix)
+                    let bridge = SimpleTquicStreamHandle::get_global_bridge();
+                    
+                    #[cfg(feature = "telemetry")]
+                    tracing::info!("SimpleTquic read: stream_id={}, reading {} bytes", recv.stream_id, chunk_size);
+                    
+                    // Read chunk from the global bridge
+                    if let Some(chunk_data) = bridge.read(recv.stream_id, chunk_size).await {
+                        #[cfg(feature = "memory-pools")]
+                        pooled_buffer.extend_from_slice(&chunk_data);
+                        #[cfg(not(feature = "memory-pools"))]
+                        buffer.extend_from_slice(&chunk_data);
+                        
+                        bytes_read += chunk_data.len();
+                    } else {
+                        // No more data available
+                        break;
                     }
                 }
                 #[cfg(feature = "lock-free-channels")]

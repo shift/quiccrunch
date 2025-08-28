@@ -1,8 +1,8 @@
 /// Adaptive optimization strategy for QuicCrunch
 /// Automatically selects the best optimization approach based on workload characteristics
 
-use crate::optimizations::{PooledBuffer, get_pool_stats};
-use crate::simd;
+use crate::memory::{PooledBuffer, get_pool_stats};
+// use crate::simd;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OptimizationStrategy {

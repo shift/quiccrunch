@@ -6,7 +6,7 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use crossbeam_channel::{bounded, unbounded, Sender, Receiver, TryRecvError};
+use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError};
 use std::collections::HashMap;
 use tokio::sync::{oneshot, Mutex};
 use bytes::Bytes;
@@ -198,7 +198,8 @@ pub struct ConnectionHandle {
     read_tx: Sender<StreamCommand>,
     close_tx: Sender<StreamCommand>,
     
-    // Per-connection stream registry
+    // Per-connection stream registry - TODO: Replace Mutex with lock-free alternative
+    // PERFORMANCE CRITICAL: This Mutex negates "lock-free" benefits!
     streams: Arc<Mutex<HashMap<u64, StreamHandle>>>,
     stats: Arc<ConnectionStats>,
 }

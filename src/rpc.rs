@@ -127,6 +127,7 @@ pub struct RpcContext {
     pub request_id: RequestId,
     pub metadata: HashMap<String, String>,
     pub start_time: SystemTime,
+    pub timeout: Option<Duration>,
 }
 
 impl RpcContext {
@@ -137,11 +138,17 @@ impl RpcContext {
             request_id: 0,
             metadata: HashMap::new(),
             start_time: SystemTime::now(),
+            timeout: None,
         }
     }
     
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
+        self
+    }
+    
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
         self
     }
     
@@ -502,15 +509,28 @@ impl RpcClient {
         let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
         context.request_id = request_id;
         
-        // Create Cap'n Proto request
-        let request_data = self.create_request(context, params)?;
+        // Create the actual call future
+        let call_future = async {
+            // Create Cap'n Proto request
+            let request_data = self.create_request(context, params)?;
+            
+            // Send request and receive response
+            let mut stream = self.connection.open_bi().await?;
+            stream.send_message(request_data).await?;
+            
+            let response_data = stream.receive_message().await?;
+            self.parse_response(response_data)
+        };
         
-        // Send request and receive response
-        let mut stream = self.connection.open_bi().await?;
-        stream.send_message(request_data).await?;
-        
-        let response_data = stream.receive_message().await?;
-        self.parse_response(response_data)
+        // Apply timeout if specified
+        if let Some(timeout_duration) = context.timeout {
+            match tokio::time::timeout(timeout_duration, call_future).await {
+                Ok(result) => result,
+                Err(_) => Err(RpcError::Timeout),
+            }
+        } else {
+            call_future.await
+        }
     }
     
     /// Simple call with service and method names
