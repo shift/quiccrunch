@@ -145,34 +145,6 @@ macro_rules! rpc_service_extract_params {
     };
 }
 
-/// Convenience macro for creating typed RPC parameters
-#[macro_export]
-macro_rules! rpc_params {
-    ($($key:ident: $value:expr),* $(,)?) => {
-        {
-            let mut params = std::collections::HashMap::new();
-            $(
-                params.insert(stringify!($key).to_string(), serde_json::to_value($value).unwrap());
-            )*
-            bytes::Bytes::from(serde_json::to_string(&params).unwrap())
-        }
-    };
-}
-
-/// Convenience macro for extracting typed RPC results
-#[macro_export]
-macro_rules! rpc_result {
-    ($result:expr, $type:ty) => {
-        {
-            let value: serde_json::Value = serde_json::from_slice(&$result)?;
-            serde_json::from_value::<$type>(value)
-                .map_err(|e| crate::rpc::RpcError::SerializationError(e.to_string()))
-        }
-    };
-}
-    };
-}
-
 /// Macro to define an RPC client for an existing service
 #[macro_export]
 macro_rules! rpc_client {
