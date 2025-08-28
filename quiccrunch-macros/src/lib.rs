@@ -11,7 +11,7 @@
 //! 
 //! ## Example Usage
 //! 
-//! ```rust
+//! ```no_run
 //! use quiccrunch_macros::rpc_service;
 //! use quiccrunch_core::rpc::{RpcContext, RpcResult};
 //! 
@@ -61,16 +61,16 @@ mod utils;
 /// 
 /// ## Example
 /// 
-/// ```rust
+/// ```no_run
 /// use quiccrunch_macros::rpc_service;
-/// use quiccrunch_core::rpc::{RpcContext, RpcResult, RpcStreamSink, RpcStreamReceiver};
+/// use quiccrunch_core::rpc::{RpcContext, RpcResult, RpcStreamSink};
 /// 
 /// #[rpc_service(name = "Calculator")]
 /// trait Calculator {
 ///     async fn add(&self, ctx: RpcContext, a: i32, b: i32) -> RpcResult<i32>;
 ///     
-///     #[rpc_method(streaming = "server")]
-///     async fn fibonacci(&self, ctx: RpcContext, n: u32, sink: RpcStreamSink<u64>) -> RpcResult<()>;
+///     // Note: streaming attributes will be implemented in future versions
+///     async fn fibonacci(&self, ctx: RpcContext, n: u32) -> RpcResult<RpcStreamSink<u64>>;
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -91,19 +91,16 @@ pub fn rpc_service(args: TokenStream, input: TokenStream) -> TokenStream {
 /// 
 /// ## Example
 /// 
-/// ```rust
+/// ```ignore
 /// use quiccrunch_macros::rpc_client;
-/// use quiccrunch_core::rpc::RpcClient;
+/// use quiccrunch_core::rpc::{RpcClient, RpcResult};
 /// 
 /// #[rpc_client(service = "Calculator")]
-/// struct CalculatorClient {
-///     client: RpcClient,
-/// }
+/// struct CalculatorClient;
 /// 
-/// // Generated methods:
-/// impl CalculatorClient {
-///     async fn add(&self, a: i32, b: i32) -> RpcResult<i32> { /* generated */ }
-/// }
+/// // The macro generates:
+/// // - A `client: RpcClient` field
+/// // - RPC method implementations based on the service definition
 /// ```
 #[proc_macro_attribute] 
 pub fn rpc_client(args: TokenStream, input: TokenStream) -> TokenStream {

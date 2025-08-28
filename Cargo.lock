@@ -2394,6 +2394,7 @@ dependencies = [
  "capnp",
  "darling",
  "proc-macro2",
+ "quiccrunch-core",
  "quote",
  "syn 2.0.106",
  "tokio",
