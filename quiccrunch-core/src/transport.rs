@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 use rustls::{Certificate, PrivateKey};
@@ -166,7 +166,7 @@ impl BackendImpl {
                 {
                     tracing::warn!("backend-tquic disabled; falling back to Quinn");
                     let q = Self::map_advanced_to_quinn(&adv);
-                    Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, q)?))
+                    return Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, q)?));
                 }
             }
             crate::config::Backend::Quinn => {
@@ -196,13 +196,22 @@ impl BackendImpl {
                 }
                 #[cfg(not(feature = "io-uring-advanced"))]
                 {
-                    tracing::warn!("io-uring-advanced disabled; falling back to tQUIC");
-                    let tls = crate::transport::tquic::TlsConfig {
-                        cert: tls_config.cert.clone(),
-                        key: tls_config.key.clone(),
-                        ca_cert: tls_config.ca_cert.clone(),
-                    };
-                    Ok(BackendImpl::Tquic(crate::transport::tquic::TquicCtx::new(tls, adv)?))
+                    #[cfg(feature = "backend-tquic")]
+                    {
+                        tracing::warn!("io-uring-advanced disabled; falling back to tQUIC");
+                        let tls = crate::transport::tquic::TlsConfig {
+                            cert: tls_config.cert.clone(),
+                            key: tls_config.key.clone(),
+                            ca_cert: tls_config.ca_cert.clone(),
+                        };
+                        Ok(BackendImpl::Tquic(crate::transport::tquic::TquicCtx::new(tls, adv)?))
+                    }
+                    #[cfg(not(feature = "backend-tquic"))]
+                    {
+                        tracing::warn!("io-uring-advanced disabled; falling back to Quinn");
+                        let q = Self::map_advanced_to_quinn(&adv);
+                        Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, q)?))
+                    }
                 }
             }
         }

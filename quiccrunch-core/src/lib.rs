@@ -51,6 +51,7 @@
 mod error;
 pub mod transport;
 mod stream;
+mod stream_splitter; // Stream splitting for concurrent RPC operations
 pub mod test_utils;
 pub mod metrics;
 pub mod power;
@@ -114,6 +115,7 @@ pub mod optimizations {
 pub use error::{Result, TransportError};
 pub use transport::{QuicTransport, Transport, Connection, TlsConfig, Incoming};
 pub use stream::QuicStream;
+pub use stream_splitter::{SplitStream, StreamReader, StreamWriter, Splittable}; // Stream splitting support
 pub use metrics::{Metrics, Operation};
 pub use client::{QuicClient, QuicConnection};
 pub use server::{QuicServer, QuicListener, MessageHandler, EchoHandler, run_echo_server, run_server_with_handler};

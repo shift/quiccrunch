@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 use bytes::Bytes;
+use tokio::time;
 use crate::memory::{PooledBuffer, MessageBuffer};
 // use crate::simd;
 use crate::lockfree::{StreamHandle, ConnectionHandle};
@@ -294,7 +295,7 @@ impl OptimizedQuicStream {
                         .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                 } else {
                     buffer.write_data(&data);
-                    let message_bytes = buffer.into_bytes();
+                    let message_bytes = std::mem::replace(buffer, MessageBuffer::with_capacity(self.config.chunk_size)).into_bytes();
                     send.write_all(&message_bytes).await
                         .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                 }

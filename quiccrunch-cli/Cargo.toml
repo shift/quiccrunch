@@ -1,0 +1,45 @@
+[package]
+name = "quiccrunch-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["QuicCrunch Contributors"]
+description = "Command-line tools for QuicCrunch RPC framework"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/shift/quickcrunch"
+documentation = "https://docs.rs/quiccrunch-cli"
+readme = "README.md"
+keywords = ["quic", "rpc", "cli", "codegen", "testing"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "quiccrunch"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+clap = { version = "4.0", features = ["derive"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# CLI-specific dependencies
+anyhow = "1.0"
+colored = "2.0"
+indicatif = "0.17"
+inquire = "0.7"
+tabled = "0.14"
+
+# QuicCrunch dependencies
+quiccrunch-core = { path = "../quiccrunch-core" }
+quiccrunch-macros = { path = "../quiccrunch-macros" }
+
+# Code generation dependencies
+capnp = { workspace = true }
+handlebars = "4.0"
+walkdir = "2.4"
+
+[dev-dependencies]
+tempfile = "3.0"
+assert_cmd = "2.0"
+predicates = "3.0"

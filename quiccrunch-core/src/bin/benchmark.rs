@@ -15,9 +15,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use clap::{Parser, Subcommand};
-use quiccrunch::{QuicTransport, Transport, TlsConfig};
+use quiccrunch_core::{QuicTransport, Transport, TlsConfig};
 #[cfg(feature = "grpc-comparison")]
-use quiccrunch::transport::grpc::GrpcTransport;
+use quiccrunch_core::transport::grpc::GrpcTransport;
 use bytes::Bytes;
 use std::time::{Duration, Instant};
 use std::error::Error;

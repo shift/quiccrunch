@@ -1,0 +1,195 @@
+[package]
+name = "quiccrunch-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["QuicCrunch Contributors"]
+description = "High-performance QUIC benchmarking framework with Cap'n Proto serialization and dual backend support"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/shift/quickcrunch"
+homepage = "https://github.com/shift/quickcrunch"
+documentation = "https://docs.rs/quiccrunch"
+readme = "README.md"
+keywords = ["quic", "capnproto", "benchmarking", "networking", "performance"]
+categories = ["network-programming", "development-tools::profiling", "api-bindings"]
+exclude = [
+    "backend_comparison/",
+    "json_test/", 
+    "test_results/",
+    "profiling_results/",
+    "*.log",
+    "tquic_*",
+    "backend_comparison_summary.txt"
+]
+
+[dependencies]
+quinn = { version = "0.10.2", optional = true }
+tquic = { version = "1.6.0", optional = true }
+tempfile = "3"
+socket2 = { version = "0.5", features = ["all"] }
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "svg_backend", "line_series"], optional = true }
+tokio = { version = "1.35.1", features = ["full"] }
+capnp = "0.18.10"
+futures = "0.3.30"
+bytes = "1.5.0"
+thiserror = "1.0.56"
+tracing = "0.1.40"
+async-trait = "0.1.77"
+rcgen = "0.12.1"
+rustls = { version = "0.21.10", features = ["dangerous_configuration"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+parking_lot = "0.12"
+lazy_static = "1.4"
+paste = "1.0"
+clap = { version = "4", features = ["derive"] }
+hdrhistogram = "7"
+chrono = { version = "0.4", features = ["serde"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+tokio-stream = { version = "0.1.14", optional = true }          # Async streams for RPC streaming support
+quiccrunch-macros = { path = "../quiccrunch-macros", optional = true }  # Procedural macros for RPC
+
+# PERFORMANCE OPTIMIZATION DEPENDENCIES
+crossbeam-channel = "0.5"        # Lock-free channels
+once_cell = "1.19"               # Lazy static initialization  
+num_cpus = "1.16"                # CPU detection
+libc = "0.2"                     # System calls for optimizations
+rand = "0.8"                     # Random number generation for load balancing
+io-uring = { version = "0.6", optional = true }  # Advanced I/O
+dashmap = "6.0"                  # Lock-free HashMap alternative
+
+# gRPC dependencies for comparison benchmarking
+tonic = { version = "0.10", optional = true }
+prost = { version = "0.12", optional = true }
+tower = { version = "0.4", optional = true }
+opentelemetry = { version = "0.21", optional = true }
+opentelemetry_sdk = { version = "0.21", optional = true }
+opentelemetry-semantic-conventions = { version = "0.13", optional = true }
+opentelemetry-http = { version = "0.10", optional = true }
+opentelemetry-jaeger = { version = "0.20", optional = true }
+tracing-opentelemetry = { version = "0.22", optional = true }
+
+# Dependencies for examples
+env_logger = "0.11"
+
+[dev-dependencies.opentelemetry]
+version = "0.21"
+
+[dev-dependencies.opentelemetry_sdk]
+version = "0.21"
+features = ["rt-tokio"]
+
+[dev-dependencies.opentelemetry-jaeger]
+version = "0.20"
+
+[dev-dependencies.tracing-opentelemetry]
+version = "0.22"
+
+[dev-dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter"]
+
+[dev-dependencies]
+ tokio-test = "0.4.3"
+ anyhow = "1.0"
+ portpicker = "0.1"
+ fastrand = "1.9"
+ criterion = { version = "0.5.1", features = ["html_reports"] }
+ proptest = "1.4"
+ test-log = "0.2"
+ tracing-test = "0.2"
+ rand = "0.8"
+ hex = "0.4"
+ plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "svg_backend", "line_series"] }
+ stats_alloc = "0.1"
+ parking_lot = "0.12"
+ chrono = "0.4"
+ glob = "0.3"
+ cucumber = { version = "0.21", features = ["macros"] }
+ which = "6"
+ nix = { version = "0.29", default-features = false, features = ["user"] }
+ clap = { version = "4", features = ["derive"] }
+ hdrhistogram = "7"
+ # gRPC dependencies for comparison benchmarking
+ tonic = "0.10"
+ prost = "0.12"
+ tower = "0.4"
+ tokio-stream = "0.1"
+ futures = "0.3"
+
+
+[build-dependencies]
+capnpc = "0.18.0"
+tonic-build = "0.10"
+
+[[bin]]
+name = "benchmark"
+path = "src/bin/benchmark.rs"
+
+[[bench]]
+name = "transport"
+harness = false
+
+[[bench]]
+name = "patterns"
+harness = false
+
+[[bench]]
+name = "profiles"
+harness = false
+
+[[bench]]
+name = "io_uring_comparison"
+harness = false
+
+[features]
+# Backends map to optional deps (mutually exclusive at compile time)
+backend-quinn = ["dep:quinn"]
+backend-tquic = ["dep:tquic"]
+# Keep placeholder for a potential third backend
+backend-alt = []
+
+# Comparison feature for gRPC
+grpc-comparison = ["dep:tonic", "dep:prost", "dep:tower", "dep:tokio-stream"]
+
+# Default features - tQUIC backend with basic optimizations only (performance regression fix)
+default = ["tls", "visualization", "backend-tquic", "dep:tokio-stream"]
+
+# Opt-in tests that require elevated privileges or special hardware
+scaling-tests = []
+
+# PERFORMANCE OPTIMIZATION FEATURES
+memory-pools = []                # Enable memory pooling optimizations
+simd-optimizations = []          # Enable SIMD operations
+lock-free-channels = []          # Enable lock-free channel optimizations
+adaptive-optimizations = []      # Enable adaptive optimization strategy selection
+io-uring-advanced = ["dep:io-uring"]  # Enable advanced io_uring transport
+
+# Misc feature flags
+telemetry = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-semantic-conventions",
+    "dep:opentelemetry-http",
+    "dep:opentelemetry-jaeger",
+    "dep:tracing-opentelemetry",
+    "dep:tracing-subscriber"
+]
+
+tls = []
+visualization = ["plotters"]
+
+# PERFORMANCE OPTIMIZATION PROFILES
+[profile.release]
+opt-level = 3                    # Maximum optimization
+lto = true                       # Link-time optimization
+codegen-units = 1               # Better optimization (slower compile)
+panic = "abort"                  # Smaller binaries, faster panics
+overflow-checks = false          # Disable overflow checks in release
+
+[profile.bench]
+inherits = "release"
+debug = true                     # Keep debug info for profiling
+
+[profile.dev]
+opt-level = 1                    # Some optimization for development
+overflow-checks = true           # Keep safety checks in development
