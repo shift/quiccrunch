@@ -28,6 +28,12 @@ callgrind.out.*
 perf.data*
 flamegraph*.svg
 
+# Large test result files and profiling data
+test_results/
+performance_investigation/
+on/
+target_baseline/
+
 # Certificate files (for security)
 *.pem
 *.key
