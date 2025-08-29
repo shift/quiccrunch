@@ -1,16 +1,26 @@
-# PERFORMANCE OPTIMIZATION BUILD FLAGS
+# OPTIMIZED BUILD CONFIGURATION FOR BETTER CACHING
 [build]
+# Enable incremental compilation for faster rebuilds
+incremental = true
+# Set consistent target directory
+target-dir = "target"
+
+# Base rustflags applied to all builds
 rustflags = [
     "-C", "target-cpu=native",     # Use all available CPU features
-    "-C", "opt-level=3",           # Maximum optimization
-    "-C", "lto=fat",               # Full link-time optimization
-    "-C", "codegen-units=1",       # Better optimization
-    "-C", "panic=abort",           # Faster panic handling
+    "-C", "target-feature=+avx2,+fma,+sse4.2",  # Enable SIMD features
 ]
 
-# Additional optimization flags for specific targets
+# Development-optimized flags (fast compilation, good caching)
 [target.x86_64-unknown-linux-gnu]
 rustflags = [
     "-C", "target-cpu=native",
-    "-C", "target-feature=+avx2,+fma,+sse4.2",  # Enable SIMD features
+    "-C", "target-feature=+avx2,+fma,+sse4.2",
+    "-C", "codegen-units=16",      # More units for parallel dev builds
+    "-C", "incremental=on",        # Enable incremental compilation
 ]
+
+# Environment variables for consistent builds
+[env]
+CARGO_INCREMENTAL = "1"
+CARGO_FEATURE_RESOLUTION = "2"

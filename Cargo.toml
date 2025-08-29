@@ -3,6 +3,9 @@ members = [
     "quiccrunch-core",
     "quiccrunch-macros",
     "quiccrunch-cli",
+    "quiccrunch-ffi",
+    # "quiccrunch-security", # Temporarily disabled due to missing dependencies
+    "tests/load-testing",
 ]
 resolver = "2"
 
@@ -28,18 +31,33 @@ darling = "0.20"
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-# Workspace-level profiles
+# Workspace-level profiles optimized for caching
+[profile.dev]
+opt-level = 1
+overflow-checks = true
+debug = true
+split-debuginfo = "unpacked"   # Faster debug info generation
+incremental = true
+codegen-units = 256           # More units for faster parallel compilation
+
 [profile.release]
 opt-level = 3
-lto = true
+lto = "thin"                  # Use thin LTO instead of full LTO for faster builds
 codegen-units = 1
 panic = "abort"
 overflow-checks = false
+strip = "symbols"             # Strip symbols for smaller binaries
+incremental = false           # Disable incremental for release builds
 
 [profile.bench]
 inherits = "release"
 debug = true
+strip = "none"                # Keep debug info for profiling
 
-[profile.dev]
-opt-level = 1
-overflow-checks = true
+# Fast development profile for feature testing
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 0
+debug = false
+incremental = true
+codegen-units = 512

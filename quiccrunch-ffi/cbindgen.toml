@@ -1,0 +1,43 @@
+language = "C"
+header = "/* QuicCrunch FFI C Headers */"
+include_version = true
+braces = "SameLine"
+line_length = 100
+tab_width = 2
+documentation = true
+documentation_style = "doxy"
+
+[export]
+include = [
+    "QuicError",
+    "QuicTlsConfig", 
+    "QuicConnectionConfig",
+    "QuicMessage",
+    "QuicCallback",
+    "QuicMessageHandler",
+]
+
+[export.rename]
+"QuicTransportHandle" = "QuicTransportHandle"
+"QuicConnectionHandle" = "QuicConnectionHandle" 
+"QuicStreamHandle" = "QuicStreamHandle"
+
+[fn]
+prefix = "quiccrunch_"
+postfix = ""
+args = "auto"
+rename_args = "GeckoCase"
+
+[struct]
+rename_fields = "GeckoCase"
+must_use = "Warn"
+
+[enum]
+prefix_with_name = false
+must_use = "Warn"
+
+[const]
+allow_static_const = true
+
+[macro_expansion]
+bitflags = true

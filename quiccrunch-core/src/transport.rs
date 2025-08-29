@@ -1,11 +1,5 @@
-use std::net::{SocketAddr, UdpSocket};
-use std::sync::Arc;
 use std::time::Duration;
 use rustls::{Certificate, PrivateKey};
-#[cfg(feature = "backend-quinn")]
-use quinn::{Endpoint, ServerConfig, TransportConfig as QuinnTransportConfig, TokioRuntime, VarInt};
-#[cfg(feature = "backend-quinn")]
-use quinn::congestion::{BbrConfig, CubicConfig, NewRenoConfig};
 
 #[cfg(feature = "backend-tquic")]
 pub mod tquic;
@@ -13,15 +7,13 @@ pub mod tquic;
 #[cfg(feature = "grpc-comparison")]
 pub mod grpc;
 
-// Enforce mutual exclusivity of backends
-#[cfg(all(feature = "backend-quinn", feature = "backend-tquic"))]
-compile_error!("Enable only one backend: backend-tquic OR backend-quinn");
-#[cfg(not(any(feature = "backend-quinn", feature = "backend-tquic")))]
-compile_error!("You must enable exactly one backend feature: backend-tquic OR backend-quinn");
+// Enforce tQUIC backend only
+#[cfg(not(feature = "backend-tquic"))]
+compile_error!("You must enable the backend-tquic feature");
 
 #[derive(Clone, Debug, Copy)]
 pub enum CongestionController {
-    Bbr, // Quinn BBR (v1). For BBRv3 use tquic backend.
+    Bbr, // BBR for tquic
     Cubic,
     NewReno
 }
@@ -65,6 +57,10 @@ pub struct TlsConfig {
     pub cert: Certificate,
     pub key: PrivateKey,
     pub ca_cert: Certificate,
+    // PEM data for tQUIC backend (required)
+    pub cert_pem: Vec<u8>,
+    pub key_pem: Vec<u8>,
+    pub ca_cert_pem: Vec<u8>,
 }
 
 impl Default for TlsConfig {
@@ -73,11 +69,16 @@ impl Default for TlsConfig {
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
         let cert_der = cert.serialize_der().unwrap();
         let key_der = cert.serialize_private_key_der();
+        let cert_pem = cert.serialize_pem().unwrap().into_bytes();
+        let key_pem = cert.serialize_private_key_pem().into_bytes();
         
         Self {
             cert: Certificate(cert_der.clone()),
             key: PrivateKey(key_der),
             ca_cert: Certificate(cert_der),
+            cert_pem: cert_pem.clone(),
+            key_pem,
+            ca_cert_pem: cert_pem,
         }
     }
 }
@@ -124,12 +125,8 @@ struct QuinnCtx {
 
 impl BackendImpl {
     fn new(tls_config: TlsConfig, settings: TransportSettings) -> crate::Result<Self> {
-        #[cfg(feature = "backend-quinn")]
-        {
-            // Legacy/simple path uses Quinn
-            Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, settings)?))
-        }
-        #[cfg(all(not(feature = "backend-quinn"), feature = "backend-tquic"))]
+        // Prioritize tQUIC as the default backend when available
+        #[cfg(feature = "backend-tquic")]
         {
             // Convert simple settings to advanced settings and delegate to tquic
             let advanced_settings = crate::config::QuicTransportSettings {
@@ -148,6 +145,11 @@ impl BackendImpl {
             };
             Self::new_advanced(tls_config, advanced_settings)
         }
+        #[cfg(all(not(feature = "backend-tquic"), feature = "backend-quinn"))]
+        {
+            // Fallback to Quinn only when tQUIC is not available
+            Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, settings)?))
+        }
     }
 
     fn new_advanced(tls_config: TlsConfig, adv: crate::config::QuicTransportSettings) -> crate::Result<Self> {
@@ -159,6 +161,9 @@ impl BackendImpl {
                         cert: tls_config.cert.clone(),
                         key: tls_config.key.clone(),
                         ca_cert: tls_config.ca_cert.clone(),
+                        cert_pem: tls_config.cert_pem.clone(),
+                        key_pem: tls_config.key_pem.clone(),
+                        ca_cert_pem: tls_config.ca_cert_pem.clone(),
                     };
                     return Ok(BackendImpl::Tquic(crate::transport::tquic::TquicCtx::new(tls, adv)?));
                 }
@@ -203,6 +208,9 @@ impl BackendImpl {
                             cert: tls_config.cert.clone(),
                             key: tls_config.key.clone(),
                             ca_cert: tls_config.ca_cert.clone(),
+                            cert_pem: tls_config.cert_pem.clone(),
+                            key_pem: tls_config.key_pem.clone(),
+                            ca_cert_pem: tls_config.ca_cert_pem.clone(),
                         };
                         Ok(BackendImpl::Tquic(crate::transport::tquic::TquicCtx::new(tls, adv)?))
                     }
@@ -528,13 +536,8 @@ impl Connection {
             }
             #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             ConnectionInner::Tquic(_handle) => {
-                // Use lock-free connection handle to open a new stream
-                let stream_handle = handle.connection_handle.open_stream().await
-                    .map_err(|e| crate::TransportError::StreamError(format!("Failed to open stream: {:?}", e)))?;
-                
-                // For now, create a simple QuicStream that wraps the lock-free stream handle
-                // In a real implementation, you'd want to integrate this more deeply
-                Ok(crate::QuicStream::new_lockfree(stream_handle, self.max_message_size))
+                // For now, just return an error indicating that bidirectional streams are not yet implemented for tquic
+                Err(crate::TransportError::StreamError("bidirectional streams not yet implemented for tquic backend".into()))
             }
             #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
             ConnectionInner::Tquic(_handle) => {
@@ -560,12 +563,8 @@ impl Connection {
             }
             #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             ConnectionInner::Tquic(_handle) => {
-                // Use lock-free connection handle to open a new stream
-                let stream_handle = handle.connection_handle.open_stream().await
-                    .map_err(|e| crate::TransportError::StreamError(format!("Failed to open stream: {:?}", e)))?;
-                
-                // For now, create a simple QuicStream that wraps the lock-free stream handle
-                Ok(crate::QuicStream::new_lockfree(stream_handle, self.max_message_size))
+                // For now, just return an error indicating that bidirectional streams are not yet implemented for tquic
+                Err(crate::TransportError::StreamError("bidirectional streams not yet implemented for tquic backend".into()))
             }
             #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
             ConnectionInner::Tquic(_handle) => {

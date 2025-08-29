@@ -191,7 +191,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::RwLock;
 use futures::Stream;
 use crate::{Connection, QuicStream, TransportError, StreamReader, StreamWriter, Splittable};
 use crate::schema::rpc_capnp::*;
@@ -1256,7 +1256,7 @@ enum StreamMessageType {
 impl<T> Stream for RpcStreamReceiver<T> {
     type Item = StreamingRpcResult<Bytes>;
     
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Use a waker to handle the async operation
         let waker = cx.waker().clone();
         
@@ -1930,7 +1930,7 @@ impl RpcServer {
     }
     
     /// Handle incoming connection - core server functionality
-    pub async fn handle_connection(&self, mut connection: Connection) -> RpcResult<()> {
+    pub async fn handle_connection(&self, connection: Connection) -> RpcResult<()> {
         loop {
             // Accept incoming bidirectional stream
             let stream = match connection.accept_bi().await {

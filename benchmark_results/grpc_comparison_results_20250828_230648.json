@@ -1,0 +1,82 @@
+{
+  "timestamp": "2025-08-28T23:06:48.273998972+00:00",
+  "config": {
+    "message_sizes": [
+      64,
+      1024
+    ],
+    "num_requests": 100,
+    "concurrent_clients": 2,
+    "warmup_requests": 10,
+    "test_duration_secs": 5
+  },
+  "quiccrunch_results": [
+    {
+      "protocol": "QuicCrunch",
+      "message_size": 64,
+      "total_requests": 100,
+      "duration": {
+        "secs": 0,
+        "nanos": 8099603
+      },
+      "requests_per_second": 12346.28413269144,
+      "latency_p50": 0.002,
+      "latency_p95": 0.033,
+      "latency_p99": 0.081,
+      "latency_max": 0.326,
+      "throughput_mbps": 0.7535573811457178,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch",
+      "message_size": 1024,
+      "total_requests": 100,
+      "duration": {
+        "secs": 0,
+        "nanos": 532722
+      },
+      "requests_per_second": 187715.16851190676,
+      "latency_p50": 0.0,
+      "latency_p95": 0.004,
+      "latency_p99": 0.01,
+      "latency_max": 0.01,
+      "throughput_mbps": 183.31559424990894,
+      "errors": 14
+    }
+  ],
+  "grpc_results": [
+    {
+      "protocol": "gRPC (not tested)",
+      "message_size": 64,
+      "total_requests": 0,
+      "duration": {
+        "secs": 0,
+        "nanos": 0
+      },
+      "requests_per_second": 0.0,
+      "latency_p50": 0.0,
+      "latency_p95": 0.0,
+      "latency_p99": 0.0,
+      "latency_max": 0.0,
+      "throughput_mbps": 0.0,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (not tested)",
+      "message_size": 1024,
+      "total_requests": 0,
+      "duration": {
+        "secs": 0,
+        "nanos": 0
+      },
+      "requests_per_second": 0.0,
+      "latency_p50": 0.0,
+      "latency_p95": 0.0,
+      "latency_p99": 0.0,
+      "latency_max": 0.0,
+      "throughput_mbps": 0.0,
+      "errors": 0
+    }
+  ],
+  "improvements": []
+}

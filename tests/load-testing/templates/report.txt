@@ -1,0 +1,85 @@
+QuicCrunch Load Test Report
+==========================
+
+Generated: {{metadata.generated_at}}
+Performance Score: {{performance_analysis.performance_score}}/100
+
+Test Summary
+============
+Total Scenarios: {{summary.total_scenarios}}
+Successful: {{summary.successful_scenarios}}
+Failed: {{summary.failed_scenarios}}
+Success Rate: {{#divide summary.successful_scenarios summary.total_scenarios}}{{multiply this 100}}{{/divide}}%
+
+Total Requests: {{summary.total_requests}}
+Total Errors: {{summary.total_errors}}
+Error Rate: {{#divide summary.total_errors summary.total_requests}}{{multiply this 100}}{{/divide}}%
+
+Average Throughput: {{summary.average_throughput}} RPS
+Average P99 Latency: {{summary.average_latency_p99}}
+Peak Connections: {{summary.peak_connections}}
+Data Transferred: {{#divide summary.total_data_transferred 1048576}}{{format_number this 1}}{{/divide}} MB
+
+Performance Metrics
+===================
+Throughput Trend: {{performance_analysis.throughput_trend.trend}}
+Latency Trend: {{performance_analysis.latency_trend.trend}}
+Error Trend: {{performance_analysis.error_trend.trend}}
+
+Resource Utilization:
+- CPU Peak: {{performance_analysis.resource_utilization.cpu_peak}}%
+- CPU Average: {{performance_analysis.resource_utilization.cpu_average}}%
+- Memory Peak: {{performance_analysis.resource_utilization.memory_peak}} MB
+- Memory Average: {{performance_analysis.resource_utilization.memory_average}} MB
+
+Scenario Results
+===============
+{{#each results}}
+Scenario: {{scenario_name}}
+Duration: {{duration}}
+Success: {{#if success}}✅ YES{{else}}❌ NO{{/if}}
+{{#if error_message}}Error: {{error_message}}{{/if}}
+
+Metrics:
+- Total Requests: {{metrics.total_requests}}
+- Successful: {{metrics.successful_requests}}
+- Failed: {{metrics.failed_requests}}
+- Throughput: {{format_number metrics.throughput_rps 1}} RPS
+- P99 Latency: {{metrics.latency_p99}}
+- Error Rate: {{multiply metrics.error_rate 100}}%
+- Connections: {{metrics.active_connections}}
+- CPU Usage: {{metrics.cpu_usage}}%
+- Memory Usage: {{metrics.memory_usage_mb}} MB
+
+{{/each}}
+
+{{#if performance_analysis.bottlenecks}}
+Identified Bottlenecks
+=====================
+{{#each performance_analysis.bottlenecks}}
+- {{component}}: {{description}} ({{severity}})
+  Recommendation: {{recommendation}}
+
+{{/each}}
+{{/if}}
+
+{{#if recommendations}}
+Recommendations
+==============
+{{#each recommendations}}
+- {{this}}
+{{/each}}
+
+{{/if}}
+
+Test Environment
+===============
+Hostname: {{metadata.test_environment.hostname}}
+OS: {{metadata.test_environment.os}}
+Architecture: {{metadata.test_environment.architecture}}
+CPU Cores: {{metadata.test_environment.cpu_cores}}
+Memory: {{metadata.test_environment.memory_gb}} GB
+Rust Version: {{metadata.test_environment.rust_version}}
+QuicCrunch Version: {{metadata.test_environment.quiccrunch_version}}
+Framework Version: {{metadata.framework_version}}
+Total Duration: {{metadata.total_duration}}

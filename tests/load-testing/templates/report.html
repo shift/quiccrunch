@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuicCrunch Load Test Report</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        .title {
+            color: #2c3e50;
+            margin: 0;
+            font-size: 2.5em;
+        }
+        .subtitle {
+            color: #7f8c8d;
+            margin: 5px 0 0 0;
+            font-size: 1.1em;
+        }
+        .section {
+            margin-bottom: 40px;
+        }
+        .section-title {
+            color: #34495e;
+            font-size: 1.5em;
+            margin-bottom: 15px;
+            border-left: 4px solid #3498db;
+            padding-left: 15px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .metric-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            border-left: 4px solid #3498db;
+        }
+        .metric-label {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .metric-unit {
+            font-size: 0.7em;
+            color: #6c757d;
+        }
+        .success { border-left-color: #27ae60; }
+        .warning { border-left-color: #f39c12; }
+        .error { border-left-color: #e74c3c; }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .table th, .table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .table th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+        .recommendations {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 6px;
+            padding: 20px;
+        }
+        .recommendations h3 {
+            color: #856404;
+            margin-top: 0;
+        }
+        .recommendations ul {
+            margin-bottom: 0;
+        }
+        .recommendations li {
+            margin-bottom: 8px;
+            color: #856404;
+        }
+        .performance-score {
+            text-align: center;
+            padding: 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .score-value {
+            font-size: 4em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .score-label {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">QuicCrunch Load Test Report</h1>
+            <p class="subtitle">Generated on {{metadata.generated_at}}</p>
+        </div>
+
+        <div class="performance-score">
+            <div class="score-value">{{performance_analysis.performance_score}}</div>
+            <div class="score-label">Performance Score</div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Test Summary</h2>
+            <div class="metrics-grid">
+                <div class="metric-card success">
+                    <div class="metric-label">Total Scenarios</div>
+                    <div class="metric-value">{{summary.total_scenarios}}</div>
+                </div>
+                <div class="metric-card {{#if summary.failed_scenarios}}error{{else}}success{{/if}}">
+                    <div class="metric-label">Success Rate</div>
+                    <div class="metric-value">{{#divide summary.successful_scenarios summary.total_scenarios}}{{multiply this 100}}{{/divide}}<span class="metric-unit">%</span></div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Total Requests</div>
+                    <div class="metric-value">{{summary.total_requests}}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Average Throughput</div>
+                    <div class="metric-value">{{summary.average_throughput}}<span class="metric-unit">RPS</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Performance Metrics</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">P99 Latency</div>
+                    <div class="metric-value">{{summary.average_latency_p99}}<span class="metric-unit">ms</span></div>
+                </div>
+                <div class="metric-card {{#if summary.total_errors}}warning{{else}}success{{/if}}">
+                    <div class="metric-label">Error Rate</div>
+                    <div class="metric-value">{{#divide summary.total_errors summary.total_requests}}{{multiply this 100}}{{/divide}}<span class="metric-unit">%</span></div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Peak Connections</div>
+                    <div class="metric-value">{{summary.peak_connections}}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Data Transferred</div>
+                    <div class="metric-value">{{#divide summary.total_data_transferred 1048576}}{{format_number this 1}}{{/divide}}<span class="metric-unit">MB</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Scenario Results</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Scenario</th>
+                        <th>Duration</th>
+                        <th>Success</th>
+                        <th>Requests</th>
+                        <th>Throughput (RPS)</th>
+                        <th>P99 Latency</th>
+                        <th>Error Rate</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each results}}
+                    <tr>
+                        <td>{{scenario_name}}</td>
+                        <td>{{duration}}</td>
+                        <td>{{#if success}}✅ Success{{else}}❌ Failed{{/if}}</td>
+                        <td>{{metrics.total_requests}}</td>
+                        <td>{{format_number metrics.throughput_rps 1}}</td>
+                        <td>{{metrics.latency_p99}}</td>
+                        <td>{{multiply metrics.error_rate 100}}%</td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Performance Analysis</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">Throughput Trend</div>
+                    <div class="metric-value">{{performance_analysis.throughput_trend.trend}}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Latency Trend</div>
+                    <div class="metric-value">{{performance_analysis.latency_trend.trend}}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">CPU Peak</div>
+                    <div class="metric-value">{{performance_analysis.resource_utilization.cpu_peak}}<span class="metric-unit">%</span></div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Memory Peak</div>
+                    <div class="metric-value">{{performance_analysis.resource_utilization.memory_peak}}<span class="metric-unit">MB</span></div>
+                </div>
+            </div>
+        </div>
+
+        {{#if performance_analysis.bottlenecks}}
+        <div class="section">
+            <h2 class="section-title">Identified Bottlenecks</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Component</th>
+                        <th>Description</th>
+                        <th>Severity</th>
+                        <th>Recommendation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each performance_analysis.bottlenecks}}
+                    <tr>
+                        <td>{{component}}</td>
+                        <td>{{description}}</td>
+                        <td>{{severity}}</td>
+                        <td>{{recommendation}}</td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+        </div>
+        {{/if}}
+
+        {{#if recommendations}}
+        <div class="section">
+            <div class="recommendations">
+                <h3>🔧 Recommendations</h3>
+                <ul>
+                    {{#each recommendations}}
+                    <li>{{this}}</li>
+                    {{/each}}
+                </ul>
+            </div>
+        </div>
+        {{/if}}
+
+        <div class="section">
+            <h2 class="section-title">Test Environment</h2>
+            <table class="table">
+                <tr><td><strong>Hostname</strong></td><td>{{metadata.test_environment.hostname}}</td></tr>
+                <tr><td><strong>OS</strong></td><td>{{metadata.test_environment.os}}</td></tr>
+                <tr><td><strong>Architecture</strong></td><td>{{metadata.test_environment.architecture}}</td></tr>
+                <tr><td><strong>CPU Cores</strong></td><td>{{metadata.test_environment.cpu_cores}}</td></tr>
+                <tr><td><strong>Memory</strong></td><td>{{metadata.test_environment.memory_gb}} GB</td></tr>
+                <tr><td><strong>Rust Version</strong></td><td>{{metadata.test_environment.rust_version}}</td></tr>
+                <tr><td><strong>QuicCrunch Version</strong></td><td>{{metadata.test_environment.quiccrunch_version}}</td></tr>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

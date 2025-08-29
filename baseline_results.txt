@@ -1,0 +1,271 @@
+warning: Git tree '/home/shift/code/quiccrunch' is dirty
+Warning: No write access to CPU frequency controls.
+Run benchmarks with sudo for full frequency scaling support.
+QuicCrunch development environment loaded!
+- Rust toolchain: rustc 1.89.0 (29483883e 2025-08-04)
+- Python: Python 3.13.5
+
+To build Python bindings, run: cd bindings/python && maturin develop
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /home/shift/code/quiccrunch/quiccrunch-core/Cargo.toml
+workspace: /home/shift/code/quiccrunch/Cargo.toml
+   Compiling syn v1.0.109
+   Compiling regex-syntax v0.8.5
+   Compiling getrandom v0.3.3
+   Compiling rand v0.8.5
+   Compiling tracing-core v0.1.34
+   Compiling tempfile v3.21.0
+   Compiling tracing v0.1.41
+   Compiling regex-automata v0.4.9
+   Compiling strum_macros v0.24.3
+   Compiling regex v1.11.1
+   Compiling env_filter v0.1.3
+   Compiling tquic v1.6.0
+   Compiling env_logger v0.11.8
+   Compiling quiccrunch-core v0.1.0 (/home/shift/code/quiccrunch/quiccrunch-core)
+warning: unused import: `std::sync::Arc`
+ --> quiccrunch-core/src/transport.rs:2:5
+  |
+2 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `SocketAddr` and `UdpSocket`
+ --> quiccrunch-core/src/transport.rs:3:16
+  |
+3 | use std::net::{UdpSocket, SocketAddr};
+  |                ^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `tokio::io::AsyncWriteExt`
+ --> quiccrunch-core/src/stream.rs:3:5
+  |
+3 | use tokio::io::AsyncWriteExt;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `tokio::time`
+ --> quiccrunch-core/src/stream.rs:4:5
+  |
+4 | use tokio::time;
+  |     ^^^^^^^^^^^
+
+warning: unused doc comment
+  --> quiccrunch-core/src/memory.rs:10:1
+   |
+10 | /// Thread-local buffer pool for reusing Vec<u8> allocations
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+   = note: `#[warn(unused_doc_comments)]` on by default
+
+warning: unused import: `tokio::time`
+  --> quiccrunch-core/src/stream_optimized.rs:11:5
+   |
+11 | use tokio::time;
+   |     ^^^^^^^^^^^
+
+warning: unreachable expression
+   --> quiccrunch-core/src/stream.rs:113:9
+    |
+67  | /         match &mut self.inner {
+68  | |             #[cfg(feature = "backend-quinn")]
+69  | |             StreamInner::Quinn { send, .. } => {
+...   |
+108 | |         }
+    | |_________- any code following this `match` expression is unreachable, as all arms diverge
+...
+113 |           Ok(())
+    |           ^^^^^^ unreachable expression
+    |
+    = note: `#[warn(unreachable_code)]` on by default
+
+warning: unused variable: `header`
+  --> quiccrunch-core/src/stream.rs:65:13
+   |
+65 |         let header = len.to_le_bytes();
+   |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_header`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unreachable statement
+   --> quiccrunch-core/src/stream.rs:186:9
+    |
+147 | /         match &mut self.inner {
+148 | |             #[cfg(feature = "backend-quinn")]
+149 | |             StreamInner::Quinn { recv, .. } => {
+150 | |                 let header_result = time::timeout(READ_TIMEOUT, recv.read_exact(&mut header)).await;
+...   |
+183 | |         }
+    | |_________- any code following this `match` expression is unreachable, as all arms diverge
+...
+186 |           let msg_len = u32::from_le_bytes(header) as usize;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unreachable statement
+
+warning: unused variable: `header`
+   --> quiccrunch-core/src/stream.rs:145:17
+    |
+145 |         let mut header = [0u8; 4];
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_header`
+
+warning: unused variable: `chunk_size`
+   --> quiccrunch-core/src/stream.rs:202:17
+    |
+202 |             let chunk_size = remaining.min(CHUNK_SIZE);
+    |                 ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_chunk_size`
+
+warning: variable does not need to be mutable
+   --> quiccrunch-core/src/stream.rs:145:13
+    |
+145 |         let mut header = [0u8; 4];
+    |             ----^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+warning: unused import: `futures::Future`
+   --> quiccrunch-core/src/rpc.rs:189:5
+    |
+189 | use futures::Future;
+    |     ^^^^^^^^^^^^^^^
+
+warning: unused variable: `waker`
+    --> quiccrunch-core/src/rpc.rs:1261:13
+     |
+1261 |         let waker = cx.waker().clone();
+     |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_waker`
+
+warning: unused variable: `bytes`
+   --> quiccrunch-core/src/cpu_optimizations.rs:339:17
+    |
+339 |             let bytes = unsafe {
+    |                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_bytes`
+
+warning: type `tquic::StreamCommand` is more private than the item `ConnHandle::stream_tx`
+  --> quiccrunch-core/src/transport/tquic.rs:25:5
+   |
+25 |     pub stream_tx: mpsc::Sender<StreamCommand>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `ConnHandle::stream_tx` is reachable at visibility `pub`
+   |
+note: but type `tquic::StreamCommand` is only usable at visibility `pub(self)`
+  --> quiccrunch-core/src/transport/tquic.rs:36:1
+   |
+36 | enum StreamCommand {
+   | ^^^^^^^^^^^^^^^^^^
+   = note: `#[warn(private_interfaces)]` on by default
+
+warning: fields `stream_id` and `fin` are never read
+  --> quiccrunch-core/src/transport/tquic.rs:38:9
+   |
+37 |     Write {
+   |     ----- fields in this variant
+38 |         stream_id: u64,
+   |         ^^^^^^^^^
+39 |         data: Bytes,
+40 |         fin: bool,
+   |         ^^^
+   |
+   = note: `StreamCommand` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: fields `stream_id` and `buffer_size` are never read
+  --> quiccrunch-core/src/transport/tquic.rs:44:9
+   |
+43 |     Read {
+   |     ---- fields in this variant
+44 |         stream_id: u64,
+   |         ^^^^^^^^^
+45 |         buffer_size: usize,
+   |         ^^^^^^^^^^^
+   |
+   = note: `StreamCommand` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `stream_id` is never read
+  --> quiccrunch-core/src/transport/tquic.rs:49:9
+   |
+48 |     Close {
+   |     ----- field in this variant
+49 |         stream_id: u64,
+   |         ^^^^^^^^^
+   |
+   = note: `StreamCommand` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: constant `READ_TIMEOUT` is never used
+   --> quiccrunch-core/src/stream.rs:144:15
+    |
+144 |         const READ_TIMEOUT: Duration = Duration::from_secs(30);
+    |               ^^^^^^^^^^^^
+
+warning: field `stream_id` is never read
+    --> quiccrunch-core/src/rpc.rs:1159:5
+     |
+1157 | pub struct RpcStreamReceiver<T = Bytes> {
+     |            ----------------- field in this struct
+1158 |     reader: StreamReader,
+1159 |     stream_id: StreamId,
+     |     ^^^^^^^^^
+
+warning: associated function `parse_stream_chunk` is never used
+    --> quiccrunch-core/src/rpc.rs:2191:8
+     |
+1913 | impl RpcServer {
+     | -------------- associated function in this implementation
+...
+2191 |     fn parse_stream_chunk(data: Bytes) -> RpcResult<(Bytes, bool)> {
+     |        ^^^^^^^^^^^^^^^^^^
+
+warning: field `connection_id` is never read
+   --> quiccrunch-core/src/lockfree.rs:335:5
+    |
+334 | pub struct StreamProcessor {
+    |            --------------- field in this struct
+335 |     connection_id: u64,
+    |     ^^^^^^^^^^^^^
+
+warning: fields `send_buffer` and `recv_buffer` are never read
+  --> quiccrunch-core/src/stream_optimized.rs:89:9
+   |
+87 |     Tquic { 
+   |     ----- fields in this variant
+88 |         handle: StreamHandle,
+89 |         send_buffer: Option<MessageBuffer>,
+   |         ^^^^^^^^^^^
+90 |         recv_buffer: Option<PooledBuffer>,
+   |         ^^^^^^^^^^^
+
+warning: variant `Optimized` is never constructed
+  --> quiccrunch-core/src/stream_optimized.rs:92:5
+   |
+78 | enum StreamInner {
+   |      ----------- variant in this enum
+...
+92 |     Optimized {
+   |     ^^^^^^^^^
+
+warning: creating a shared reference to mutable static
+  --> quiccrunch-core/src/cpu_optimizations.rs:67:33
+   |
+67 |         let features = unsafe { CPU_FEATURES.as_ref().unwrap().clone() };
+   |                                 ^^^^^^^^^^^^^^^^^^^^^ shared reference to mutable static
+   |
+   = note: for more information, see <https://doc.rust-lang.org/nightly/edition-guide/rust-2024/static-mut-references.html>
+   = note: shared references to mutable statics are dangerous; it's undefined behavior if the static is mutated or if a mutable reference is created for it while the shared reference lives
+   = note: `#[warn(static_mut_refs)]` on by default
+
+warning: `quiccrunch-core` (lib) generated 26 warnings (run `cargo fix --lib -p quiccrunch-core` to apply 6 suggestions)
+warning: function `main` is never used
+  --> quiccrunch-core/src/bin/../../examples/cert_utils.rs:55:4
+   |
+55 | fn main() {
+   |    ^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: `quiccrunch-core` (bin "benchmark") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 1m 09s
+     Running `target/release/benchmark --backend tquic --concurrency 1 --requests 1000 --message-size 1024`
+error: unexpected argument '--backend' found
+
+Usage: benchmark [OPTIONS] <COMMAND>
+
+For more information, try '--help'.

@@ -1,0 +1,53 @@
+# Multi-stage build for QuicCrunch CLI
+FROM rust:1.75-slim as builder
+
+WORKDIR /usr/src/app
+
+# Install system dependencies for building
+RUN apt-get update && apt-get install -y \
+    cmake \
+    clang \
+    pkg-config \
+    libssl-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace configuration
+COPY Cargo.toml Cargo.lock ./
+COPY .cargo/ ./.cargo/
+
+# Copy source code
+COPY quiccrunch-core/ ./quiccrunch-core/
+COPY quiccrunch-macros/ ./quiccrunch-macros/
+COPY quiccrunch-cli/ ./quiccrunch-cli/
+
+# Build in release mode with optimizations
+RUN cargo build --release --bin quiccrunch-cli
+
+# Runtime stage - minimal image
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -r -s /bin/false -d /app quiccrunch
+
+WORKDIR /app
+
+# Copy the binary from builder stage
+COPY --from=builder /usr/src/app/target/release/quiccrunch-cli /usr/local/bin/quiccrunch
+
+# Create directories for certificates and data
+RUN mkdir -p /app/certs /app/data && \
+    chown -R quiccrunch:quiccrunch /app
+
+USER quiccrunch
+
+# Default command
+ENTRYPOINT ["quiccrunch"]
+CMD ["--help"]

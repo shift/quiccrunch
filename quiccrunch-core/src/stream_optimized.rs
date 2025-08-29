@@ -209,6 +209,10 @@ impl OptimizedQuicStream {
                     recv_buffer: Some(PooledBuffer::get(config.chunk_size)),
                 }
             }
+            #[cfg(not(any(feature = "backend-quinn", feature = "backend-tquic")))]
+            {
+                compile_error!("No backend feature enabled");
+            }
         };
 
         Self {

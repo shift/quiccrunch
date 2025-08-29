@@ -2,7 +2,6 @@
 //! 
 //! Provides macros and utilities for generating RPC client and server code from service definitions.
 
-use paste::paste;
 
 /// Macro to define an RPC service with methods
 /// 

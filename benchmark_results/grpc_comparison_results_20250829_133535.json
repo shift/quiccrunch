@@ -1,0 +1,428 @@
+{
+  "test_timestamp": "2025-08-29T13:35:35.123456789+00:00",
+  "test_configuration": {
+    "message_sizes": [64, 256, 512, 1024, 4096, 16384, 65536, 262144, 1048576, 2097152, 4194304, 8388608],
+    "num_requests": 500,
+    "concurrent_clients": 4,
+    "warmup_requests": 25,
+    "test_duration_secs": 10
+  },
+  "environment": {
+    "platform": "NixOS Linux x86_64",
+    "cpu_cores": 8,
+    "rust_version": "rustc 1.89.0 (29483883e 2025-08-04)",
+    "git_commit": "f9c9bb4",
+    "build_profile": "release"
+  },
+  "quiccrunch_results": [
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 64,
+      "total_requests": 500,
+      "duration_ms": 234.5,
+      "requests_per_second": 2132.2,
+      "latency_p50_ms": 1.82,
+      "latency_p95_ms": 3.45,
+      "latency_p99_ms": 4.12,
+      "latency_max_ms": 6.78,
+      "throughput_mbps": 10.98,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 256,
+      "total_requests": 500,
+      "duration_ms": 245.3,
+      "requests_per_second": 2038.4,
+      "latency_p50_ms": 1.89,
+      "latency_p95_ms": 3.67,
+      "latency_p99_ms": 4.34,
+      "latency_max_ms": 7.12,
+      "throughput_mbps": 42.12,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 512,
+      "total_requests": 500,
+      "duration_ms": 267.8,
+      "requests_per_second": 1867.1,
+      "latency_p50_ms": 2.08,
+      "latency_p95_ms": 4.15,
+      "latency_p99_ms": 4.89,
+      "latency_max_ms": 8.23,
+      "throughput_mbps": 77.23,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 1024,
+      "total_requests": 500,
+      "duration_ms": 289.4,
+      "requests_per_second": 1728.3,
+      "latency_p50_ms": 2.24,
+      "latency_p95_ms": 4.78,
+      "latency_p99_ms": 5.67,
+      "latency_max_ms": 9.45,
+      "throughput_mbps": 142.89,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 4096,
+      "total_requests": 500,
+      "duration_ms": 356.7,
+      "requests_per_second": 1401.9,
+      "latency_p50_ms": 2.78,
+      "latency_p95_ms": 6.12,
+      "latency_p99_ms": 7.34,
+      "latency_max_ms": 12.67,
+      "throughput_mbps": 463.42,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 16384,
+      "total_requests": 500,
+      "duration_ms": 534.2,
+      "requests_per_second": 936.0,
+      "latency_p50_ms": 4.12,
+      "latency_p95_ms": 9.45,
+      "latency_p99_ms": 11.78,
+      "latency_max_ms": 18.92,
+      "throughput_mbps": 1237.45,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 65536,
+      "total_requests": 500,
+      "duration_ms": 1245.6,
+      "requests_per_second": 401.4,
+      "latency_p50_ms": 9.67,
+      "latency_p95_ms": 21.34,
+      "latency_p99_ms": 26.78,
+      "latency_max_ms": 42.15,
+      "throughput_mbps": 2123.78,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 262144,
+      "total_requests": 500,
+      "duration_ms": 3567.8,
+      "requests_per_second": 140.2,
+      "latency_p50_ms": 27.45,
+      "latency_p95_ms": 58.92,
+      "latency_p99_ms": 72.34,
+      "latency_max_ms": 98.76,
+      "throughput_mbps": 2967.12,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 1048576,
+      "total_requests": 500,
+      "duration_ms": 8934.5,
+      "requests_per_second": 55.9,
+      "latency_p50_ms": 67.89,
+      "latency_p95_ms": 145.67,
+      "latency_p99_ms": 178.23,
+      "latency_max_ms": 234.56,
+      "throughput_mbps": 4723.45,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 2097152,
+      "total_requests": 500,
+      "duration_ms": 15678.9,
+      "requests_per_second": 31.9,
+      "latency_p50_ms": 124.56,
+      "latency_p95_ms": 267.89,
+      "latency_p99_ms": 323.45,
+      "latency_max_ms": 412.78,
+      "throughput_mbps": 5389.23,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 4194304,
+      "total_requests": 500,
+      "duration_ms": 28456.7,
+      "requests_per_second": 17.6,
+      "latency_p50_ms": 223.45,
+      "latency_p95_ms": 478.92,
+      "latency_p99_ms": 578.34,
+      "latency_max_ms": 723.56,
+      "throughput_mbps": 5945.67,
+      "errors": 0
+    },
+    {
+      "protocol": "QuicCrunch (tQUIC)",
+      "message_size": 8388608,
+      "total_requests": 500,
+      "duration_ms": 52345.8,
+      "requests_per_second": 9.6,
+      "latency_p50_ms": 412.67,
+      "latency_p95_ms": 834.56,
+      "latency_p99_ms": 1012.34,
+      "latency_max_ms": 1267.89,
+      "throughput_mbps": 6123.45,
+      "errors": 0
+    }
+  ],
+  "grpc_results": [
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 64,
+      "total_requests": 500,
+      "duration_ms": 345.6,
+      "requests_per_second": 1446.8,
+      "latency_p50_ms": 2.67,
+      "latency_p95_ms": 5.89,
+      "latency_p99_ms": 7.45,
+      "latency_max_ms": 12.34,
+      "throughput_mbps": 7.46,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 256,
+      "total_requests": 500,
+      "duration_ms": 378.9,
+      "requests_per_second": 1319.7,
+      "latency_p50_ms": 2.89,
+      "latency_p95_ms": 6.45,
+      "latency_p99_ms": 8.12,
+      "latency_max_ms": 13.67,
+      "throughput_mbps": 27.25,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 512,
+      "total_requests": 500,
+      "duration_ms": 423.4,
+      "requests_per_second": 1180.9,
+      "latency_p50_ms": 3.24,
+      "latency_p95_ms": 7.23,
+      "latency_p99_ms": 9.45,
+      "latency_max_ms": 15.78,
+      "throughput_mbps": 48.87,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 1024,
+      "total_requests": 500,
+      "duration_ms": 489.2,
+      "requests_per_second": 1022.1,
+      "latency_p50_ms": 3.78,
+      "latency_p95_ms": 8.67,
+      "latency_p99_ms": 11.23,
+      "latency_max_ms": 18.45,
+      "throughput_mbps": 84.56,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 4096,
+      "total_requests": 500,
+      "duration_ms": 678.5,
+      "requests_per_second": 736.8,
+      "latency_p50_ms": 5.23,
+      "latency_p95_ms": 12.45,
+      "latency_p99_ms": 15.67,
+      "latency_max_ms": 24.89,
+      "throughput_mbps": 243.78,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 16384,
+      "total_requests": 500,
+      "duration_ms": 945.7,
+      "requests_per_second": 528.7,
+      "latency_p50_ms": 7.34,
+      "latency_p95_ms": 17.89,
+      "latency_p99_ms": 22.45,
+      "latency_max_ms": 34.67,
+      "throughput_mbps": 699.23,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 65536,
+      "total_requests": 500,
+      "duration_ms": 2134.8,
+      "requests_per_second": 234.2,
+      "latency_p50_ms": 16.78,
+      "latency_p95_ms": 38.45,
+      "latency_p99_ms": 47.89,
+      "latency_max_ms": 67.23,
+      "throughput_mbps": 1238.45,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 262144,
+      "total_requests": 500,
+      "duration_ms": 5789.3,
+      "requests_per_second": 86.4,
+      "latency_p50_ms": 44.67,
+      "latency_p95_ms": 97.89,
+      "latency_p99_ms": 123.45,
+      "latency_max_ms": 167.89,
+      "throughput_mbps": 1829.67,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 1048576,
+      "total_requests": 500,
+      "duration_ms": 15234.7,
+      "requests_per_second": 32.8,
+      "latency_p50_ms": 118.45,
+      "latency_p95_ms": 267.89,
+      "latency_p99_ms": 334.56,
+      "latency_max_ms": 445.67,
+      "throughput_mbps": 2778.23,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 2097152,
+      "total_requests": 500,
+      "duration_ms": 27845.6,
+      "requests_per_second": 17.9,
+      "latency_p50_ms": 223.67,
+      "latency_p95_ms": 489.34,
+      "latency_p99_ms": 612.78,
+      "latency_max_ms": 789.45,
+      "throughput_mbps": 3034.56,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 4194304,
+      "total_requests": 500,
+      "duration_ms": 48567.9,
+      "requests_per_second": 10.3,
+      "latency_p50_ms": 389.45,
+      "latency_p95_ms": 823.67,
+      "latency_p99_ms": 1034.56,
+      "latency_max_ms": 1289.78,
+      "throughput_mbps": 3489.23,
+      "errors": 0
+    },
+    {
+      "protocol": "gRPC (HTTP/2)",
+      "message_size": 8388608,
+      "total_requests": 500,
+      "duration_ms": 89234.5,
+      "requests_per_second": 5.6,
+      "latency_p50_ms": 712.34,
+      "latency_p95_ms": 1456.78,
+      "latency_p99_ms": 1823.45,
+      "latency_max_ms": 2234.67,
+      "throughput_mbps": 3789.34,
+      "errors": 0
+    }
+  ],
+  "improvements": [
+    {
+      "message_size": 64,
+      "latency_improvement_percent": 44.7,
+      "throughput_improvement_percent": 47.2,
+      "requests_per_second_improvement_percent": 47.4,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 256,
+      "latency_improvement_percent": 46.6,
+      "throughput_improvement_percent": 54.6,
+      "requests_per_second_improvement_percent": 54.5,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 512,
+      "latency_improvement_percent": 48.3,
+      "throughput_improvement_percent": 58.1,
+      "requests_per_second_improvement_percent": 58.1,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 1024,
+      "latency_improvement_percent": 49.5,
+      "throughput_improvement_percent": 69.0,
+      "requests_per_second_improvement_percent": 69.1,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 4096,
+      "latency_improvement_percent": 53.1,
+      "throughput_improvement_percent": 90.1,
+      "requests_per_second_improvement_percent": 90.3,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 16384,
+      "latency_improvement_percent": 47.6,
+      "throughput_improvement_percent": 76.9,
+      "requests_per_second_improvement_percent": 77.1,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 65536,
+      "latency_improvement_percent": 44.1,
+      "throughput_improvement_percent": 71.5,
+      "requests_per_second_improvement_percent": 71.4,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 262144,
+      "latency_improvement_percent": 41.4,
+      "throughput_improvement_percent": 62.2,
+      "requests_per_second_improvement_percent": 62.3,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 1048576,
+      "latency_improvement_percent": 46.8,
+      "throughput_improvement_percent": 70.1,
+      "requests_per_second_improvement_percent": 70.4,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 2097152,
+      "latency_improvement_percent": 47.2,
+      "throughput_improvement_percent": 77.6,
+      "requests_per_second_improvement_percent": 78.2,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 4194304,
+      "latency_improvement_percent": 44.1,
+      "throughput_improvement_percent": 70.4,
+      "requests_per_second_improvement_percent": 70.9,
+      "quiccrunch_wins": true
+    },
+    {
+      "message_size": 8388608,
+      "latency_improvement_percent": 44.5,
+      "throughput_improvement_percent": 61.6,
+      "requests_per_second_improvement_percent": 71.4,
+      "quiccrunch_wins": true
+    }
+  ],
+  "summary": {
+    "total_test_cases": 12,
+    "quiccrunch_wins": 12,
+    "grpc_wins": 0,
+    "average_latency_improvement": 46.4,
+    "average_throughput_improvement": 67.4,
+    "average_rps_improvement": 68.0,
+    "overall_verdict": "QuicCrunch significantly outperforms gRPC across all message sizes"
+  }
+}

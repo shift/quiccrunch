@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quiccrunch-server
+  labels:
+    app: quiccrunch-server
+    component: server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quiccrunch-server
+  template:
+    metadata:
+      labels:
+        app: quiccrunch-server
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: quiccrunch-server
+        image: quiccrunch/server:latest
+        ports:
+        - containerPort: 50051
+          protocol: UDP
+          name: quic
+        - containerPort: 9090
+          protocol: TCP
+          name: metrics
+        env:
+        - name: RUST_LOG
+          value: "info"
+        - name: RUST_BACKTRACE
+          value: "1"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.toml
+          subPath: config.toml
+          readOnly: true
+        - name: certs
+          mountPath: /app/certs
+          readOnly: true
+        - name: data
+          mountPath: /app/data
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9090
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: quiccrunch-config
+      - name: certs
+        secret:
+          secretName: quiccrunch-certs
+      - name: data
+        emptyDir: {}
+      securityContext:
+        fsGroup: 1000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quiccrunch-server-service
+  labels:
+    app: quiccrunch-server
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 50051
+    targetPort: 50051
+    protocol: UDP
+    name: quic
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: quiccrunch-server
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quiccrunch-config
+data:
+  config.toml: |
+    [server]
+    bind_address = "0.0.0.0:50051"
+    max_connections = 10000
+    connection_timeout = "30s"
+    keep_alive_interval = "5s"
+    
+    [server]
+    max_concurrent_streams = 1000
+    initial_window_size = 65535
+    max_window_size = 16777215
+    receive_window = 1048576
+    send_window = 1048576
+    
+    [tls]
+    cert_path = "/app/certs/server.crt"
+    key_path = "/app/certs/server.key"
+    ca_cert_path = "/app/certs/ca.crt"
+    auto_generate = false
+    
+    [monitoring]
+    metrics_enabled = true
+    metrics_address = "0.0.0.0:9090"
+    tracing_enabled = true
+    log_level = "info"
+    
+    [metrics]
+    enable_prometheus = true
+    prometheus_port = 9090
+    histogram_buckets = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0]
+    
+    [security]
+    require_client_cert = false
+    max_message_size = 1048576
+    max_requests_per_second = 1000

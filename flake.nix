@@ -49,9 +49,22 @@
             dejavu_fonts
             liberation_ttf
             noto-fonts
+            
+            # Python development for bindings
             python3
             python3Packages.pip
             python3Packages.matplotlib
+            # python3Packages.maturin  # Not available in this nixpkgs version
+            python3Packages.pytest
+            python3Packages.pytest-asyncio
+            python3Packages.black
+            python3Packages.mypy
+            python3Packages.ruff
+            python3Packages.typing-extensions
+            python3Packages.setuptools
+            python3Packages.wheel
+            python3Packages.virtualenv
+            
 	    linuxPackages.perf
 	    cargo-flamegraph
 
@@ -95,11 +108,28 @@
             export OPENSSL_LIB_DIR="${pkgs.openssl.out}/lib"
             export OPENSSL_INCLUDE_DIR="${pkgs.openssl.dev}/include"
 
+            # Python development environment setup
+            export PYTHONPATH="${pkgs.python3Packages.pytest}/lib/python3.11/site-packages:${pkgs.python3Packages.pytest-asyncio}/lib/python3.11/site-packages:$PYTHONPATH"
+            
+            # Set up Python virtual environment directory
+            export PIP_DISABLE_PIP_VERSION_CHECK=1
+            export PIP_NO_CACHE_DIR=1
+            
+            # Allow pip installs in development environment
+            export PIP_BREAK_SYSTEM_PACKAGES=1
+
             # If no CPU frequency control access, warn but allow dev shell to continue
             if [ ! -w "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor" ]; then
               echo "Warning: No write access to CPU frequency controls."
               echo "Run benchmarks with sudo for full frequency scaling support."
             fi
+            
+            echo "QuicCrunch development environment loaded!"
+            echo "- Rust toolchain: $(rustc --version)"
+            echo "- Python: $(python3 --version)"
+            # echo "- Maturin: $(maturin --version)"
+            echo ""
+            echo "To build Python bindings, run: cd bindings/python && maturin develop"
           '';
         };
       }

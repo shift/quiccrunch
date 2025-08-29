@@ -508,15 +508,19 @@ impl IoUringAdvancedTransport {
                 // Submit zero-copy send with registered buffer
                 let send_op = opcode::Send::new(
                     types::Fd(self.socket.as_raw_fd()),
-                    std::ptr::null(),
+                    buffer.data.as_ptr(),
                     copy_len as u32,
                 )
                 .build()
-                .flags(io_uring::squeue::Flags::FIXED_BUF)
-                .buf_index(buffer_id);
+                .user_data(buffer_id as u64);
 
                 unsafe {
-                    submission.push(&send_op)?;
+                    if let Err(e) = submission.push(&send_op) {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Failed to push send operation: {:?}", e)
+                        ));
+                    }
                 }
                 
                 submitted += 1;
@@ -569,10 +573,16 @@ impl IoUringAdvancedTransport {
                 let send_op = opcode::SendMsg::new(
                     types::Fd(self.socket.as_raw_fd()),
                     &msghdr as *const libc::msghdr,
-                ).build();
+                ).build()
+                .user_data(i as u64);
 
                 unsafe {
-                    submission.push(&send_op)?;
+                    if let Err(e) = submission.push(&send_op) {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Failed to push sendmsg operation: {:?}", e)
+                        ));
+                    }
                 }
                 submitted += 1;
             }
@@ -604,13 +614,16 @@ impl IoUringAdvancedTransport {
                 types::Fd(self.socket.as_raw_fd()),
                 std::ptr::null_mut(),
             )
-            .buf_group(self.buffer_pool.group_id)
             .build()
-            .flags(io_uring::squeue::Flags::MULTISHOT) // Enable multishot for efficiency
             .user_data(operation.buffer_id as u64);
 
             unsafe {
-                submission.push(&recv_op)?;
+                if let Err(e) = submission.push(&recv_op) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to push recvmsg operation: {:?}", e)
+                    ));
+                }
             }
         }
 

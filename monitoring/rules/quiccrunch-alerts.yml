@@ -1,0 +1,62 @@
+groups:
+- name: quiccrunch-alerts
+  rules:
+  # High error rate
+  - alert: QuicCrunchHighErrorRate
+    expr: rate(quiccrunch_errors_total[5m]) > 0.1
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "QuicCrunch high error rate detected"
+      description: "QuicCrunch server has error rate of {{ $value }} errors per second"
+
+  # High response time
+  - alert: QuicCrunchHighLatency
+    expr: histogram_quantile(0.95, rate(quiccrunch_request_duration_seconds_bucket[5m])) > 0.5
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "QuicCrunch high latency detected"
+      description: "95th percentile latency is {{ $value }}s"
+
+  # Server down
+  - alert: QuicCrunchServerDown
+    expr: up{job="quiccrunch-server"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "QuicCrunch server is down"
+      description: "QuicCrunch server instance {{ $labels.instance }} is down"
+
+  # High CPU usage
+  - alert: QuicCrunchHighCPU
+    expr: rate(process_cpu_seconds_total{job="quiccrunch-server"}[5m]) * 100 > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "QuicCrunch high CPU usage"
+      description: "CPU usage is {{ $value }}% for instance {{ $labels.instance }}"
+
+  # High memory usage
+  - alert: QuicCrunchHighMemory
+    expr: process_resident_memory_bytes{job="quiccrunch-server"} / 1024 / 1024 > 500
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "QuicCrunch high memory usage"
+      description: "Memory usage is {{ $value }}MB for instance {{ $labels.instance }}"
+
+  # Connection pool exhaustion
+  - alert: QuicCrunchConnectionPoolExhaustion
+    expr: quiccrunch_active_connections / quiccrunch_max_connections > 0.9
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "QuicCrunch connection pool near exhaustion"
+      description: "Connection pool is {{ $value | humanizePercentage }} full"

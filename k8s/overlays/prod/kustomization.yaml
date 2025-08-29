@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: quiccrunch-prod
+
+resources:
+- ../../base
+- alertmanager.yaml
+- ingress.yaml
+- hpa.yaml
+
+patchesStrategicMerge:
+- deployment-patches.yaml
+
+commonLabels:
+  environment: prod
+
+replicas:
+- name: quiccrunch-server
+  count: 3
+- name: prometheus
+  count: 1
+- name: grafana
+  count: 1
+
+images:
+- name: quiccrunch/server
+  newTag: v1.0.0

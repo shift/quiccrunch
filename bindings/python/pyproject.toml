@@ -1,0 +1,71 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "quiccrunch"
+version = "0.1.0"
+description = "Python bindings for QuicCrunch high-performance QUIC transport"
+authors = [{name = "QuicCrunch Contributors"}]
+license = {text = "Apache-2.0 OR MIT"}
+readme = "README.md"
+homepage = "https://github.com/quiccrunch/quiccrunch"
+repository = "https://github.com/quiccrunch/quiccrunch"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Networking",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "typing-extensions>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=22.0",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+"Bug Tracker" = "https://github.com/quiccrunch/quiccrunch/issues"
+"Changelog" = "https://github.com/quiccrunch/quiccrunch/blob/main/CHANGELOG.md"
+"Documentation" = "https://quiccrunch.readthedocs.io/"
+
+[tool.maturin]
+python-source = "python"
+module-name = "quiccrunch._quiccrunch"
+features = ["pyo3/extension-module"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.ruff]
+select = ["E", "F", "W", "I", "UP", "RUF"]
+line-length = 88
+target-version = "py38"
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v"

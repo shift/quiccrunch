@@ -1,0 +1,84 @@
+[package]
+name = "quiccrunch-security"
+version = "0.1.0"
+edition = "2021"
+authors = ["QuicCrunch Team <security@quiccrunch.org>"]
+description = "Comprehensive security framework for QuicCrunch RPC"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/quiccrunch/quiccrunch"
+categories = ["network-programming", "cryptography", "authentication"]
+keywords = ["security", "rpc", "authentication", "authorization", "monitoring"]
+
+[dependencies]
+# Core dependencies
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Authentication and JWT (optional)
+jsonwebtoken = { version = "9.0", optional = true }
+oauth2 = { version = "4.0", optional = true }
+base64 = "0.22"
+ring = "0.17"
+
+# Authorization and RBAC (optional)
+casbin = { version = "2.0", features = ["runtime-tokio", "logging"], optional = true }
+sqlx-adapter = { version = "1.8", optional = true }
+
+# Security monitoring and logging (optional)
+log = "0.4"
+syslog = { version = "6.0", optional = true }
+elasticsearch-dsl = { version = "0.4", optional = true }
+
+# Rate limiting and DoS protection (optional)
+governor = { version = "0.6", optional = true }
+dashmap = "5.0"
+
+# Cryptography and security
+rustls = "0.22"
+x509-parser = "0.15"
+sha2 = "0.10"
+hmac = "0.12"
+
+# Configuration and environment
+config = "0.14"
+dotenvy = "0.15"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json"] }
+
+# Database for audit logging (optional)
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"], optional = true }
+
+# Testing utilities (optional)
+wiremock = { version = "0.6", optional = true }
+tempfile = { version = "3.0", optional = true }
+
+# Testing dependencies
+[dev-dependencies]
+tokio-test = "0.4"
+proptest = "1.0"
+
+[features]
+default = ["jwt", "oauth2", "rbac"]  # Enable core features by default
+jwt = ["dep:jsonwebtoken"]
+oauth2 = ["dep:oauth2"]
+rbac = ["dep:casbin", "dep:sqlx-adapter"]
+monitoring = ["dep:elasticsearch-dsl", "dep:syslog"]
+rate-limiting = ["dep:governor"]
+testing = ["dep:wiremock", "dep:tempfile"]
+compliance = ["dep:sqlx"]
+
+[[bin]]
+name = "security-cli"
+path = "src/bin/security_cli.rs"
+
+[lib]
+name = "quiccrunch_security"
+path = "src/lib.rs"

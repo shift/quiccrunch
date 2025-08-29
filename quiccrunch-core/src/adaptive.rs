@@ -1,8 +1,8 @@
 /// Adaptive optimization strategy for QuicCrunch
 /// Automatically selects the best optimization approach based on workload characteristics
 
-use crate::memory::{PooledBuffer, get_pool_stats};
-// use crate::simd;
+use crate::memory::PooledBuffer;
+use crate::simd;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OptimizationStrategy {
@@ -15,32 +15,32 @@ pub enum OptimizationStrategy {
 }
 
 impl OptimizationStrategy {
-    /// Select optimal strategy based on buffer size
+    /// Select optimal strategy based on buffer size (updated based on performance analysis)
     pub fn for_size(size: usize) -> Self {
         match size {
             // Small buffers: standard allocator is fastest due to pool overhead
-            0..=8192 => Self::Standard,
-            // Medium buffers: pools help but SIMD has overhead
-            8193..=131072 => Self::PoolOnly,  // 8KB - 128KB
-            // Large buffers: both optimizations should help
-            _ => Self::Full,
+            0..=8192 => Self::Standard,           // 0-8KB: Use standard (was 0-8KB)
+            // Medium buffers: pools help significantly, but SIMD still has overhead  
+            8193..=65536 => Self::PoolOnly,      // 8KB-64KB: Use pools only (was 8KB-128KB)
+            // Large buffers: both optimizations help (after SIMD fixes)
+            _ => Self::Full,                     // 64KB+: Use full optimization (was 128KB+)
         }
     }
     
-    /// Select optimal strategy based on alignment and size
+    /// Select optimal strategy based on alignment and size (updated thresholds)
     pub fn for_buffer(data: &[u8]) -> Self {
         let size = data.len();
-        let aligned = data.as_ptr() as usize % 32 == 0;
+        let aligned = data.as_ptr() as usize % 64 == 0;  // 64-byte alignment for AVX-512
         
         match (size, aligned) {
             // Small buffers always use standard
             (0..=8192, _) => Self::Standard,
-            // Medium buffers use pools only
-            (8193..=131072, _) => Self::PoolOnly,
+            // Medium buffers use pools only 
+            (8193..=65536, _) => Self::PoolOnly,
             // Large aligned buffers can use full optimization
-            (131073.., true) => Self::Full,
+            (65537.., true) => Self::Full,
             // Large unaligned buffers avoid SIMD
-            (131073.., false) => Self::PoolOnly,
+            (65537.., false) => Self::PoolOnly,
         }
     }
 }
@@ -169,9 +169,9 @@ impl WorkloadConfig {
     pub fn small_rpc() -> Self {
         Self {
             typical_message_size: 2048,      // 2KB
-            peak_message_size: 8192,         // 8KB
+            peak_message_size: 8192,         // 8KB  
             concurrent_streams: 100,
-            optimization_strategy: OptimizationStrategy::Standard,
+            optimization_strategy: OptimizationStrategy::Standard,  // Based on analysis: standard is fastest for <8KB
         }
     }
     
@@ -179,19 +179,19 @@ impl WorkloadConfig {
     pub fn medium_rpc() -> Self {
         Self {
             typical_message_size: 32768,     // 32KB
-            peak_message_size: 262144,       // 256KB
+            peak_message_size: 65536,        // 64KB (reduced from 256KB)
             concurrent_streams: 50,
-            optimization_strategy: OptimizationStrategy::PoolOnly,
+            optimization_strategy: OptimizationStrategy::PoolOnly,  // Pools help significantly in 8KB-64KB range
         }
     }
     
     /// Configuration for large workloads (video streaming, large data)
     pub fn large_rpc() -> Self {
         Self {
-            typical_message_size: 524288,    // 512KB
-            peak_message_size: 4194304,      // 4MB
+            typical_message_size: 262144,    // 256KB (reduced from 512KB)
+            peak_message_size: 2097152,      // 2MB (reduced from 4MB)
             concurrent_streams: 10,
-            optimization_strategy: OptimizationStrategy::Full,
+            optimization_strategy: OptimizationStrategy::Full,  // Both pools and SIMD help for 64KB+
         }
     }
 }

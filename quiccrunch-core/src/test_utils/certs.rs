@@ -48,9 +48,12 @@ pub fn generate_node_cert(node_name: &str) -> TlsConfig {
     let signed_cert = cert.serialize_der_with_signer(&ca_cert).expect("Failed to sign certificate");
     
     TlsConfig {
-        cert: rustls::Certificate(signed_cert),
+        cert: rustls::Certificate(signed_cert.clone()),
         key: rustls::PrivateKey(cert.serialize_private_key_der()),
-        ca_cert: rustls::Certificate(ca_cert_der),
+        ca_cert: rustls::Certificate(ca_cert_der.clone()),
+        cert_pem: cert.serialize_pem().unwrap().into_bytes(),
+        key_pem: cert.serialize_private_key_pem().into_bytes(),
+        ca_cert_pem: ca_cert.serialize_pem().unwrap().into_bytes(),
     }
 }
 

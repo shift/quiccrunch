@@ -55,16 +55,17 @@ pub fn fast_copy(src: &[u8], dst: &mut [u8]) {
     assert_eq!(src.len(), dst.len());
     
     // For small copies, standard library is faster due to overhead
-    if src.len() < 128 {
+    // Increased threshold based on performance analysis showing SIMD overhead
+    if src.len() < 65536 {  // 64KB threshold (was 128 bytes)
         dst.copy_from_slice(src);
         return;
     }
     
     // Check alignment - SIMD works best with aligned data
-    let src_aligned = src.as_ptr() as usize % 32 == 0;
-    let dst_aligned = dst.as_ptr() as usize % 32 == 0;
+    let src_aligned = src.as_ptr() as usize % 64 == 0;  // 64-byte alignment for AVX-512
+    let dst_aligned = dst.as_ptr() as usize % 64 == 0;
     
-    // Only use SIMD for aligned large transfers
+    // Only use SIMD for large, well-aligned transfers
     if !src_aligned || !dst_aligned {
         dst.copy_from_slice(src);
         return;
@@ -72,46 +73,49 @@ pub fn fast_copy(src: &[u8], dst: &mut [u8]) {
 
     #[cfg(target_arch = "x86_64")]
     {
-        // Cache feature detection to avoid repeated checks
-        static mut FEATURES_DETECTED: Option<CpuFeatures> = None;
-        static INIT: std::sync::Once = std::sync::Once::new();
-        
-        let features = unsafe {
-            INIT.call_once(|| {
-                FEATURES_DETECTED = Some(CpuFeatures::detect());
-            });
-            FEATURES_DETECTED.as_ref().unwrap()
-        };
-        
-        if features.avx512f && features.avx512bw && src.len() >= 512 {
-            unsafe { fast_copy_avx512(src, dst) };
-            return;
+        // Use thread-local storage for safe feature detection caching
+        thread_local! {
+            static CPU_FEATURES: CpuFeatures = CpuFeatures::detect();
         }
         
-        if features.avx2 && src.len() >= 256 {
-            unsafe { fast_copy_avx2(src, dst) };
-            return;
-        }
+        let use_simd = CPU_FEATURES.with(|features| {
+            if features.avx512f && features.avx512bw && src.len() >= 1048576 {  // 1MB for AVX-512
+                Some(SIMDType::AVX512)
+            } else if features.avx2 && src.len() >= 262144 {  // 256KB for AVX2
+                Some(SIMDType::AVX2)
+            } else if features.sse41 && src.len() >= 131072 {  // 128KB for SSE4.1
+                Some(SIMDType::SSE41)
+            } else {
+                None
+            }
+        });
         
-        if features.sse41 && src.len() >= 128 {
-            unsafe { fast_copy_sse41(src, dst) };
-            return;
+        match use_simd {
+            Some(SIMDType::AVX512) => {
+                unsafe { fast_copy_avx512(src, dst) };
+                return;
+            }
+            Some(SIMDType::AVX2) => {
+                unsafe { fast_copy_avx2(src, dst) };
+                return;
+            }
+            Some(SIMDType::SSE41) => {
+                unsafe { fast_copy_sse41(src, dst) };
+                return;
+            }
+            None => {}
         }
     }
 
     #[cfg(target_arch = "aarch64")]
     {
-        static mut NEON_AVAILABLE: Option<bool> = None;
-        static INIT: std::sync::Once = std::sync::Once::new();
+        thread_local! {
+            static NEON_AVAILABLE: bool = is_aarch64_feature_detected!("neon");
+        }
         
-        let neon_available = unsafe {
-            INIT.call_once(|| {
-                NEON_AVAILABLE = Some(is_aarch64_feature_detected!("neon"));
-            });
-            *NEON_AVAILABLE.as_ref().unwrap()
-        };
+        let use_neon = NEON_AVAILABLE.with(|&neon| neon && src.len() >= 131072);  // 128KB threshold
         
-        if neon_available && src.len() >= 128 {
+        if use_neon {
             unsafe { fast_copy_neon(src, dst) };
             return;
         }
@@ -121,23 +125,47 @@ pub fn fast_copy(src: &[u8], dst: &mut [u8]) {
     dst.copy_from_slice(src);
 }
 
+#[derive(Debug, Clone, Copy)]
+enum SIMDType {
+    AVX512,
+    AVX2,
+    SSE41,
+}
+
 /// Fast memory zeroing with SIMD
 pub fn fast_zero(buffer: &mut [u8]) {
-    if buffer.len() < 32 {
+    // Increased threshold based on performance analysis
+    if buffer.len() < 65536 {  // 64KB threshold
         buffer.fill(0);
         return;
     }
 
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx512f") && buffer.len() >= 64 {
-            unsafe { fast_zero_avx512(buffer) };
-            return;
+        thread_local! {
+            static CPU_FEATURES: CpuFeatures = CpuFeatures::detect();
         }
         
-        if is_x86_feature_detected!("avx2") {
-            unsafe { fast_zero_avx2(buffer) };
-            return;
+        let use_simd = CPU_FEATURES.with(|features| {
+            if features.avx512f && buffer.len() >= 262144 {  // 256KB for AVX-512
+                Some(SIMDType::AVX512)
+            } else if features.avx2 && buffer.len() >= 131072 {  // 128KB for AVX2
+                Some(SIMDType::AVX2)
+            } else {
+                None
+            }
+        });
+        
+        match use_simd {
+            Some(SIMDType::AVX512) => {
+                unsafe { fast_zero_avx512(buffer) };
+                return;
+            }
+            Some(SIMDType::AVX2) => {
+                unsafe { fast_zero_avx2(buffer) };
+                return;
+            }
+            _ => {}
         }
     }
 

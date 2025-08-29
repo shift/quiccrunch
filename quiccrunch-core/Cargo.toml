@@ -125,6 +125,10 @@ tonic-build = "0.10"
 name = "benchmark"
 path = "src/bin/benchmark.rs"
 
+[[bin]]
+name = "validate_performance_fixes"
+path = "src/bin/validate_performance_fixes.rs"
+
 [[bench]]
 name = "transport"
 harness = false
@@ -141,6 +145,10 @@ harness = false
 name = "io_uring_comparison"
 harness = false
 
+[[bench]]
+name = "optimization_fixes"
+harness = false
+
 [features]
 # Backends map to optional deps (mutually exclusive at compile time)
 backend-quinn = ["dep:quinn"]
@@ -151,18 +159,24 @@ backend-alt = []
 # Comparison feature for gRPC
 grpc-comparison = ["dep:tonic", "dep:prost", "dep:tower", "dep:tokio-stream"]
 
-# Default features - tQUIC backend with basic optimizations only (performance regression fix)
-default = ["tls", "visualization", "backend-tquic", "dep:tokio-stream"]
+# Default features - use tQUIC backend for high performance
+default = ["tls", "visualization", "backend-tquic", "dep:tokio-stream", "adaptive-optimizations"]
 
 # Opt-in tests that require elevated privileges or special hardware
 scaling-tests = []
 
 # PERFORMANCE OPTIMIZATION FEATURES
-memory-pools = []                # Enable memory pooling optimizations
-simd-optimizations = []          # Enable SIMD operations
+memory-pools = []                # Enable memory pooling optimizations (recommended for 8KB+ workloads)
+simd-optimizations = []          # Enable SIMD operations (recommended for 64KB+ workloads after fixes)
 lock-free-channels = []          # Enable lock-free channel optimizations
-adaptive-optimizations = []      # Enable adaptive optimization strategy selection
+adaptive-optimizations = ["memory-pools", "simd-optimizations"]  # Enable adaptive optimization strategy selection
 io-uring-advanced = ["dep:io-uring"]  # Enable advanced io_uring transport
+
+# PERFORMANCE OPTIMIZATION PROFILES (based on performance analysis)
+small-rpc = ["backend-tquic"]                                      # <8KB workloads - use standard allocator
+medium-rpc = ["backend-tquic", "memory-pools"]                     # 8KB-64KB workloads - use memory pools
+large-rpc = ["backend-tquic", "memory-pools", "simd-optimizations"] # >64KB workloads - use full optimizations
+high-performance = ["backend-tquic", "adaptive-optimizations"]     # Adaptive optimization selection
 
 # Misc feature flags
 telemetry = [

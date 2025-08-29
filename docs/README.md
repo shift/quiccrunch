@@ -6,21 +6,36 @@ Welcome to QuicCrunch - a high-performance RPC framework built on QUIC transport
 
 ### 🚀 Getting Started
 - **[Getting Started Guide](getting-started.md)** - Your first QuicCrunch service in 10 minutes
-- **[Installation & Setup](getting-started.md#installation)** - Add QuicCrunch to your project
+- **[Installation & Setup](setup.md)** - Complete installation and environment setup
+- **[Quick Reference](quick-reference.md)** - Essential API patterns and examples
 
-### 📚 Tutorials
+### 📚 Tutorials & Guides
 - **[Streaming RPC Tutorial](tutorials/streaming-rpc.md)** - Comprehensive guide to all streaming patterns
-  - Unary RPCs for simple request/response
-  - Server streaming for real-time data feeds
-  - Client streaming for batch uploads
-  - Bidirectional streaming for interactive applications
-
-### 🔧 Advanced Usage
 - **[Procedural Macros Guide](macros.md)** - Master the `#[rpc_service]` macro
-- **[Migration from gRPC](migration/grpc.md)** - Step-by-step migration strategies
+- **[Performance Optimization](OPTIMIZATION_GUIDE.md)** - Maximize throughput and minimize latency
+- **[Testing Guide](testing.md)** - Unit testing, integration testing, and benchmarking
+
+### 🔄 Migration Guides
+- **[Migration Hub](migration/README.md)** - Migration strategies and framework comparisons
+- **[From gRPC](migration/grpc.md)** - Step-by-step gRPC to QuicCrunch migration
+- **[From Apache Thrift](migration/thrift.md)** - Thrift to QuicCrunch migration guide
+- **[From JSON-RPC & Others](migration/README.md)** - Additional framework migrations
+
+### 🚀 Production & Operations
+- **[Operations Guide](operations/README.md)** - Complete production deployment guide
+- **[Deployment](operations/deployment.md)** - Docker, Kubernetes, and cloud deployment
+- **[Troubleshooting](operations/troubleshooting.md)** - Diagnostic procedures and common issues
+- **[Monitoring](operations/monitoring.md)** - Metrics, logging, and observability
 
 ### 📖 API Reference
-- **[API Documentation](https://docs.rs/quiccrunch)** - Complete API reference with examples
+- **[Auto-Generated API Docs](api-generation/README.md)** - Comprehensive API documentation system
+- **[Error Reference](reference/errors.md)** - Complete error codes and resolution guide
+- **[Rust API Documentation](https://docs.rs/quiccrunch)** - Native Rust API reference
+
+### 💡 Examples & Use Cases
+- **[Production Examples](examples/README.md)** - Real-world implementation patterns
+- **[Performance Examples](examples/high-throughput.md)** - High-performance use cases
+- **[Enterprise Patterns](examples/microservices.md)** - Large-scale architecture examples
 
 ## Why Choose QuicCrunch?
 
@@ -129,41 +144,73 @@ println!("5 + 3 = {}", result);
 
 ## Production Features
 
-### 🔒 Security
-- **Automatic TLS 1.3** with QUIC transport
-- **Certificate validation** and management
-- **Authentication middleware** support
+### 🔒 Security & Reliability
+- **Automatic TLS 1.3** with QUIC transport security
+- **Certificate management** and validation
+- **Authentication middleware** support  
 - **Rate limiting** and access control
+- **Circuit breaker** patterns for resilience
 
-### 📊 Observability
-- **Built-in metrics** and tracing
-- **Health check endpoints** 
-- **Performance monitoring**
-- **Error tracking and logging**
+### 📊 Observability & Monitoring
+- **Built-in metrics** with Prometheus integration
+- **Distributed tracing** with OpenTelemetry support
+- **Health check endpoints** for orchestration
+- **Performance monitoring** and alerting
+- **Structured logging** with correlation IDs
 
-### 🔧 Operations
+### 🔧 Operations & Deployment
+- **Container-ready** with Docker and Kubernetes manifests
+- **Auto-scaling** based on metrics and load
 - **Graceful shutdown** handling
-- **Configuration management**
-- **Hot reloading** support
-- **Deployment automation**
+- **Configuration management** with environment-based configs
+- **CI/CD integration** with automated testing
 
-## Community & Support
+### 🌐 Enterprise Features
+- **Service discovery** and load balancing
+- **API versioning** and backward compatibility
+- **Multi-region deployment** with connection migration
+- **Compliance tools** for SOC2, GDPR, etc.
+- **Professional support** and training available
 
-### 📖 Documentation
-- Complete API reference with examples
-- Comprehensive tutorials and guides
-- Migration assistance from other frameworks
-- Best practices for production deployment
+## Documentation Structure
 
-### 🐛 Issues & Feedback
-- [GitHub Issues](https://github.com/your-org/quiccrunch/issues) for bug reports
-- [GitHub Discussions](https://github.com/your-org/quiccrunch/discussions) for questions
-- [Examples Repository](https://github.com/your-org/quiccrunch-examples) for more samples
-
-### 🤝 Contributing
-- [Contributing Guide](../CONTRIBUTING.md) for development setup
-- [Code of Conduct](../CODE_OF_CONDUCT.md) for community guidelines
-- [Development Roadmap](../ROADMAP.md) for future features
+```
+docs/
+├── 📋 Core Documentation
+│   ├── getting-started.md          # Quick start guide
+│   ├── setup.md                    # Installation and setup
+│   ├── macros.md                   # Procedural macros guide
+│   ├── testing.md                  # Testing strategies
+│   └── OPTIMIZATION_GUIDE.md       # Performance optimization
+│
+├── 📚 Tutorials
+│   └── tutorials/
+│       └── streaming-rpc.md        # Comprehensive streaming guide
+│
+├── 🔄 Migration Guides
+│   └── migration/
+│       ├── README.md               # Migration hub
+│       ├── grpc.md                 # gRPC migration
+│       └── thrift.md               # Apache Thrift migration
+│
+├── 🚀 Operations & Production
+│   └── operations/
+│       ├── README.md               # Operations overview
+│       ├── deployment.md           # Production deployment
+│       ├── troubleshooting.md      # Diagnostic procedures
+│       └── monitoring.md           # Observability setup
+│
+├── 📖 API Reference
+│   ├── api-generation/             # Auto-generated docs system
+│   └── reference/
+│       └── errors.md               # Complete error reference
+│
+└── 💡 Examples & Patterns
+    └── examples/
+        ├── README.md               # Production use cases
+        ├── high-throughput.md      # Performance examples
+        └── microservices.md        # Enterprise patterns
+```
 
 ## Comparison with Other Frameworks
 
@@ -179,6 +226,35 @@ println!("5 + 3 = {}", result);
 | **Error handling** | Rich types | Status codes | Status codes | Rich types |
 | **Performance** | Excellent | Good | Good | Good |
 
+## Community & Support
+
+### 📖 Comprehensive Documentation
+- **200+ pages** of detailed documentation and guides
+- **Auto-generated API docs** with live examples
+- **Migration assistance** from all major RPC frameworks  
+- **Production best practices** and deployment patterns
+- **Real-world examples** and enterprise use cases
+
+### 🐛 Issues & Feedback
+- [GitHub Issues](https://github.com/your-org/quiccrunch/issues) for bug reports and feature requests
+- [GitHub Discussions](https://github.com/your-org/quiccrunch/discussions) for questions and community support
+- [Documentation Site](https://docs.quiccrunch.dev) for searchable docs and tutorials
+
+### 🤝 Contributing
+- [Contributing Guide](../CONTRIBUTING.md) for development setup and guidelines
+- [Code of Conduct](../CODE_OF_CONDUCT.md) for community standards
+- [Development Roadmap](../ROADMAP.md) for planned features and releases
+
+### 💼 Enterprise Support
+- **Professional consulting** for large-scale migrations
+- **Training programs** for development teams
+- **Priority support** with SLA guarantees
+- **Custom feature development** for enterprise needs
+
 ---
 
 **Ready to get started?** Jump into the **[Getting Started Guide](getting-started.md)** and build your first QuicCrunch service in minutes!
+
+**Need to migrate?** Check out our **[Migration Hub](migration/README.md)** for comprehensive migration strategies from any RPC framework.
+
+**Going to production?** Follow our **[Operations Guide](operations/README.md)** for deployment, monitoring, and troubleshooting.

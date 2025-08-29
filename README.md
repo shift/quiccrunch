@@ -214,12 +214,42 @@ println!("Connection stats:
 
 ## Performance
 
-QuicCrunch is designed for high performance:
+QuicCrunch includes several performance optimizations that can be enabled based on your workload:
 
-- Zero-copy message handling where possible
-- Stream multiplexing to avoid head-of-line blocking
-- Efficient binary protocol
-- Minimal allocations in hot paths
+### Performance Features
+
+- **Memory Pool Optimizations**: Thread-local buffer pools that provide significant benefits for medium to large messages (8KB+)
+- **Adaptive Strategy Selection**: Automatically chooses the best optimization approach based on message size
+- **Lock-Free Channels**: High-concurrency channel implementation for multi-stream workloads
+- **Zero-copy message handling**: Where possible to minimize memory allocations
+- **Stream multiplexing**: Avoids head-of-line blocking
+
+### Build Configurations
+
+Enable performance optimizations based on your workload:
+
+```toml
+# Small messages (<8KB) - use defaults
+quiccrunch = { version = "0.1", features = ["backend-tquic"] }
+
+# Medium messages (8KB-64KB) - enable memory pools
+quiccrunch = { version = "0.1", features = ["backend-tquic", "memory-pools"] }
+
+# Large messages (64KB+) - full optimizations
+quiccrunch = { version = "0.1", features = ["backend-tquic", "adaptive-optimizations"] }
+
+# High concurrency workloads - add lock-free channels
+quiccrunch = { version = "0.1", features = ["backend-tquic", "adaptive-optimizations", "lock-free-channels"] }
+```
+
+### Performance Characteristics
+
+Based on actual testing:
+- **Memory pools**: 9-10% improvement for medium to large messages
+- **Adaptive strategies**: Automatic optimization selection prevents performance regressions
+- **tQUIC backend**: ~3x better performance than Quinn backend in most scenarios
+
+**Note**: SIMD optimizations are currently experimental and may not provide benefits in all scenarios.
 
 ### Power Monitoring
 
@@ -250,6 +280,41 @@ Security is enabled by default:
 - Certificate-based authentication
 - Built-in certificate generation utilities
 
+## Examples and Containerization
+
+QuicCrunch includes comprehensive examples showing how to build and containerize applications:
+
+- **Calculator Service**: Mathematical RPC service with JSON protocol
+- **Chat Service**: Multi-user chat with rooms and message history
+- **Echo Service**: Simple request/response demonstration
+- **Development Environment**: Complete Docker-based development setup
+- **Integration Tests**: Multi-service testing framework
+- **Performance Benchmarks**: Latency, throughput, and load testing
+
+### Quick Start with Examples
+
+```bash
+# Navigate to examples directory
+cd examples
+
+# Start all example services
+make up
+
+# Test calculator service
+docker-compose exec calculator-server calculator-client --operation add --a 5 --b 3
+
+# Test chat service interactively
+docker-compose run --rm chat-server chat-client --user alice --interactive
+
+# Run integration tests
+make test-integration
+
+# Run performance benchmarks
+make test-performance
+```
+
+See [examples/README.md](examples/README.md) for complete documentation.
+
 ## Testing
 
 Run the test suite:
@@ -268,6 +333,17 @@ Run benchmarks:
 
 ```bash
 nix develop -c cargo bench
+```
+
+### Container-based Testing
+
+For comprehensive testing including multi-service integration:
+
+```bash
+cd examples
+make test           # Run all tests
+make dev-env        # Start development environment
+make validate       # Validate setup
 ```
 
 ## License

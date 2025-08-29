@@ -1,0 +1,38 @@
+[package]
+name = "quiccrunch-integration-tests"
+version = "0.1.0"
+edition = "2021"
+description = "Integration tests for QuicCrunch example applications"
+
+[dependencies]
+quiccrunch-core = { path = "../../quiccrunch-core" }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bytes = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Test framework
+tokio-test = "0.4"
+
+# Example application dependencies for testing
+quiccrunch-calculator = { path = "../../examples/applications/calculator" }
+quiccrunch-chat-service = { path = "../../examples/applications/chat-service" }
+
+[[test]]
+name = "calculator_integration"
+path = "tests/calculator_integration.rs"
+
+[[test]]
+name = "chat_integration"
+path = "tests/chat_integration.rs"
+
+[[test]]
+name = "multi_service_integration"
+path = "tests/multi_service_integration.rs"
+
+[[test]]
+name = "performance_integration"
+path = "tests/performance_integration.rs"

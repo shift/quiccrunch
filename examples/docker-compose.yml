@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  # Calculator Service
+  calculator-server:
+    build:
+      context: ./applications/calculator
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051/udp"
+    environment:
+      - RUST_LOG=info
+    command: ["calculator-server", "--address", "0.0.0.0:50051", "--verbose"]
+    healthcheck:
+      test: ["CMD", "calculator-client", "--server", "127.0.0.1:50051", "--operation", "add", "--a", "2", "--b", "2"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Chat Service
+  chat-server:
+    build:
+      context: ./applications/chat-service
+      dockerfile: Dockerfile
+    ports:
+      - "50052:50051/udp"
+    environment:
+      - RUST_LOG=info
+    command: ["chat-server", "--address", "0.0.0.0:50051", "--verbose", "--max-rooms", "20", "--max-users-per-room", "100"]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "echo 'test' | nc -u 127.0.0.1 50051 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Echo Service (simple example)
+  echo-server:
+    build:
+      context: ./applications/echo-service
+      dockerfile: Dockerfile
+    ports:
+      - "50053:50051/udp"
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
+
+  # Development Tools Container
+  dev-tools:
+    build:
+      context: ./containers/development
+      dockerfile: Dockerfile
+    volumes:
+      - ../..:/workspace
+      - dev-cargo-cache:/home/dev/.cargo
+    working_dir: /workspace
+    environment:
+      - RUST_LOG=debug
+    command: ["sleep", "infinity"]
+    profiles: ["dev"]
+
+  # Testing Container
+  integration-tests:
+    build:
+      context: ./containers/testing
+      dockerfile: Dockerfile
+    volumes:
+      - ../..:/workspace
+    working_dir: /workspace
+    environment:
+      - CALCULATOR_SERVER=calculator-server:50051
+      - CHAT_SERVER=chat-server:50051
+      - ECHO_SERVER=echo-server:50051
+    depends_on:
+      calculator-server:
+        condition: service_healthy
+      chat-server:
+        condition: service_healthy
+      echo-server:
+        condition: service_started
+    command: ["cargo", "test", "--manifest-path", "tests/integration/Cargo.toml"]
+    profiles: ["test"]
+
+  # Benchmarking Container
+  benchmark:
+    build:
+      context: ./containers/benchmarking
+      dockerfile: Dockerfile
+    volumes:
+      - ../..:/workspace
+      - benchmark-results:/results
+    working_dir: /workspace
+    environment:
+      - CALCULATOR_SERVER=calculator-server:50051
+      - CHAT_SERVER=chat-server:50051
+      - ECHO_SERVER=echo-server:50051
+      - BENCHMARK_DURATION=60s
+      - BENCHMARK_CONNECTIONS=100
+    depends_on:
+      calculator-server:
+        condition: service_healthy
+      chat-server:
+        condition: service_healthy
+      echo-server:
+        condition: service_started
+    profiles: ["benchmark"]
+
+volumes:
+  dev-cargo-cache:
+  benchmark-results:
+
+networks:
+  default:
+    driver: bridge

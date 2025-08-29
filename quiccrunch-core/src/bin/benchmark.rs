@@ -161,9 +161,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (cert, key) = cert_utils::generate_node_cert(&ca_cert_obj, "127.0.0.1")?;
     
     let tls_config = TlsConfig {
-        cert,
-        key,
-        ca_cert,
+        cert: cert.clone(),
+        key: key.clone(),
+        ca_cert: ca_cert.clone(),
+        cert_pem: None, // Will use DER format
+        key_pem: None,
+        ca_cert_pem: None,
     };
     
     match args.mode {

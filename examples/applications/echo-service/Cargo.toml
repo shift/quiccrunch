@@ -1,0 +1,20 @@
+[package]
+name = "quiccrunch-echo-service"
+version = "0.1.0"
+edition = "2021"
+description = "A simple echo service built with QuicCrunch RPC framework"
+
+[dependencies]
+quiccrunch-core = { path = "../../../quiccrunch-core" }
+tokio = { version = "1.0", features = ["full"] }
+clap = { version = "4.0", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "echo-server"
+path = "src/server.rs"
+
+[[bin]]
+name = "echo-client"
+path = "src/client.rs"

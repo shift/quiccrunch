@@ -22,10 +22,10 @@ struct BufferPool {
 }
 
 impl BufferPool {
-    const SMALL_THRESHOLD: usize = 4 * 1024;        // 4KB
-    const MEDIUM_THRESHOLD: usize = 64 * 1024;      // 64KB
-    const LARGE_THRESHOLD: usize = 1024 * 1024;     // 1MB
-    const MAX_POOL_SIZE: usize = 16;                // Max buffers per pool
+    const SMALL_THRESHOLD: usize = 8 * 1024;        // 8KB (was 4KB)
+    const MEDIUM_THRESHOLD: usize = 64 * 1024;      // 64KB (unchanged)
+    const LARGE_THRESHOLD: usize = 1024 * 1024;     // 1MB (unchanged)
+    const MAX_POOL_SIZE: usize = 32;                // Max buffers per pool (increased from 16)
 
     fn new() -> Self {
         Self {
@@ -44,32 +44,52 @@ impl BufferPool {
             _ => &mut self.huge_buffers,
         };
 
-        if let Some(mut buffer) = pool.pop_front() {
-            buffer.clear();
-            if buffer.capacity() >= size {
-                // Reuse existing buffer - this is a hit!
-                POOL_STATS.with(|stats| {
-                    stats.borrow_mut().pool_hits += 1;
-                });
-                buffer.reserve(size.saturating_sub(buffer.capacity()));
-                return buffer;
+        // Try to find a suitable buffer in the pool
+        for i in 0..pool.len() {
+            if let Some(buffer) = pool.get(i) {
+                if buffer.capacity() >= size {
+                    // Found a suitable buffer - remove it and mark as hit
+                    let mut reused_buffer = pool.remove(i).unwrap();
+                    reused_buffer.clear();
+                    reused_buffer.resize(size, 0);
+                    
+                    POOL_STATS.with(|stats| {
+                        stats.borrow_mut().pool_hits += 1;
+                    });
+                    return reused_buffer;
+                }
             }
         }
 
-        // Allocate new buffer - this is a miss
+        // No suitable buffer found - allocate new buffer (miss)
         POOL_STATS.with(|stats| {
             let mut s = stats.borrow_mut();
             s.pool_misses += 1;
             s.allocations += 1;
         });
-        Vec::with_capacity(size)
+        
+        // Allocate with appropriate capacity for the size category
+        let capacity = match size {
+            s if s <= Self::SMALL_THRESHOLD => Self::SMALL_THRESHOLD,
+            s if s <= Self::MEDIUM_THRESHOLD => Self::MEDIUM_THRESHOLD,
+            s if s <= Self::LARGE_THRESHOLD => Self::LARGE_THRESHOLD,
+            _ => size.max(Self::LARGE_THRESHOLD),
+        };
+        
+        let mut buffer = Vec::with_capacity(capacity);
+        buffer.resize(size, 0);
+        buffer
     }
 
-    fn return_buffer(&mut self, buffer: Vec<u8>) {
+    fn return_buffer(&mut self, mut buffer: Vec<u8>) {
         POOL_STATS.with(|stats| {
             stats.borrow_mut().deallocations += 1;
         });
 
+        // Clear the buffer but retain capacity
+        buffer.clear();
+
+        // Determine correct pool based on capacity (should match allocation strategy)
         let pool = match buffer.capacity() {
             c if c <= Self::SMALL_THRESHOLD => &mut self.small_buffers,
             c if c <= Self::MEDIUM_THRESHOLD => &mut self.medium_buffers,
@@ -77,6 +97,7 @@ impl BufferPool {
             _ => &mut self.huge_buffers,
         };
 
+        // Only keep the buffer if we have room in the pool
         if pool.len() < Self::MAX_POOL_SIZE {
             pool.push_back(buffer);
         }

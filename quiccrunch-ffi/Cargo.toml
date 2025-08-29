@@ -1,0 +1,44 @@
+[package]
+name = "quiccrunch-ffi"
+version = "0.1.0"
+edition = "2021"
+authors = ["QuicCrunch Contributors"]
+description = "C FFI bindings for QuicCrunch high-performance QUIC library"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/shift/quickcrunch"
+homepage = "https://github.com/shift/quickcrunch"
+documentation = "https://docs.rs/quiccrunch-ffi"
+readme = "README.md"
+keywords = ["quic", "ffi", "c-bindings", "networking", "rpc"]
+categories = ["external-ffi-bindings", "network-programming", "api-bindings"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+quiccrunch-core = { path = "../quiccrunch-core" }
+tokio = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# FFI-specific dependencies
+libc = "0.2"
+once_cell = "1.19"
+
+[build-dependencies]
+cbindgen = "0.26"
+
+[features]
+default = []
+
+# Enable additional features from core
+high-performance = ["quiccrunch-core/high-performance"]
+telemetry = ["quiccrunch-core/telemetry"]
+grpc-comparison = ["quiccrunch-core/grpc-comparison"]
+
+# FFI-specific features
+generate-headers = []  # Generate C headers during build

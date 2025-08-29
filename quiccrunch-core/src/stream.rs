@@ -1,45 +1,10 @@
 use std::time::Duration;
 use bytes::Bytes;
-use tokio::time;
 use tokio::io::AsyncWriteExt;
+use tokio::time;
 #[cfg(feature = "backend-quinn")]
 use quinn::{SendStream as QuinnSend, RecvStream as QuinnRecv};
-#[cfg(feature = "backend-tquic")]
-#[derive(Clone, Debug)]
-pub struct TquicStreamHandle {
-    stream_id: u64,
-    // Store a clone of the command channel to send stream operations
-    cmd_tx: tokio::sync::mpsc::Sender<crate::transport::tquic::StreamCmd>,
-}
 
-#[cfg(feature = "backend-tquic")]
-impl TquicStreamHandle {
-    pub fn new(stream_id: u64, cmd_tx: tokio::sync::mpsc::Sender<crate::transport::tquic::StreamCmd>) -> Self {
-        Self { stream_id, cmd_tx }
-    }
-}
-
-#[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
-#[derive(Clone, Debug)]
-pub struct SimpleTquicStreamHandle {
-    stream_id: u64,
-}
-
-#[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
-impl SimpleTquicStreamHandle {
-    pub fn new(stream_id: u64) -> Self {
-        Self { stream_id }
-    }
-    
-    pub fn get_global_bridge() -> &'static crate::transport::tquic::StreamBridge {
-        crate::transport::tquic::StreamBridge::global()
-    }
-}
-
-#[cfg(feature = "backend-tquic")]
-pub type TquicSend = TquicStreamHandle;
-#[cfg(feature = "backend-tquic")]
-pub type TquicRecv = TquicStreamHandle;
 #[cfg(feature = "telemetry")]
 use tracing::{info, error};
 
@@ -57,30 +22,15 @@ pub struct QuicStream {
 enum StreamInner {
     #[cfg(feature = "backend-quinn")]
     Quinn { send: QuinnSend, recv: QuinnRecv },
-    #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
-    Tquic { send: TquicSend, recv: TquicRecv },
-    #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
-    SimpleTquic { send: SimpleTquicStreamHandle, recv: SimpleTquicStreamHandle },
     #[cfg(feature = "lock-free-channels")]
     LockFree { handle: crate::lockfree::StreamHandle },
 }
 
 impl QuicStream {
-    #[cfg(all(not(feature = "backend-tquic"), feature = "backend-quinn"))]
-    pub fn new_tquic<_S, _R>(_send: _S, _recv: _R, _max_message_size: usize) -> Self {
-        // Fallback to placeholder; should not be called when tquic disabled
-        unimplemented!("tquic backend not enabled")
-    }
     /// Create a new QuicStream (Quinn)
     #[cfg(feature = "backend-quinn")]
     pub fn new(send: QuinnSend, recv: QuinnRecv, max_message_size: usize) -> Self {
         Self { inner: StreamInner::Quinn { send, recv }, max_message_size }
-    }
-
-    /// Create a new QuicStream (tQUIC with lock-free channels)
-    #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
-    pub fn new_tquic(send: TquicSend, recv: TquicRecv, max_message_size: usize) -> Self {
-        Self { inner: StreamInner::Tquic { send, recv }, max_message_size }
     }
     
     /// Create a new QuicStream (Lock-free)
@@ -89,13 +39,11 @@ impl QuicStream {
         Self { inner: StreamInner::LockFree { handle }, max_message_size }
     }
     
-    /// Create a simple tQUIC stream without lock-free channels (performance regression fix)
-    #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
-    pub fn new_simple_tquic(stream_id: u64, max_message_size: usize) -> Self {
-        // Create a simple tQUIC stream handle that directly uses StreamBridge
-        let send = SimpleTquicStreamHandle::new(stream_id);
-        let recv = SimpleTquicStreamHandle::new(stream_id);
-        Self { inner: StreamInner::SimpleTquic { send, recv }, max_message_size }
+    /// Create a simple tQUIC stream (fallback implementation)
+    #[cfg(feature = "backend-tquic")]
+    pub fn new_simple_tquic(_stream_id: u64, _max_message_size: usize) -> Self {
+        // For now, return an error for unsupported feature combination
+        panic!("Simple tquic streams require proper integration - not yet implemented");
     }
 
     /// Send a message over the stream with flow control
@@ -116,8 +64,6 @@ impl QuicStream {
         let len = data.len() as u32;
         let header = len.to_le_bytes();
 
-        // helper removed; wrote directly to streams to avoid unused warnings
-
         match &mut self.inner {
             #[cfg(feature = "backend-quinn")]
             StreamInner::Quinn { send, .. } => {
@@ -129,44 +75,8 @@ impl QuicStream {
                     let chunk_size = remaining.len().min(CHUNK_SIZE);
                     let (chunk, rest) = remaining.split_at(chunk_size);
                     
-                    // Use SIMD-optimized sending if enabled
-                    #[cfg(feature = "simd-optimizations")]
-                    {
-                        if chunk_size >= 32 {
-                            // For large chunks, use memory pool for temporary buffer
-                            #[cfg(feature = "memory-pools")]
-                            {
-                                let mut pooled_chunk = crate::memory::PooledBuffer::get(chunk_size);
-                                pooled_chunk.resize(chunk_size, 0);
-                                let features = crate::simd::CpuFeatures::detect();
-                                if features.avx2 {
-                                    crate::simd::fast_copy(chunk, pooled_chunk.as_mut_slice());
-                                    if let Err(e) = send.write_all(pooled_chunk.as_slice()).await { 
-                                        return Err(crate::TransportError::StreamError(e.to_string())); 
-                                    }
-                                } else {
-                                    if let Err(e) = send.write_all(chunk).await { 
-                                        return Err(crate::TransportError::StreamError(e.to_string())); 
-                                    }
-                                }
-                            }
-                            #[cfg(not(feature = "memory-pools"))]
-                            {
-                                if let Err(e) = send.write_all(chunk).await { 
-                                    return Err(crate::TransportError::StreamError(e.to_string())); 
-                                }
-                            }
-                        } else {
-                            if let Err(e) = send.write_all(chunk).await { 
-                                return Err(crate::TransportError::StreamError(e.to_string())); 
-                            }
-                        }
-                    }
-                    #[cfg(not(feature = "simd-optimizations"))]
-                    {
-                        if let Err(e) = send.write_all(chunk).await { 
-                            return Err(crate::TransportError::StreamError(e.to_string())); 
-                        }
+                    if let Err(e) = send.write_all(chunk).await { 
+                        return Err(crate::TransportError::StreamError(e.to_string())); 
                     }
                     
                     if let Err(e) = send.flush().await { return Err(crate::TransportError::StreamError(e.to_string())); }
@@ -174,90 +84,26 @@ impl QuicStream {
                 }
                 if let Err(e) = send.flush().await { return Err(crate::TransportError::StreamError(e.to_string())); }
             }
-            #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
-            StreamInner::Tquic { send, .. } => {
-                // For tquic, send write command through the stream handle
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                if let Err(_) = send.cmd_tx.send(crate::transport::tquic::StreamCmd::Write { 
-                    stream_id: send.stream_id, 
-                    data: bytes::Bytes::from(header.to_vec()),
-                    fin: false,
-                    rsp: tx 
-                }).await {
-                    return Err(crate::TransportError::StreamError("tquic write channel closed".into()));
-                }
-                let _ = rx.await.map_err(|_| crate::TransportError::StreamError("tquic write canceled".into()))??;
-
-                // Write data in chunks
-                const CHUNK_SIZE: usize = 262_144; // 256KB chunks for optimal throughput (increased from 32KB)
-                let mut remaining = data.as_ref();
-                while !remaining.is_empty() {
-                    let chunk_size = remaining.len().min(CHUNK_SIZE);
-                    let (chunk, rest) = remaining.split_at(chunk_size);
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    if let Err(_) = send.cmd_tx.send(crate::transport::tquic::StreamCmd::Write { 
-                        stream_id: send.stream_id, 
-                        data: bytes::Bytes::from(chunk.to_vec()),
-                        fin: false,
-                        rsp: tx 
-                    }).await {
-                        return Err(crate::TransportError::StreamError("tquic write channel closed".into()));
-                    }
-                    let _ = rx.await.map_err(|_| crate::TransportError::StreamError("tquic write canceled".into()))??;
-                    remaining = rest;
-                }
-            }
-            #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
-            StreamInner::SimpleTquic { send, .. } => {
-                // Simple direct tQUIC implementation using global StreamBridge (performance regression fix)
-                let bridge = SimpleTquicStreamHandle::get_global_bridge();
-                
-                #[cfg(feature = "telemetry")]
-                tracing::info!("SimpleTquic write: stream_id={}, header_len={}, data_len={}", 
-                               send.stream_id, header.len(), data.len());
-                
-                // Write header and data to the global bridge
-                bridge.write(send.stream_id, &header).await;
-                bridge.write(send.stream_id, data.as_ref()).await;
-            }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
                 // Use lock-free stream handle for optimal performance
                 handle.write(bytes::Bytes::from(header.to_vec()), false).await?;
                 
-                // Write data in optimized chunks using adaptive optimization
+                // Write data in optimized chunks
                 const CHUNK_SIZE: usize = 262_144; // 256KB chunks
                 let mut remaining = data.as_ref();
                 while !remaining.is_empty() {
                     let chunk_size = remaining.len().min(CHUNK_SIZE);
                     let (chunk, rest) = remaining.split_at(chunk_size);
                     
-                    // Adaptive optimization based on chunk characteristics
-                    // PERFORMANCE WARNING: These optimizations may add overhead for small messages
-                    #[cfg(feature = "adaptive-optimizations")]
-                    {
-                        let mut buffer = crate::adaptive::allocate_optimized(chunk.len());
-                        buffer.copy_from_slice(chunk);
-                        handle.write(bytes::Bytes::from(buffer.into_vec()), false).await?;
-                    }
-                    #[cfg(all(not(feature = "adaptive-optimizations"), feature = "simd-optimizations"))]
-                    {
-                        let features = crate::simd::CpuFeatures::detect();
-                        if features.avx2 && chunk.len() >= 32 {
-                            // Use zero-allocation SIMD-optimized copy for large data
-                            let mut simd_buffer = Vec::with_capacity(chunk.len());
-                            unsafe { simd_buffer.set_len(chunk.len()); }
-                            crate::simd::fast_copy(chunk, &mut simd_buffer);
-                            handle.write(bytes::Bytes::from(simd_buffer), false).await?;
-                        } else {
-                            handle.write(bytes::Bytes::from(chunk.to_vec()), false).await?;
-                        }
-                    }
-                    #[cfg(all(not(feature = "adaptive-optimizations"), not(feature = "simd-optimizations")))]
                     handle.write(bytes::Bytes::from(chunk.to_vec()), false).await?;
                     
                     remaining = rest;
                 }
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                return Err(crate::TransportError::StreamError("Unsupported stream backend".into()));
             }
         }
 
@@ -267,7 +113,6 @@ impl QuicStream {
         Ok(())
     }
 
-    /// Receive a message from the stream with flow control
     /// Close the stream
     pub async fn close(&mut self) -> crate::Result<()> {
         match &mut self.inner {
@@ -276,29 +121,13 @@ impl QuicStream {
                 send.finish().await.map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                 Ok(())
             }
-            #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
-            StreamInner::Tquic { send, .. } => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                if let Err(_) = send.cmd_tx.send(crate::transport::tquic::StreamCmd::Shutdown { 
-                    stream_id: send.stream_id, 
-                    rsp: tx 
-                }).await {
-                    return Err(crate::TransportError::StreamError("tquic stream shutdown channel closed".into()));
-                }
-                rx.await.map_err(|_| crate::TransportError::StreamError("tquic shutdown canceled".into()))??;
-                Ok(())
-            }
-            #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
-            StreamInner::SimpleTquic { .. } => {
-                // Simple direct tQUIC implementation (performance regression fix)
-                // Mock shutdown - just return success
-                #[cfg(feature = "telemetry")]
-                tracing::info!("SimpleTquic shutdown");
-                Ok(())
-            }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
                 handle.close().await?;
+                Ok(())
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
                 Ok(())
             }
         }
@@ -333,47 +162,6 @@ impl QuicStream {
                     },
                 }
             }
-            #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
-            StreamInner::Tquic { recv, .. } => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                if let Err(_) = recv.cmd_tx.send(crate::transport::tquic::StreamCmd::Read { 
-                    stream_id: recv.stream_id, 
-                    len: 4,
-                    rsp: tx 
-                }).await {
-                    return Err(crate::TransportError::StreamError("tquic read channel closed".into()));
-                }
-                let header_result = time::timeout(READ_TIMEOUT, rx).await;
-                match header_result {
-                    Ok(Ok(Ok(Some(data)))) if data.len() >= 4 => {
-                        header.copy_from_slice(&data[..4]);
-                    },
-                    Ok(Ok(Ok(Some(_)))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
-                    Ok(Ok(Ok(None))) => return Err(crate::TransportError::StreamError("tquic stream closed".into())),
-                    Ok(Ok(Err(e))) => return Err(e),
-                    Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
-                    Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
-                }
-            }
-            #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
-            StreamInner::SimpleTquic { recv, .. } => {
-                // Simple direct tQUIC implementation using global StreamBridge (performance regression fix)
-                let bridge = SimpleTquicStreamHandle::get_global_bridge();
-                
-                #[cfg(feature = "telemetry")]
-                tracing::info!("SimpleTquic read: stream_id={}, reading 4 bytes header", recv.stream_id);
-                
-                // Read header from the global bridge
-                if let Some(header_data) = bridge.read(recv.stream_id, 4).await {
-                    if header_data.len() >= 4 {
-                        header.copy_from_slice(&header_data[..4]);
-                    } else {
-                        return Err(crate::TransportError::StreamError("incomplete header read".into()));
-                    }
-                } else {
-                    return Err(crate::TransportError::StreamError("no header data available".into()));
-                }
-            }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
                 // Use lock-free read for optimal performance
@@ -388,6 +176,10 @@ impl QuicStream {
                     Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
                 }
             }
+            #[allow(unreachable_patterns)]
+            _ => {
+                return Err(crate::TransportError::StreamError("Unsupported stream backend".into()));
+            }
         }
 
         // Parse message length and prepare buffer
@@ -397,15 +189,12 @@ impl QuicStream {
                 "Announced message size {} exceeds limit {}", msg_len, self.max_message_size
             )));
         }
-        // Use memory pool for zero-allocation buffer management
-        #[cfg(feature = "memory-pools")]
-        let mut pooled_buffer = crate::memory::PooledBuffer::get(msg_len);
-        #[cfg(not(feature = "memory-pools"))]
+        
         let mut buffer = Vec::with_capacity(msg_len);
         let mut bytes_read = 0;
 
         // Read message content in chunks with flow control
-        const CHUNK_SIZE: usize = 262_144; // 256KB chunks for optimal throughput (increased from 32KB)
+        const CHUNK_SIZE: usize = 262_144; // 256KB chunks for optimal throughput
         
         while bytes_read < msg_len {
             // Calculate next chunk size
@@ -420,40 +209,7 @@ impl QuicStream {
                     let read_res = time::timeout(READ_TIMEOUT, recv.read_exact(&mut chunk)).await;
                     match read_res {
                         Ok(Ok(_)) => {
-                            #[cfg(feature = "memory-pools")]
-                            {
-                                // Use SIMD-optimized copy if available
-                                #[cfg(feature = "simd-optimizations")]
-                                {
-                                    let features = crate::simd::CpuFeatures::detect();
-                                    if features.avx2 && chunk.len() >= 32 {
-                                        // Resize buffer to accommodate new data
-                                        let current_len = pooled_buffer.len();
-                                        pooled_buffer.resize(current_len + chunk_size, 0);
-                                        crate::simd::fast_copy(&chunk, &mut pooled_buffer.as_mut_slice()[current_len..current_len + chunk_size]);
-                                    } else {
-                                        pooled_buffer.extend_from_slice(&chunk);
-                                    }
-                                }
-                                #[cfg(not(feature = "simd-optimizations"))]
-                                pooled_buffer.extend_from_slice(&chunk);
-                            }
-                            #[cfg(not(feature = "memory-pools"))]
-                            {
-                                #[cfg(feature = "simd-optimizations")]
-                                {
-                                    let features = crate::simd::CpuFeatures::detect();
-                                    if features.avx2 && chunk.len() >= 32 {
-                                        // For Vec, we still benefit from SIMD copies
-                                        buffer.resize(bytes_read + chunk_size, 0);
-                                        crate::simd::fast_copy(&chunk, &mut buffer[bytes_read..bytes_read + chunk_size]);
-                                    } else {
-                                        buffer.extend_from_slice(&chunk);
-                                    }
-                                }
-                                #[cfg(not(feature = "simd-optimizations"))]
-                                buffer.extend_from_slice(&chunk);
-                            }
+                            buffer.extend_from_slice(&chunk);
                             bytes_read += chunk_size;
                             
                             #[cfg(feature = "telemetry")]
@@ -478,82 +234,6 @@ impl QuicStream {
                         },
                     }
                 }
-                #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
-                StreamInner::Tquic { recv, .. } => {
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    if let Err(_) = recv.cmd_tx.send(crate::transport::tquic::StreamCmd::Read { 
-                        stream_id: recv.stream_id, 
-                        len: chunk_size,
-                        rsp: tx 
-                    }).await {
-                        return Err(crate::TransportError::StreamError("tquic read channel closed".into()));
-                    }
-                    let read_res = time::timeout(READ_TIMEOUT, rx).await;
-                    match read_res {
-                        Ok(Ok(Ok(Some(data)))) => {
-                            if data.len() != chunk_size {
-                                return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
-                            }
-                            #[cfg(feature = "memory-pools")]
-                            {
-                                #[cfg(feature = "simd-optimizations")]
-                                {
-                                    let features = crate::simd::CpuFeatures::detect();
-                                    if features.avx2 && data.len() >= 32 {
-                                        let current_len = pooled_buffer.len();
-                                        pooled_buffer.resize(current_len + chunk_size, 0);
-                                        crate::simd::fast_copy(&data, &mut pooled_buffer.as_mut_slice()[current_len..current_len + chunk_size]);
-                                    } else {
-                                        pooled_buffer.extend_from_slice(&data);
-                                    }
-                                }
-                                #[cfg(not(feature = "simd-optimizations"))]
-                                pooled_buffer.extend_from_slice(&data);
-                            }
-                            #[cfg(not(feature = "memory-pools"))]
-                            {
-                                #[cfg(feature = "simd-optimizations")]
-                                {
-                                    let features = crate::simd::CpuFeatures::detect();
-                                    if features.avx2 && data.len() >= 32 {
-                                        buffer.resize(bytes_read + chunk_size, 0);
-                                        crate::simd::fast_copy(&data, &mut buffer[bytes_read..bytes_read + chunk_size]);
-                                    } else {
-                                        buffer.extend_from_slice(&data);
-                                    }
-                                }
-                                #[cfg(not(feature = "simd-optimizations"))]
-                                buffer.extend_from_slice(&data);
-                            }
-                            bytes_read += chunk_size;
-                        },
-                        Ok(Ok(Ok(None))) => return Err(crate::TransportError::StreamError("tquic stream closed during read".into())),
-                        Ok(Ok(Err(e))) => return Err(e),
-                        Ok(Err(_)) => return Err(crate::TransportError::StreamError("tquic read canceled".into())),
-                        Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
-                    }
-                }
-                #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
-                StreamInner::SimpleTquic { recv, .. } => {
-                    // Simple direct tQUIC implementation using global StreamBridge (performance regression fix)
-                    let bridge = SimpleTquicStreamHandle::get_global_bridge();
-                    
-                    #[cfg(feature = "telemetry")]
-                    tracing::info!("SimpleTquic read: stream_id={}, reading {} bytes", recv.stream_id, chunk_size);
-                    
-                    // Read chunk from the global bridge
-                    if let Some(chunk_data) = bridge.read(recv.stream_id, chunk_size).await {
-                        #[cfg(feature = "memory-pools")]
-                        pooled_buffer.extend_from_slice(&chunk_data);
-                        #[cfg(not(feature = "memory-pools"))]
-                        buffer.extend_from_slice(&chunk_data);
-                        
-                        bytes_read += chunk_data.len();
-                    } else {
-                        // No more data available
-                        break;
-                    }
-                }
                 #[cfg(feature = "lock-free-channels")]
                 StreamInner::LockFree { handle } => {
                     // Use lock-free read for optimal chunk reading performance
@@ -563,37 +243,7 @@ impl QuicStream {
                             if data.len() != chunk_size {
                                 return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
                             }
-                            #[cfg(feature = "memory-pools")]
-                            {
-                                #[cfg(feature = "simd-optimizations")]
-                                {
-                                    let features = crate::simd::CpuFeatures::detect();
-                                    if features.avx2 && data.len() >= 32 {
-                                        let current_len = pooled_buffer.len();
-                                        pooled_buffer.resize(current_len + chunk_size, 0);
-                                        crate::simd::fast_copy(&data, &mut pooled_buffer.as_mut_slice()[current_len..current_len + chunk_size]);
-                                    } else {
-                                        pooled_buffer.extend_from_slice(&data);
-                                    }
-                                }
-                                #[cfg(not(feature = "simd-optimizations"))]
-                                pooled_buffer.extend_from_slice(&data);
-                            }
-                            #[cfg(not(feature = "memory-pools"))]
-                            {
-                                #[cfg(feature = "simd-optimizations")]
-                                {
-                                    let features = crate::simd::CpuFeatures::detect();
-                                    if features.avx2 && data.len() >= 32 {
-                                        buffer.resize(bytes_read + chunk_size, 0);
-                                        crate::simd::fast_copy(&data, &mut buffer[bytes_read..bytes_read + chunk_size]);
-                                    } else {
-                                        buffer.extend_from_slice(&data);
-                                    }
-                                }
-                                #[cfg(not(feature = "simd-optimizations"))]
-                                buffer.extend_from_slice(&data);
-                            }
+                            buffer.extend_from_slice(&data);
                             bytes_read += chunk_size;
                         },
                         Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed during read".into())),
@@ -601,21 +251,16 @@ impl QuicStream {
                         Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
                     }
                 }
+                #[allow(unreachable_patterns)]
+                _ => {
+                    return Err(crate::TransportError::StreamError("Unsupported stream backend".into()));
+                }
             }
         }
 
         #[cfg(feature = "telemetry")]
         info!(message_size = %msg_len, "Message received successfully");
 
-        {
-            #[cfg(feature = "memory-pools")]
-            {
-                Ok(Bytes::from(pooled_buffer.into_vec()))
-            }
-            #[cfg(not(feature = "memory-pools"))]
-            {
-                Ok(Bytes::from(buffer))
-            }
-        }
+        Ok(Bytes::from(buffer))
     }
 }
