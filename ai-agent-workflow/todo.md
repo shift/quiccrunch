@@ -25,6 +25,15 @@ ai-agent-workflow/
 ## Active Tasks
 *Currently in progress*
 
+### Clean Up Compiler Warnings
+- **Status**: Active
+- **Priority**: Medium
+- **Created**: 17:52 CEST
+- **Context**: [context/cleanup-compiler-warnings.md](context/cleanup-compiler-warnings.md)
+- **Task**: [tasks/cleanup-compiler-warnings.md](tasks/cleanup-compiler-warnings.md)
+- **Description**: Remove all 52+ compiler warnings to improve code quality
+- **Current Phase**: Implementation Agent - analyzing and fixing warnings
+
 ### Setup Project Workflow
 - **Status**: Complete
 - **Priority**: P0 CRITICAL
@@ -58,6 +67,7 @@ ai-agent-workflow/
 
 ## P2 MEDIUM Priority Tasks
 *Enhancements and optimizations*
+- 🔄 **Clean Up Compiler Warnings**: Remove all 52+ compiler warnings
 - 📋 **Batch Packet Processing**: Enhanced io_uring batch operations
 - 📋 **NUMA-Aware Optimizations**: Multi-socket system optimization
 - 📋 **Zero-Allocation Hot Paths**: Memory allocation elimination
