@@ -7,6 +7,34 @@ Create comprehensive documentation for the benchmark suite, analyze performance 
 
 ### CRITICAL RULES FOR AI AGENTS
 
+#### 🚨 RULE 0: NEVER FABRICATE ANYTHING IN OUTPUTS
+**ABSOLUTE LAW: Never fabricate, invent, or make up any information in any output.**
+
+##### What This Means:
+- ❌ **Never invent performance numbers** (e.g., "0.8ms latency" without measurement)
+- ❌ **Never fabricate hardware specs** (e.g., "AMD Ryzen 9" when unknown)
+- ❌ **Never make up network speeds** (e.g., "10Gbps" when untested)
+- ❌ **Never invent test results** (e.g., "12,500 RPS" without benchmarking)
+- ❌ **Never create fictional citations** (e.g., fake research papers)
+- ❌ **Never assume unverified details** (e.g., "Linux 6.1" when unspecified)
+- ✅ **Use actual measured data** when available
+- ✅ **State "unknown" or "not measured"** when data is unavailable
+- ✅ **Use "estimated" or "projected"** with clear disclaimers
+- ✅ **Cite real sources** with verifiable URLs
+- ✅ **Be honest about limitations** and what hasn't been tested
+
+##### Consequences of Fabrication:
+- **Immediate Trust Loss**: Users cannot verify claims
+- **Legal Liability**: Unverifiable performance claims
+- **Professional Damage**: Reputation harm from false information
+- **Technical Debt**: Future corrections become credibility issues
+
+##### Verification Requirements:
+- **Every number must have a source** or clear estimation methodology
+- **Every claim must be verifiable** through independent means
+- **Every assumption must be stated** explicitly
+- **Every limitation must be disclosed** upfront
+
 #### 🚨 RULE 1: NO MOCKS EXCEPT IN TEST CODE
 **ABSOLUTE REQUIREMENT: Never use mock data or fabricated results in any production code, documentation, or marketing materials.**
 
