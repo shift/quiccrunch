@@ -5,6 +5,106 @@
 ### Objective
 Create comprehensive documentation for the benchmark suite, analyze performance results, and maintain up-to-date project documentation.
 
+### CRITICAL RULES FOR AI AGENTS
+
+#### 🚨 RULE 1: NO MOCKS EXCEPT IN TEST CODE
+**ABSOLUTE REQUIREMENT: Never use mock data or fabricated results in any production code, documentation, or marketing materials.**
+
+##### Exceptions:
+- ✅ **Test code only**: Unit tests, integration tests, and example code may use mocks
+- ✅ **Documentation examples**: Code examples in docs may use simplified/mock data for clarity
+- ❌ **Performance claims**: Never use mock results for performance comparisons or marketing
+- ❌ **Benchmark results**: Always use real test data from actual benchmark runs
+- ❌ **Marketing materials**: Never fabricate performance numbers or comparisons
+
+##### Why This Matters:
+- **Trust**: Users must be able to verify performance claims
+- **Credibility**: Fabricated results damage reputation and trust
+- **Legal**: Performance claims must be substantiated
+- **Competition**: Real benchmarks provide competitive advantage
+
+##### Verification Requirements:
+- All performance claims must include test methodology
+- Benchmark results must be reproducible
+- Raw data must be available for independent verification
+- Test environment must be fully documented
+
+#### 🚨 RULE 2: NEVER DISABLE OR COMMENT OUT FEATURES
+**STRICT REQUIREMENT: Never disable, comment out, or remove implemented features without explicit user approval.**
+
+##### What This Means:
+- ❌ **Never comment out working code**
+- ❌ **Never add `#[cfg(disabled)]` or similar**
+- ❌ **Never remove feature implementations**
+- ❌ **Never disable tests or benchmarks**
+- ✅ **Fix compilation errors properly**
+- ✅ **Address warnings appropriately**
+- ✅ **Refactor code when necessary**
+- ✅ **Document deprecated features**
+
+##### When Feature Removal is Acceptable:
+- Only with **explicit user instruction**
+- Must be **documented in commit message**
+- Should be **replaced with better implementation**
+- Never done **unilaterally by AI agent**
+
+#### 🚨 RULE 3: NEVER DEVIATE FROM IMPLEMENTATION PLAN
+**MANDATORY: Always follow the established implementation and testing plan without deviation.**
+
+##### Requirements:
+- ❌ **Never change implementation approach without discussion**
+- ❌ **Never modify testing methodology without approval**
+- ❌ **Never alter performance targets unilaterally**
+- ❌ **Never deviate from architectural decisions**
+- ✅ **Follow established patterns and conventions**
+- ✅ **Maintain consistency with existing codebase**
+- ✅ **Ask for clarification when uncertain**
+- ✅ **Document any necessary changes**
+
+##### Decision Making Authority:
+- **You are NOT the decision maker** for architectural choices
+- **You are NOT authorized** to change implementation plans
+- **You are NOT permitted** to modify performance targets
+- **Always seek user approval** for significant changes
+- **Follow user instructions** precisely and completely
+
+#### 🚨 RULE 4: MAINTAIN CODE QUALITY STANDARDS
+**MANDATORY: All code must meet production quality standards.**
+
+##### Code Quality Requirements:
+- ✅ **Zero compilation errors**
+- ✅ **Address all warnings appropriately**
+- ✅ **Comprehensive error handling**
+- ✅ **Proper documentation**
+- ✅ **Performance optimization**
+- ✅ **Security best practices**
+- ✅ **Code review readiness**
+
+##### Testing Requirements:
+- ✅ **All tests must pass**
+- ✅ **Integration tests included**
+- ✅ **Performance benchmarks working**
+- ✅ **Edge cases covered**
+- ✅ **Error conditions tested**
+
+#### 🚨 RULE 5: TRANSPARENT COMMUNICATION
+**MANDATORY: Always be transparent about actions and limitations.**
+
+##### Communication Requirements:
+- ✅ **Explain what you're doing and why**
+- ✅ **Ask for clarification when needed**
+- ✅ **Report issues immediately**
+- ✅ **Document assumptions clearly**
+- ✅ **Provide status updates regularly**
+- ✅ **Be honest about capabilities and limitations**
+
+##### When to Seek Help:
+- **Uncertain about requirements**: Ask for clarification
+- **Encountering unexpected issues**: Report immediately
+- **Need architectural decisions**: Request user input
+- **Performance concerns**: Discuss with user
+- **Design questions**: Seek user guidance
+
 ### Documentation Requirements
 
 #### 1. Benchmark Suite Documentation
