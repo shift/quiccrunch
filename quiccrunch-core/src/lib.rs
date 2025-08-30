@@ -82,7 +82,6 @@ pub mod optimization_validation;
 
 // Zero-allocation components
 pub use memory::{FastBuffer, FastHeaderParser, FastMetrics, FastMetricsSnapshot, get_fast_buffer, return_fast_buffer};
-pub use error::ErrorCode;
 
 // Convenience module for all optimizations
 pub mod optimizations {

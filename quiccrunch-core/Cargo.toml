@@ -129,6 +129,10 @@ tonic-build = "0.10"
 name = "comprehensive_benchmark"
 required-features = ["benchmark-suite"]
 
+[[example]]
+name = "promotional_demo"
+path = "../examples/promotional_demo.rs"
+
 [[bin]]
 name = "benchmark"
 path = "src/bin/benchmark.rs"

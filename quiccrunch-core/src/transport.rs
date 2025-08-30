@@ -87,7 +87,7 @@ impl Default for TlsConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum ConnectionInner {
     #[cfg(feature = "backend-quinn")]
     Quinn(quinn::Connection),
@@ -622,7 +622,7 @@ pub struct CongestionState {
     pub is_congested: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Connection {
     inner: ConnectionInner,
     max_message_size: usize,

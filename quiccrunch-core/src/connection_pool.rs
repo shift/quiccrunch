@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
-use crate::transport::{QuicTransport, Connection, TlsConfig, TransportSettings};
+use crate::transport::{QuicTransport, Connection, TlsConfig, TransportSettings, Transport};
 use crate::Result;
 
 /// Configuration for connection pool behavior
@@ -134,9 +134,12 @@ impl ConnectionPool {
 
         if let Some(pool) = pools.get_mut(endpoint) {
             // Find a healthy, non-expired connection
+            let mut to_remove = Vec::new();
+            let mut found_connection = None;
+
             for (index, pooled_conn) in pool.iter_mut().enumerate() {
                 if pooled_conn.health == ConnectionHealth::Healthy &&
-                   !pooled_conn.is_expired(&self.config) {
+                    !pooled_conn.is_expired(&self.config) {
 
                     // Perform health check if needed
                     if pooled_conn.needs_health_check(
@@ -148,11 +151,12 @@ impl ConnectionPool {
                         if let Some(healthy_conn) = self.health_check_connection(pooled_conn.clone()).await {
                             pooled_conn.mark_used();
                             let connection = healthy_conn.connection.clone();
-                            pool.swap_remove(index); // Remove from pool (will be returned later)
-                            return Some(connection);
+                            to_remove.push(index);
+                            found_connection = Some(connection);
+                            break;
                         } else {
                             // Connection is unhealthy, remove it
-                            pool.swap_remove(index);
+                            to_remove.push(index);
                             *self.total_connections.write().await -= 1;
                             continue;
                         }
@@ -161,9 +165,19 @@ impl ConnectionPool {
                     // Connection is healthy
                     pooled_conn.mark_used();
                     let connection = pooled_conn.connection.clone();
-                    pool.swap_remove(index); // Remove from pool (will be returned later)
-                    return Some(connection);
+                    to_remove.push(index);
+                    found_connection = Some(connection);
+                    break;
                 }
+            }
+
+            // Remove connections from pool (in reverse order to maintain indices)
+            for index in to_remove.into_iter().rev() {
+                pool.swap_remove(index);
+            }
+
+            if let Some(connection) = found_connection {
+                return Some(connection);
             }
         }
 
