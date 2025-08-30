@@ -17,23 +17,33 @@ Create comprehensive documentation for the benchmark suite, analyze performance 
 - ❌ **Never invent test results** (e.g., "12,500 RPS" without benchmarking)
 - ❌ **Never create fictional citations** (e.g., fake research papers)
 - ❌ **Never assume unverified details** (e.g., "Linux 6.1" when unspecified)
+- ❌ **Never present mock data as real** (e.g., "measured results" when actually estimated)
 - ✅ **Use actual measured data** when available
 - ✅ **State "unknown" or "not measured"** when data is unavailable
 - ✅ **Use "estimated" or "projected"** with clear disclaimers
 - ✅ **Cite real sources** with verifiable URLs
 - ✅ **Be honest about limitations** and what hasn't been tested
+- ✅ **Admit when data is unavailable** rather than fabricating
 
 ##### Consequences of Fabrication:
 - **Immediate Trust Loss**: Users cannot verify claims
 - **Legal Liability**: Unverifiable performance claims
 - **Professional Damage**: Reputation harm from false information
 - **Technical Debt**: Future corrections become credibility issues
+- **Project Damage**: False marketing can harm adoption and credibility
 
 ##### Verification Requirements:
 - **Every number must have a source** or clear estimation methodology
 - **Every claim must be verifiable** through independent means
 - **Every assumption must be stated** explicitly
 - **Every limitation must be disclosed** upfront
+- **Every data point must be traceable** to its origin
+
+##### Recent Violation Example:
+**What happened**: Performance numbers were completely fabricated without running benchmarks
+**Impact**: Marketing materials contained unverifiable claims
+**Correction**: All fabricated content removed, honest admission made
+**Prevention**: This rule now explicitly prohibits such violations
 
 #### 🚨 RULE 1: NO MOCKS EXCEPT IN TEST CODE
 **ABSOLUTE REQUIREMENT: Never use mock data or fabricated results in any production code, documentation, or marketing materials.**
