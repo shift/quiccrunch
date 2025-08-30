@@ -102,3 +102,12 @@ graph TD
 - **Task**: [tasks/setup-project-workflow.md](tasks/setup-project-workflow.md)
 - **Description**: Initialize AI Agent Workflow system for unknown project
 - **Current Phase**: Implementation Agent setting up workflow
+
+### Create Benchmarking Suite
+- **Status**: Active
+- **Priority**: P0 CRITICAL
+- **Created**: 2025-08-30 15:25 CEST
+- **Context**: [context/create-benchmarking-suite.md](context/create-benchmarking-suite.md)
+- **Task**: [tasks/create-benchmarking-suite.md](tasks/create-benchmarking-suite.md)
+- **Description**: Create comprehensive benchmarking suite for QuicCrunch vs gRPC performance comparison
+- **Current Phase**: Task created, ready for Implementation Agent
