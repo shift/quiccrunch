@@ -32,7 +32,7 @@ pub mod proto {
 use proto::{
     benchmark_service_server::{BenchmarkService, BenchmarkServiceServer},
     benchmark_service_client::BenchmarkServiceClient,
-    BenchmarkRequest, BenchmarkResponse, ServerMetrics,
+    BenchmarkRequest, BenchmarkResponse, SimpleRequest, SimpleResponse, ServerMetrics,
 };
 
 /// gRPC-based transport for performance comparison  
@@ -233,6 +233,66 @@ impl BenchmarkServiceImpl {
 
 #[async_trait]
 impl BenchmarkService for BenchmarkServiceImpl {
+    // New streaming methods for comprehensive benchmark
+    async fn unary_call(
+        &self,
+        request: Request<SimpleRequest>,
+    ) -> std::result::Result<Response<SimpleResponse>, Status> {
+        let req = request.into_inner();
+        
+        // Update statistics  
+        {
+            let mut count = self.message_count.lock().await;
+            *count += 1;
+            
+            let mut start = self.start_time.lock().await;
+            if start.is_none() {
+                *start = Some(SystemTime::now());
+            }
+        }
+        
+        let response = SimpleResponse {
+            id: format!("resp-{}", req.id),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_micros() as u64,
+            payload: req.payload, // Echo back payload
+            status: "ok".to_string(),
+            metrics: None,
+        };
+        
+        Ok(Response::new(response))
+    }
+
+    async fn client_streaming(
+        &self,
+        _request: Request<Streaming<SimpleRequest>>,
+    ) -> std::result::Result<Response<SimpleResponse>, Status> {
+        // Not implemented in this legacy version
+        Err(Status::unimplemented("client_streaming not implemented in transport/grpc.rs"))
+    }
+
+    async fn server_streaming(
+        &self,
+        _request: Request<SimpleRequest>,
+    ) -> std::result::Result<Response<Self::ServerStreamingStream>, Status> {
+        // Not implemented in this legacy version  
+        Err(Status::unimplemented("server_streaming not implemented in transport/grpc.rs"))
+    }
+
+    async fn bidirectional_streaming(
+        &self,
+        _request: Request<Streaming<SimpleRequest>>,
+    ) -> std::result::Result<Response<Self::BidirectionalStreamingStream>, Status> {
+        // Not implemented in this legacy version
+        Err(Status::unimplemented("bidirectional_streaming not implemented in transport/grpc.rs"))
+    }
+
+    type ServerStreamingStream = std::pin::Pin<Box<dyn futures::Stream<Item = std::result::Result<SimpleResponse, Status>> + Send>>;
+    type BidirectionalStreamingStream = std::pin::Pin<Box<dyn futures::Stream<Item = std::result::Result<SimpleResponse, Status>> + Send>>;
+
+    // Legacy methods
     async fn latency_test(
         &self,
         request: Request<BenchmarkRequest>,

@@ -71,6 +71,9 @@ tracing-opentelemetry = { version = "0.22", optional = true }
 # Dependencies for examples
 env_logger = "0.11"
 
+# System monitoring for benchmarks
+sysinfo = { version = "0.30", optional = true }
+
 [dev-dependencies.opentelemetry]
 version = "0.21"
 
@@ -121,6 +124,10 @@ features = ["env-filter"]
 capnpc = "0.18.0"
 tonic-build = "0.10"
 
+[[example]]
+name = "comprehensive_benchmark"
+required-features = ["benchmark-suite"]
+
 [[bin]]
 name = "benchmark"
 path = "src/bin/benchmark.rs"
@@ -159,8 +166,15 @@ backend-alt = []
 # Comparison feature for gRPC
 grpc-comparison = ["dep:tonic", "dep:prost", "dep:tower", "dep:tokio-stream"]
 
-# Default features - use tQUIC backend for high performance
-default = ["tls", "visualization", "backend-tquic", "dep:tokio-stream", "adaptive-optimizations"]
+# Benchmark suite feature - requires grpc-comparison for full functionality
+benchmark-suite = ["grpc-comparison", "dep:sysinfo"]
+
+# Opt-in features for individual benchmark components
+benchmark-metrics = ["dep:sysinfo"]
+benchmark-clients = []
+
+# Default features - use tQUIC backend for high performance with optimizations
+default = ["tls", "visualization", "backend-tquic", "dep:tokio-stream", "adaptive-optimizations", "io-uring-advanced", "lock-free-channels", "zero-copy"]
 
 # Opt-in tests that require elevated privileges or special hardware
 scaling-tests = []
@@ -171,6 +185,8 @@ simd-optimizations = []          # Enable SIMD operations (recommended for 64KB+
 lock-free-channels = []          # Enable lock-free channel optimizations
 adaptive-optimizations = ["memory-pools", "simd-optimizations"]  # Enable adaptive optimization strategy selection
 io-uring-advanced = ["dep:io-uring"]  # Enable advanced io_uring transport
+zero-copy = []                   # Enable zero-copy stream operations
+all-optimizations = ["io-uring-advanced", "lock-free-channels", "zero-copy"]  # Enable all optimization modules
 
 # PERFORMANCE OPTIMIZATION PROFILES (based on performance analysis)
 small-rpc = ["backend-tquic"]                                      # <8KB workloads - use standard allocator

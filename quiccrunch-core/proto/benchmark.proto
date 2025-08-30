@@ -20,16 +20,58 @@ package benchmark;
 
 // Benchmark service for comparing gRPC vs QUIC performance
 service BenchmarkService {
-  // Latency test: single request-response
+  // Unary RPC - single request-response (already implemented)
+  rpc UnaryCall(SimpleRequest) returns (SimpleResponse);
+  
+  // Client streaming RPC - client sends stream of messages, server responds once
+  rpc ClientStreaming(stream SimpleRequest) returns (SimpleResponse);
+  
+  // Server streaming RPC - client sends one message, server responds with stream
+  rpc ServerStreaming(SimpleRequest) returns (stream SimpleResponse);
+  
+  // Bidirectional streaming RPC - full duplex communication
+  rpc BidirectionalStreaming(stream SimpleRequest) returns (stream SimpleResponse);
+  
+  // Legacy methods for backward compatibility
   rpc LatencyTest(BenchmarkRequest) returns (BenchmarkResponse);
-  
-  // Flood test: continuous unidirectional stream
   rpc FloodTest(stream BenchmarkRequest) returns (BenchmarkResponse);
-  
-  // Stream test: bidirectional streaming
   rpc StreamTest(stream BenchmarkRequest) returns (stream BenchmarkResponse);
 }
 
+// Simple messages for new streaming patterns
+message SimpleRequest {
+  // Unique identifier for this request
+  string id = 1;
+  
+  // Timestamp when request was sent (microseconds since epoch)
+  uint64 timestamp = 2;
+  
+  // Test data payload
+  bytes payload = 3;
+  
+  // Test metadata
+  string test_type = 4;
+  uint32 sequence_number = 5;
+}
+
+message SimpleResponse {
+  // Echo back the request ID
+  string id = 1;
+  
+  // Server timestamp when response was generated
+  uint64 timestamp = 2;
+  
+  // Response payload (can be empty for minimal latency)
+  bytes payload = 3;
+  
+  // Status of the operation
+  string status = 4;
+  
+  // Server-side metrics if available
+  optional ServerMetrics metrics = 5;
+}
+
+// Legacy messages for backward compatibility
 message BenchmarkRequest {
   // Unique identifier for this request
   string id = 1;

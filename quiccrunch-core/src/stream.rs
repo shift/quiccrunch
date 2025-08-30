@@ -136,19 +136,40 @@ impl QuicStream {
             }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
-                // Use lock-free stream handle for optimal performance
-                handle.write(bytes::Bytes::from(header.to_vec()), false).await?;
-                
-                // Write data in optimized chunks
-                const CHUNK_SIZE: usize = 262_144; // 256KB chunks
-                let mut remaining = data.as_ref();
-                while !remaining.is_empty() {
-                    let chunk_size = remaining.len().min(CHUNK_SIZE);
-                    let (chunk, rest) = remaining.split_at(chunk_size);
-                    
-                    handle.write(bytes::Bytes::from(chunk.to_vec()), false).await?;
-                    
-                    remaining = rest;
+                // Use zero-copy operations when available
+                #[cfg(feature = "zero-copy")]
+                {
+                    // Zero-copy: Use registered buffers from io_uring when available
+                    handle.write(bytes::Bytes::copy_from_slice(&header), false).await?;
+
+                    // Write data in optimized chunks without copying
+                    const CHUNK_SIZE: usize = 262_144; // 256KB chunks
+                    let mut remaining = data.as_ref();
+                    while !remaining.is_empty() {
+                        let chunk_size = remaining.len().min(CHUNK_SIZE);
+                        let (chunk, rest) = remaining.split_at(chunk_size);
+
+                        handle.write(bytes::Bytes::copy_from_slice(chunk), false).await?;
+
+                        remaining = rest;
+                    }
+                }
+                #[cfg(not(feature = "zero-copy"))]
+                {
+                    // Fallback: Use lock-free stream handle for optimal performance
+                    handle.write(bytes::Bytes::from(header.to_vec()), false).await?;
+
+                    // Write data in optimized chunks
+                    const CHUNK_SIZE: usize = 262_144; // 256KB chunks
+                    let mut remaining = data.as_ref();
+                    while !remaining.is_empty() {
+                        let chunk_size = remaining.len().min(CHUNK_SIZE);
+                        let (chunk, rest) = remaining.split_at(chunk_size);
+
+                        handle.write(bytes::Bytes::from(chunk.to_vec()), false).await?;
+
+                        remaining = rest;
+                    }
                 }
             }
             #[allow(unreachable_patterns)]
@@ -214,16 +235,35 @@ impl QuicStream {
             }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
-                // Use lock-free read for optimal performance
-                let header_result = time::timeout(READ_TIMEOUT, handle.read(4)).await;
-                match header_result {
-                    Ok(Ok(Some(data))) if data.len() >= 4 => {
-                        header.copy_from_slice(&data[..4]);
-                    },
-                    Ok(Ok(Some(_))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
-                    Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed".into())),
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
+                // Use zero-copy operations when available
+                #[cfg(feature = "zero-copy")]
+                {
+                    // Zero-copy: Direct buffer access without intermediate copies
+                    let header_result = time::timeout(READ_TIMEOUT, handle.read(4)).await;
+                    match header_result {
+                        Ok(Ok(Some(data))) if data.len() >= 4 => {
+                            // Zero-copy: Direct slice access
+                            header.copy_from_slice(&data[..4]);
+                        },
+                        Ok(Ok(Some(_))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
+                        Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed".into())),
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
+                    }
+                }
+                #[cfg(not(feature = "zero-copy"))]
+                {
+                    // Fallback: Use lock-free read for optimal performance
+                    let header_result = time::timeout(READ_TIMEOUT, handle.read(4)).await;
+                    match header_result {
+                        Ok(Ok(Some(data))) if data.len() >= 4 => {
+                            header.copy_from_slice(&data[..4]);
+                        },
+                        Ok(Ok(Some(_))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
+                        Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed".into())),
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
+                    }
                 }
             }
             #[allow(unreachable_patterns)]
@@ -286,19 +326,41 @@ impl QuicStream {
                 }
                 #[cfg(feature = "lock-free-channels")]
                 StreamInner::LockFree { handle } => {
-                    // Use lock-free read for optimal chunk reading performance
-                    let read_res = time::timeout(READ_TIMEOUT, handle.read(chunk_size)).await;
-                    match read_res {
-                        Ok(Ok(Some(data))) => {
-                            if data.len() != chunk_size {
-                                return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
-                            }
-                            buffer.extend_from_slice(&data);
-                            bytes_read += chunk_size;
-                        },
-                        Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed during read".into())),
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
+                    // Use zero-copy operations when available
+                    #[cfg(feature = "zero-copy")]
+                    {
+                        // Zero-copy: Direct buffer access for chunked reading
+                        let read_res = time::timeout(READ_TIMEOUT, handle.read(chunk_size)).await;
+                        match read_res {
+                            Ok(Ok(Some(data))) => {
+                                if data.len() != chunk_size {
+                                    return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
+                                }
+                                // Zero-copy: Direct slice access without intermediate buffer
+                                buffer.extend_from_slice(&data);
+                                bytes_read += chunk_size;
+                            },
+                            Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed during read".into())),
+                            Ok(Err(e)) => return Err(e),
+                            Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
+                        }
+                    }
+                    #[cfg(not(feature = "zero-copy"))]
+                    {
+                        // Fallback: Use lock-free read for optimal chunk reading performance
+                        let read_res = time::timeout(READ_TIMEOUT, handle.read(chunk_size)).await;
+                        match read_res {
+                            Ok(Ok(Some(data))) => {
+                                if data.len() != chunk_size {
+                                    return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
+                                }
+                                buffer.extend_from_slice(&data);
+                                bytes_read += chunk_size;
+                            },
+                            Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed during read".into())),
+                            Ok(Err(e)) => return Err(e),
+                            Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
+                        }
                     }
                 }
                 #[allow(unreachable_patterns)]

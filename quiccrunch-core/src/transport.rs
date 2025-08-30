@@ -125,7 +125,27 @@ struct QuinnCtx {
 
 impl BackendImpl {
     fn new(tls_config: TlsConfig, settings: TransportSettings) -> crate::Result<Self> {
-        // Prioritize tQUIC as the default backend when available
+        // Prioritize io_uring backend when available and enabled
+        #[cfg(feature = "io-uring-advanced")]
+        {
+            let advanced_settings = crate::config::QuicTransportSettings {
+                backend: crate::config::Backend::IoUringAdvanced,
+                max_idle_timeout_ms: settings.max_idle_timeout_ms,
+                keep_alive_interval_ms: settings.keep_alive_interval_ms,
+                initial_max_data: settings.connection_receive_window as u64,
+                initial_max_stream_data_bidi_remote: settings.stream_receive_window as u64,
+                congestion_control: match settings.congestion_controller {
+                    CongestionController::Bbr => crate::config::CongestionControl::Bbr,
+                    CongestionController::Cubic => crate::config::CongestionControl::Cubic,
+                    CongestionController::NewReno => crate::config::CongestionControl::NewReno,
+                },
+                enable_multipath: true,
+                enable_hystart: true,
+            };
+            return Self::new_advanced(tls_config, advanced_settings);
+        }
+
+        // Fallback to tQUIC as the default backend when available
         #[cfg(feature = "backend-tquic")]
         {
             // Convert simple settings to advanced settings and delegate to tquic

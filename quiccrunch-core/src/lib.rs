@@ -60,6 +60,10 @@ pub mod client;
 pub mod server;
 pub mod rpc;
 
+// Benchmark suite module
+#[cfg(feature = "benchmark-suite")]
+pub mod benchmark;
+
 // Performance optimization modules
 pub mod memory;
 pub mod simd;

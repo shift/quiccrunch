@@ -2,6 +2,34 @@
 
 This document provides quick reference to all relevant files and their purposes for the gRPC vs QuicCrunch performance comparison project.
 
+## Agent Communication Context Files
+
+### Implementation Context (`ai/contexts/benchmark_implementation.md`)
+- Task specifications for implementation agent
+- Protocol definitions and requirements
+- Expected API interfaces and signatures
+- Implementation status and progress tracking
+
+### Testing Context (`ai/contexts/benchmark_testing.md`)
+- Test requirements and validation criteria
+- Implementation feedback from testing agent
+- Bug reports and failure analysis
+- Test results and performance metrics
+
+### Documentation Context (`ai/contexts/benchmark_documentation.md`)
+- Documentation requirements and standards
+- Benchmark results and analysis
+- Report generation specifications
+- Documentation update requirements
+
+## Agent Workflow
+
+```
+Implementation Agent → Testing Agent → Documentation Agent
+       ↑                    ↓
+       └── Feedback Loop ───┘
+```
+
 ## tQUIC Backend Files
 
 ### Core Implementation
