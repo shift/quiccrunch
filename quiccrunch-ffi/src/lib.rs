@@ -50,8 +50,8 @@ pub use server::*;
 pub use types::*;
 pub use runtime::*;
 
-use std::os::raw::{c_char, c_void};
-use std::ffi::{CStr, CString};
+use std::os::raw::c_char;
+use std::ffi::CString;
 use once_cell::sync::Lazy;
 
 /// Global tokio runtime for handling async operations

@@ -121,7 +121,7 @@ pub fn rpc_client(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn rpc_service_legacy(input: TokenStream) -> TokenStream {
     // For now, just pass through to show the approach
     // In practice, this would parse and generate the same as the old declarative macro
-    let input = proc_macro2::TokenStream::from(input);
+    let _input = proc_macro2::TokenStream::from(input);
     quote! {
         compile_error!("Legacy rpc_service! macro - use #[rpc_service] attribute instead");
     }.into()

@@ -1,9 +1,9 @@
 use std::os::raw::{c_char, c_void};
-use std::sync::Arc;
+
 use std::collections::HashMap;
 use quiccrunch_core::{QuicServer as CoreServer, QuicListener as CoreListener, MessageHandler, EchoHandler};
 use crate::error::QuicError;
-use crate::types::{QuicCallback, QuicTlsConfig, QuicConnectionConfig, QuicMessage, c_str_to_str, str_to_c_str};
+use crate::types::{QuicTlsConfig, QuicMessage, c_str_to_str};
 use crate::runtime::FfiRuntime;
 
 /// Message handler callback type
@@ -80,7 +80,7 @@ pub extern "C" fn quiccrunch_server_new_with_tls(
         return std::ptr::null_mut();
     }
     
-    let tls_config = unsafe { &*tls_config };
+    let _tls_config = unsafe { &*tls_config };
     
     // For now, just create a basic server
     // TODO: Implement actual TLS configuration

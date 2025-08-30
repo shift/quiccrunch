@@ -7,7 +7,7 @@
 /// 3. Adaptive optimization strategy selection
 
 use quiccrunch_core::optimizations::{validate_optimizations, quick_performance_test};
-use std::time::Instant;
+
 
 fn main() {
     println!("🔧 QuicCrunch Performance Fix Validation Tool");

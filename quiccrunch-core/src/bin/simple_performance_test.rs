@@ -1,8 +1,6 @@
-use std::time::{Duration, Instant};
-use std::net::SocketAddr;
+use std::time::Instant;
 use quiccrunch_core::{
-    config::QuicTransportSettings,
-    transport::{QuicTransport, TlsConfig, TransportSettings},
+    transport::{QuicTransport, TlsConfig},
 };
 use serde_json;
 use chrono;

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use quiccrunch_core::{QuicClient as CoreClient, QuicConnection as CoreConnection};
 use crate::error::QuicError;
-use crate::types::{QuicCallback, QuicTlsConfig, QuicConnectionConfig, QuicMessage, c_str_to_str, str_to_c_str};
+use crate::types::{QuicCallback, QuicTlsConfig, QuicMessage, c_str_to_str};
 use crate::runtime::FfiRuntime;
 
 /// Internal client handle structure
@@ -63,7 +63,7 @@ pub extern "C" fn quiccrunch_client_new_with_tls(
         return std::ptr::null_mut();
     }
     
-    let tls_config = unsafe { &*tls_config };
+    let _tls_config = unsafe { &*tls_config };
     
     // For now, just create a basic client
     // TODO: Implement actual TLS configuration
@@ -151,7 +151,7 @@ pub extern "C" fn quiccrunch_client_connect_async(
     // This is tricky with the current approach - let's use a simpler method for now
     FfiRuntime::spawn_with_callback(
         async move {
-            let connection = client.connect(&address_str).await?;
+            let _connection = client.connect(&address_str).await?;
             // TODO: Store connection and return ID
             Ok(())
         },

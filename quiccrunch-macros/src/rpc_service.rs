@@ -1,8 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 use syn::{
-    punctuated::Punctuated, Meta, Token, ItemTrait, TraitItem, FnArg, Pat, Type, ReturnType,
-    Result as SynResult, Error as SynError, Attribute, Signature
+    punctuated::Punctuated, Meta, Token, ItemTrait,
+    Result as SynResult
 };
 
 /// Configuration for the rpc_service macro

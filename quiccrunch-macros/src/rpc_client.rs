@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::quote;
 use syn::{
     punctuated::Punctuated, Meta, Token, DeriveInput, Data,
     Result as SynResult, Error as SynError
