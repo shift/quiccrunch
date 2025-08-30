@@ -27,7 +27,9 @@ Systematically remove all compiler warnings from the QuicCrunch codebase while p
 - **18:28 CEST**: Fixed quiccrunch-macros unused imports and variables
 - **18:28 CEST**: Fixed quiccrunch-core bin files unused imports
 - **18:28 CEST**: Fixed quiccrunch-ffi unused imports and variables
-- **18:28 CEST**: Current warning count: 62 total (20 warnings eliminated so far)
+- **18:28 CEST**: Fixed quiccrunch-cli unused imports and variables
+- **18:28 CEST**: Removed dead methods from quiccrunch-ffi server
+- **18:28 CEST**: Current warning count: 45 total (37 warnings eliminated so far)
 
 ## Remaining Warnings by Crate
 ### quiccrunch-macros (8 warnings)

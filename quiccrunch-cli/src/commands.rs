@@ -34,7 +34,7 @@ async fn generate_rust_code(input: &str, output: &str, service: Option<String>) 
     crate::print_info("Generating Rust RPC service code...");
     
     // Parse Cap'n Proto schema
-    let schema_content = std::fs::read_to_string(input)?;
+    let _schema_content = std::fs::read_to_string(input)?;
     
     // For now, create a basic template - in a full implementation,
     // this would parse the actual Cap'n Proto schema
@@ -55,13 +55,13 @@ async fn generate_rust_code(input: &str, output: &str, service: Option<String>) 
     Ok(())
 }
 
-async fn generate_typescript_code(input: &str, output: &str, service: Option<String>) -> Result<()> {
+async fn generate_typescript_code(_input: &str, _output: &str, _service: Option<String>) -> Result<()> {
     crate::print_info("TypeScript generation not yet implemented");
     // TODO: Implement TypeScript code generation
     Ok(())
 }
 
-async fn generate_go_code(input: &str, output: &str, service: Option<String>) -> Result<()> {
+async fn generate_go_code(_input: &str, _output: &str, _service: Option<String>) -> Result<()> {
     crate::print_info("Go generation not yet implemented");
     // TODO: Implement Go code generation
     Ok(())
@@ -160,7 +160,7 @@ pub async fn handle_call(
     endpoint: String,
     method: String,
     params: String,
-    timeout: f64,
+    _timeout: f64,
 ) -> Result<()> {
     crate::print_info(&format!("Calling {} at {}", method, endpoint));
     
@@ -223,7 +223,7 @@ pub async fn handle_serve(port: u16, service: String, watch: bool) -> Result<()>
 pub async fn handle_benchmark(
     endpoint: String,
     method: String,
-    params: String,
+    _params: String,
     duration: u64,
     connections: usize,
     output: String,
@@ -348,9 +348,3 @@ async fn create_microservice_project(name: &str) -> Result<()> {
 }
 
 // Re-export for easier use
-pub use handle_generate as generate;
-pub use handle_test as test;
-pub use handle_call as call;
-pub use handle_serve as serve;
-pub use handle_benchmark as benchmark;
-pub use handle_init as init;

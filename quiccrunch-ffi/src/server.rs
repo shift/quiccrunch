@@ -44,16 +44,7 @@ impl QuicServerInternal {
         }
     }
     
-    fn add_connection(&mut self, remote_addr: String) -> u32 {
-        let id = self.next_connection_id;
-        self.next_connection_id += 1;
-        self.connections.insert(id, remote_addr);
-        id
-    }
-    
-    fn remove_connection(&mut self, id: u32) -> bool {
-        self.connections.remove(&id).is_some()
-    }
+
 }
 
 /// Create a new QUIC server
