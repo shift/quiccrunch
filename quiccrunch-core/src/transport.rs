@@ -453,6 +453,11 @@ impl QuicTransport {
         })
     }
 
+    /// Get the hardware crypto accelerator if enabled
+    pub fn crypto_accelerator(&self) -> Option<Arc<crate::crypto_accel::HardwareCrypto>> {
+        self.crypto_accel.clone()
+    }
+
     /// Get information about which backend is currently active
     pub fn backend_info(&self) -> &'static str {
         match &self.backend {
@@ -474,6 +479,12 @@ impl QuicTransport {
             crypto_accel: None,
             congestion_control: None,
         })
+    }
+
+    /// Enable hardware crypto acceleration
+    pub fn with_crypto_acceleration(mut self, config: crate::crypto_accel::CryptoAccelConfig) -> Self {
+        self.crypto_accel = Some(Arc::new(crate::crypto_accel::HardwareCrypto::new(config)));
+        self
     }
 
     pub fn with_settings_advanced(tls_config: TlsConfig, settings: crate::config::QuicTransportSettings) -> crate::Result<Self> {

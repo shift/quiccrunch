@@ -57,6 +57,9 @@ rand = "0.8"                     # Random number generation for load balancing
 io-uring = { version = "0.6", optional = true }  # Advanced I/O
 dashmap = "6.0"                  # Lock-free HashMap alternative
 raw-cpuid = "11.0"               # CPU feature detection for crypto acceleration
+aesni = "0.8"                    # AES-NI hardware acceleration
+aes-gcm = "0.10"                 # AES-GCM cipher implementation
+getrandom = "0.2"                # Random number generation for crypto
 
 # gRPC dependencies for comparison benchmarking
 tonic = { version = "0.10", optional = true }

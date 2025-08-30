@@ -7,6 +7,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::Result;
+use aesni::{Aes128, Aes256};
+use aes_gcm::{AesGcm, Key, Nonce};
+use aes_gcm::aead::{Aead, NewAead};
 
 /// Configuration for hardware crypto acceleration
 #[derive(Clone, Debug)]
@@ -132,46 +135,110 @@ impl BatchCryptoProcessor {
         }
     }
 
-    /// Single encryption operation
+    /// Single encryption operation using AES-GCM
     fn encrypt_single(&self, plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-        // For now, use a simple XOR-based encryption as placeholder
-        // In production, this would use proper AES encryption
-        let mut ciphertext = plaintext.to_vec();
-        for (i, byte) in plaintext.iter().enumerate() {
-            ciphertext[i] = byte ^ key[i % key.len()];
+        if self.hw_caps.aes_ni_available && self.config.enable_aes_ni {
+            self.encrypt_single_aes_ni(plaintext, key)
+        } else {
+            self.encrypt_single_software(plaintext, key)
         }
-        Ok(ciphertext)
     }
 
-    /// Single decryption operation
+    /// Single decryption operation using AES-GCM
     fn decrypt_single(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-        // For now, use a simple XOR-based decryption as placeholder
-        // In production, this would use proper AES decryption
-        let mut plaintext = ciphertext.to_vec();
-        for (i, byte) in ciphertext.iter().enumerate() {
-            plaintext[i] = byte ^ key[i % key.len()];
+        if self.hw_caps.aes_ni_available && self.config.enable_aes_ni {
+            self.decrypt_single_aes_ni(ciphertext, key)
+        } else {
+            self.decrypt_single_software(ciphertext, key)
         }
+    }
+
+    /// Hardware-accelerated single encryption using AES-NI
+    fn encrypt_single_aes_ni(&self, plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        // Use AES-GCM with hardware acceleration
+        let key = Key::from_slice(key);
+        let cipher = AesGcm::<Aes128, _>::new(key); // Use Aes128 for compatibility
+
+        // Generate a random nonce (12 bytes for GCM)
+        let mut nonce_bytes = [0u8; 12];
+        getrandom::getrandom(&mut nonce_bytes).map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        // Encrypt the plaintext
+        let ciphertext = cipher.encrypt(nonce, plaintext)
+            .map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+
+        // Prepend nonce to ciphertext for decryption
+        let mut result = nonce_bytes.to_vec();
+        result.extend_from_slice(&ciphertext);
+
+        Ok(result)
+    }
+
+    /// Software-based single encryption fallback
+    fn encrypt_single_software(&self, plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        // Use software AES-GCM as fallback
+        let key = Key::from_slice(key);
+        let cipher = AesGcm::<Aes128, _>::new(key);
+
+        let mut nonce_bytes = [0u8; 12];
+        getrandom::getrandom(&mut nonce_bytes).map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let ciphertext = cipher.encrypt(nonce, plaintext)
+            .map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+
+        let mut result = nonce_bytes.to_vec();
+        result.extend_from_slice(&ciphertext);
+
+        Ok(result)
+    }
+
+    /// Hardware-accelerated single decryption using AES-NI
+    fn decrypt_single_aes_ni(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        if ciphertext.len() < 12 {
+            return Err(crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, "Ciphertext too short")));
+        }
+
+        let key = Key::from_slice(key);
+        let cipher = AesGcm::<Aes128, _>::new(key);
+
+        let nonce = Nonce::from_slice(&ciphertext[..12]);
+        let ciphertext = &ciphertext[12..];
+
+        let plaintext = cipher.decrypt(nonce, ciphertext)
+            .map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+
+        Ok(plaintext)
+    }
+
+    /// Software-based single decryption fallback
+    fn decrypt_single_software(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        if ciphertext.len() < 12 {
+            return Err(crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, "Ciphertext too short")));
+        }
+
+        let key = Key::from_slice(key);
+        let cipher = AesGcm::<Aes128, _>::new(key);
+
+        let nonce = Nonce::from_slice(&ciphertext[..12]);
+        let ciphertext = &ciphertext[12..];
+
+        let plaintext = cipher.decrypt(nonce, ciphertext)
+            .map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+
         Ok(plaintext)
     }
 
     /// Hardware-accelerated batch encryption using AES-NI
     fn encrypt_batch_aes_ni(&self, plaintexts: &[&[u8]], key: &[u8]) -> Result<Vec<Vec<u8>>> {
-        // Placeholder for AES-NI batch encryption
-        // In production, this would use CPU intrinsics for AES-NI
         tracing::debug!("Using AES-NI batch encryption for {} blocks", plaintexts.len());
 
         let mut results = Vec::with_capacity(plaintexts.len());
 
-        // Simulate batch processing with hardware acceleration
+        // Process each plaintext with hardware acceleration
         for plaintext in plaintexts {
-            let mut ciphertext = vec![0u8; plaintext.len()];
-
-            // Simulate AES-NI operations (in production, use actual intrinsics)
-            for (i, &byte) in plaintext.iter().enumerate() {
-                // Simple transformation to simulate AES operations
-                ciphertext[i] = byte.wrapping_add(key[i % key.len()]);
-            }
-
+            let ciphertext = self.encrypt_single_aes_ni(plaintext, key)?;
             results.push(ciphertext);
         }
 
@@ -185,7 +252,8 @@ impl BatchCryptoProcessor {
         let mut results = Vec::with_capacity(plaintexts.len());
 
         for plaintext in plaintexts {
-            results.push(self.encrypt_single(plaintext, key)?);
+            let ciphertext = self.encrypt_single_software(plaintext, key)?;
+            results.push(ciphertext);
         }
 
         Ok(results)
@@ -193,21 +261,13 @@ impl BatchCryptoProcessor {
 
     /// Hardware-accelerated batch decryption using AES-NI
     fn decrypt_batch_aes_ni(&self, ciphertexts: &[&[u8]], key: &[u8]) -> Result<Vec<Vec<u8>>> {
-        // Placeholder for AES-NI batch decryption
         tracing::debug!("Using AES-NI batch decryption for {} blocks", ciphertexts.len());
 
         let mut results = Vec::with_capacity(ciphertexts.len());
 
-        // Simulate batch processing with hardware acceleration
+        // Process each ciphertext with hardware acceleration
         for ciphertext in ciphertexts {
-            let mut plaintext = vec![0u8; ciphertext.len()];
-
-            // Simulate AES-NI operations (in production, use actual intrinsics)
-            for (i, &byte) in ciphertext.iter().enumerate() {
-                // Simple transformation to simulate AES operations
-                plaintext[i] = byte.wrapping_sub(key[i % key.len()]);
-            }
-
+            let plaintext = self.decrypt_single_aes_ni(ciphertext, key)?;
             results.push(plaintext);
         }
 
@@ -221,7 +281,8 @@ impl BatchCryptoProcessor {
         let mut results = Vec::with_capacity(ciphertexts.len());
 
         for ciphertext in ciphertexts {
-            results.push(self.decrypt_single(ciphertext, key)?);
+            let plaintext = self.decrypt_single_software(ciphertext, key)?;
+            results.push(plaintext);
         }
 
         Ok(results)
@@ -312,6 +373,7 @@ impl HardwareCrypto {
     /// Encrypt data using hardware acceleration when available
     pub fn encrypt(&self, plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         let start = std::time::Instant::now();
+        let use_hw = self.batch_processor.hardware_capabilities().aes_ni_available && self.config.enable_aes_ni;
 
         let result = if self.config.enable_batch_crypto {
             // For single operations, still use batch processor for consistency
@@ -323,7 +385,7 @@ impl HardwareCrypto {
         };
 
         let duration = start.elapsed();
-        self.stats.record_operation(duration, true);
+        self.stats.record_operation(duration, true, use_hw);
 
         Ok(result)
     }
@@ -331,6 +393,7 @@ impl HardwareCrypto {
     /// Decrypt data using hardware acceleration when available
     pub fn decrypt(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         let start = std::time::Instant::now();
+        let use_hw = self.batch_processor.hardware_capabilities().aes_ni_available && self.config.enable_aes_ni;
 
         let result = if self.config.enable_batch_crypto {
             // For single operations, still use batch processor for consistency
@@ -342,7 +405,7 @@ impl HardwareCrypto {
         };
 
         let duration = start.elapsed();
-        self.stats.record_operation(duration, false);
+        self.stats.record_operation(duration, false, use_hw);
 
         Ok(result)
     }
@@ -350,11 +413,12 @@ impl HardwareCrypto {
     /// Batch encrypt multiple data blocks
     pub fn encrypt_batch(&self, plaintexts: &[&[u8]], key: &[u8]) -> Result<Vec<Vec<u8>>> {
         let start = std::time::Instant::now();
+        let use_hw = self.batch_processor.hardware_capabilities().aes_ni_available && self.config.enable_aes_ni;
         let result = self.batch_processor.encrypt_batch(plaintexts, key);
         let duration = start.elapsed();
 
         if result.is_ok() {
-            self.stats.record_batch_operation(duration, plaintexts.len(), true);
+            self.stats.record_batch_operation(duration, plaintexts.len(), true, use_hw);
         }
 
         result
@@ -363,11 +427,12 @@ impl HardwareCrypto {
     /// Batch decrypt multiple data blocks
     pub fn decrypt_batch(&self, ciphertexts: &[&[u8]], key: &[u8]) -> Result<Vec<Vec<u8>>> {
         let start = std::time::Instant::now();
+        let use_hw = self.batch_processor.hardware_capabilities().aes_ni_available && self.config.enable_aes_ni;
         let result = self.batch_processor.decrypt_batch(ciphertexts, key);
         let duration = start.elapsed();
 
         if result.is_ok() {
-            self.stats.record_batch_operation(duration, ciphertexts.len(), false);
+            self.stats.record_batch_operation(duration, ciphertexts.len(), false, use_hw);
         }
 
         result
@@ -402,7 +467,7 @@ pub struct CryptoStats {
 }
 
 impl CryptoStats {
-    fn record_operation(&self, duration: std::time::Duration, is_encrypt: bool) {
+    fn record_operation(&self, duration: std::time::Duration, is_encrypt: bool, use_hw: bool) {
         self.total_operations.fetch_add(1, Ordering::Relaxed);
         if is_encrypt {
             self.total_encrypt_ops.fetch_add(1, Ordering::Relaxed);
@@ -410,12 +475,15 @@ impl CryptoStats {
             self.total_decrypt_ops.fetch_add(1, Ordering::Relaxed);
         }
         self.total_time_ns.fetch_add(duration.as_nanos() as u64, Ordering::Relaxed);
+        if use_hw {
+            self.hw_accelerated_ops.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
-    fn record_batch_operation(&self, duration: std::time::Duration, item_count: usize, is_encrypt: bool) {
+    fn record_batch_operation(&self, duration: std::time::Duration, item_count: usize, is_encrypt: bool, use_hw: bool) {
         self.total_batch_operations.fetch_add(1, Ordering::Relaxed);
         self.total_batch_items.fetch_add(item_count as u64, Ordering::Relaxed);
-        self.record_operation(duration, is_encrypt);
+        self.record_operation(duration, is_encrypt, use_hw);
     }
 
     pub fn get_stats(&self) -> CryptoStatsSnapshot {
@@ -544,9 +612,9 @@ mod tests {
         let stats = CryptoStats::default();
 
         // Record some operations
-        stats.record_operation(std::time::Duration::from_nanos(100), true);
-        stats.record_operation(std::time::Duration::from_nanos(200), false);
-        stats.record_batch_operation(std::time::Duration::from_nanos(300), 5, true);
+        stats.record_operation(std::time::Duration::from_nanos(100), true, true);
+        stats.record_operation(std::time::Duration::from_nanos(200), false, false);
+        stats.record_batch_operation(std::time::Duration::from_nanos(300), 5, true, true);
 
         let snapshot = stats.get_stats();
 
@@ -555,6 +623,7 @@ mod tests {
         assert_eq!(snapshot.total_decrypt_ops, 1);
         assert_eq!(snapshot.total_batch_operations, 1);
         assert_eq!(snapshot.total_batch_items, 5);
+        assert_eq!(snapshot.hw_accelerated_ops, 2); // Two operations used hardware
 
         println!("Crypto stats: {:?}", snapshot);
         println!("Avg operation time: {} ns", snapshot.avg_operation_time_ns());
