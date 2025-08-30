@@ -505,8 +505,8 @@ mod tests {
 
         let plaintexts = vec![
             b"Hello, World!",
-            b"This is a test",
-            b"Batch crypto operations",
+            b"This is test!",
+            b"Batch crypto ",
         ];
         let key = b"0123456789abcdef";
 

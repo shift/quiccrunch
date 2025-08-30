@@ -125,5 +125,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("✅ Demo completed! Check the generated files for marketing materials.");
 
     Ok(())
-}</content>
-</xai:function_call">Create promotional demo example that showcases QuicCrunch vs gRPC performance
+}

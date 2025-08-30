@@ -53,9 +53,17 @@ pub fn generate_node_cert(node_name: &str) -> TlsConfig {
     let ca_cert_der = ca_cert.serialize_der().expect("Failed to serialize CA certificate");
     let ca_cert = rustls::Certificate(ca_cert_der);
 
+    // Generate PEM data
+    let cert_pem = node_cert.serialize_pem().expect("Failed to serialize cert to PEM");
+    let key_pem = node_cert.serialize_private_key_pem();
+    let ca_cert_pem = ca_cert.serialize_pem().expect("Failed to serialize CA cert to PEM");
+
     TlsConfig {
         cert: node_cert,
         key: node_key,
         ca_cert,
+        cert_pem: cert_pem.into_bytes(),
+        key_pem: key_pem.into_bytes(),
+        ca_cert_pem: ca_cert_pem.into_bytes(),
     }
 }

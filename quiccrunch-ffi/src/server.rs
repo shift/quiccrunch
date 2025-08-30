@@ -118,7 +118,7 @@ pub extern "C" fn quiccrunch_server_init(
     
     let server_internal = unsafe { &mut *(handle as *mut QuicServerInternal) };
     
-    let result = QuicServer::new();
+    let result = CoreServer::new();
     
     match result {
         Ok(server) => {
@@ -221,7 +221,7 @@ pub extern "C" fn quiccrunch_server_serve(
     
     // For now, use the built-in echo handler
     // TODO: Implement custom message handler support
-    let echo_handler = EchoHandler::new();
+    let echo_handler = EchoHandler;
     
     let result = FfiRuntime::block_on(async {
         loop {

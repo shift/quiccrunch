@@ -23,8 +23,9 @@ impl FfiRuntime {
         F: std::future::Future<Output = Result<T, crate::error::QuicError>> + Send + 'static,
         T: Send + 'static,
     {
-        crate::RUNTIME.spawn(async move {
-            let result = future.await;
+        // Use std::thread::spawn to avoid Send requirement for raw pointers
+        std::thread::spawn(move || {
+            let result = crate::RUNTIME.block_on(future);
             match result {
                 Ok(_) => {
                     callback(user_data, crate::error::QuicError::Success, std::ptr::null_mut());

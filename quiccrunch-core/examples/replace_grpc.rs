@@ -2,6 +2,7 @@ use quiccrunch_core::{QuicTransport, Transport, TlsConfig};
 use std::error::Error;
 use bytes::Bytes;
 use tokio::sync::mpsc;
+use pem;
 
 use serde::{Serialize, Deserialize};
 
@@ -40,13 +41,30 @@ impl GreetingService for GreetingServiceImpl {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Generate TLS certificates
-    let (ca_cert, _) = cert_utils::generate_ca_cert()?;
+    let (ca_cert, _ca_key, ca_cert_obj) = cert_utils::generate_ca_cert()?;
     let (cert, key) = cert_utils::generate_node_cert(&ca_cert, "localhost")?;
-    
+
+    // Generate PEM data using rcgen
+    let cert_pem = pem::encode(&pem::Pem {
+        tag: "CERTIFICATE".to_string(),
+        contents: cert.0.clone(),
+    });
+    let key_pem = pem::encode(&pem::Pem {
+        tag: "PRIVATE KEY".to_string(),
+        contents: key.0.clone(),
+    });
+    let ca_cert_pem = pem::encode(&pem::Pem {
+        tag: "CERTIFICATE".to_string(),
+        contents: ca_cert.0.clone(),
+    });
+
     let tls_config = TlsConfig {
         cert,
         key,
         ca_cert,
+        cert_pem: cert_pem.into_bytes(),
+        key_pem: key_pem.into_bytes(),
+        ca_cert_pem: ca_cert_pem.into_bytes(),
     };
 
     let transport = QuicTransport::new(tls_config)?;
