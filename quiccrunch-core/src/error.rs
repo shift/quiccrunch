@@ -53,5 +53,12 @@ impl From<capnp::NotInSchema> for TransportError {
     }
 }
 
+#[cfg(feature = "backend-tquic")]
+impl From<tquic::Error> for TransportError {
+    fn from(err: tquic::Error) -> Self {
+        TransportError::ConnectionFailed(format!("tQUIC error: {:?}", err))
+    }
+}
+
 /// Result type for transport operations
 pub type Result<T> = std::result::Result<T, TransportError>;

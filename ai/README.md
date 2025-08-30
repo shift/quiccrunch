@@ -2,6 +2,19 @@
 
 This directory contains comprehensive task planning and context files for the gRPC vs QuicCrunch performance comparison project.
 
+## Important AI Guidelines
+
+### Code Preservation Rules
+1. **NEVER remove existing code** - even if you don't understand its purpose
+2. **Ask the human operator** when functionality is unclear instead of making assumptions
+3. **Mocks in production code are FORBIDDEN** - only use mocks in dedicated test files
+4. **Preserve all working functionality** - regression is unacceptable
+
+### When in Doubt
+- Stop and ask the human operator for clarification
+- Don't assume code should be removed or simplified
+- Respect existing architectural decisions
+
 ## Files
 
 ### `tasks.md`

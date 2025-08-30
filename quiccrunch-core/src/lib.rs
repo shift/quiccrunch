@@ -72,6 +72,7 @@ pub mod io_uring_optimized;
 pub mod io_uring_advanced;
 pub mod stream_optimized;
 pub mod cpu_optimizations;
+pub mod optimization_validation;
 
 // Convenience module for all optimizations
 pub mod optimizations {
@@ -83,6 +84,12 @@ pub mod optimizations {
     pub use crate::stream_optimized::{OptimizedQuicStream, StreamConfig, BenchmarkResults};
     pub use crate::cpu_optimizations::{CpuOptimizations, CpuBenchmarkResults, initialize_optimizations};
     pub use crate::adaptive::{OptimizationStrategy, OptimizedBuffer, WorkloadConfig, allocate_optimized, copy_optimized};
+    
+    // Re-export optimization validation functions
+    pub use crate::optimization_validation::{
+        validate_optimizations, quick_performance_test, 
+        OptimizationResults, AllocationPerformance, CopyPerformance, AdaptiveStrategyValidation
+    };
     
     /// Enable all high-performance optimizations
     pub fn enable_high_performance(cpu_opts: &CpuOptimizations) -> std::io::Result<()> {
