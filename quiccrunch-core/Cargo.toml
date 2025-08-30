@@ -50,12 +50,13 @@ quiccrunch-macros = { path = "../quiccrunch-macros", optional = true }  # Proced
 
 # PERFORMANCE OPTIMIZATION DEPENDENCIES
 crossbeam-channel = "0.5"        # Lock-free channels
-once_cell = "1.19"               # Lazy static initialization  
+once_cell = "1.19"               # Lazy static initialization
 num_cpus = "1.16"                # CPU detection
 libc = "0.2"                     # System calls for optimizations
 rand = "0.8"                     # Random number generation for load balancing
 io-uring = { version = "0.6", optional = true }  # Advanced I/O
 dashmap = "6.0"                  # Lock-free HashMap alternative
+raw-cpuid = "11.0"               # CPU feature detection for crypto acceleration
 
 # gRPC dependencies for comparison benchmarking
 tonic = { version = "0.10", optional = true }

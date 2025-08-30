@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::sync::atomic::Ordering;
 use bytes::{Bytes, BytesMut};
 
 /// Thread-local buffer pool for reusing Vec<u8> allocations
@@ -283,9 +284,248 @@ mod tests {
         let small = PooledBuffer::get(1024);
         let medium = PooledBuffer::get(32 * 1024);
         let large = PooledBuffer::get(512 * 1024);
-        
+
         assert!(small.capacity() >= 1024);
         assert!(medium.capacity() >= 32 * 1024);
         assert!(large.capacity() >= 512 * 1024);
+    }
+}
+
+/// Zero-allocation buffer system for hot paths
+/// Pre-allocated buffer for zero-allocation operations
+#[derive(Clone)]
+pub struct FastBuffer {
+    data: [u8; 4096], // 4KB fixed-size buffer
+    len: usize,
+}
+
+impl FastBuffer {
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            data: [0u8; 4096],
+            len: 0,
+        }
+    }
+
+    #[inline(always)]
+    pub fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    #[inline(always)]
+    pub fn as_slice(&self) -> &[u8] {
+        &self.data[..self.len]
+    }
+
+    #[inline(always)]
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.data[..]
+    }
+
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[inline(always)]
+    pub fn capacity(&self) -> usize {
+        self.data.len()
+    }
+
+    #[inline(always)]
+    pub fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), ()> {
+        if self.len + slice.len() > self.data.len() {
+            return Err(()); // Buffer overflow
+        }
+        self.data[self.len..self.len + slice.len()].copy_from_slice(slice);
+        self.len += slice.len();
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn push(&mut self, byte: u8) -> Result<(), ()> {
+        if self.len >= self.data.len() {
+            return Err(()); // Buffer overflow
+        }
+        self.data[self.len] = byte;
+        self.len += 1;
+        Ok(())
+    }
+}
+
+/// Thread-local fast buffer pool
+thread_local! {
+    static FAST_BUFFER_POOL: RefCell<Vec<FastBuffer>> = RefCell::new(Vec::new());
+}
+
+/// Get a fast buffer from the thread-local pool
+#[inline(always)]
+pub fn get_fast_buffer() -> FastBuffer {
+    FAST_BUFFER_POOL.with(|pool| {
+        if let Some(mut buffer) = pool.borrow_mut().pop() {
+            buffer.clear();
+            buffer
+        } else {
+            FastBuffer::new()
+        }
+    })
+}
+
+/// Return a fast buffer to the thread-local pool
+#[inline(always)]
+pub fn return_fast_buffer(buffer: FastBuffer) {
+    FAST_BUFFER_POOL.with(|pool| {
+        if pool.borrow().len() < 32 { // Limit pool size
+            pool.borrow_mut().push(buffer);
+        }
+        // Drop buffer if pool is full
+    })
+}
+
+/// Zero-allocation header parsing
+pub struct FastHeaderParser {
+    buffer: FastBuffer,
+}
+
+impl FastHeaderParser {
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            buffer: get_fast_buffer(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn parse_length_prefix(&mut self, data: &[u8]) -> Result<(usize, usize), crate::error::FastError> {
+        if data.len() < 4 {
+            return Err(crate::error::FastError::invalid_message());
+        }
+
+        // Parse 32-bit big-endian length prefix
+        let length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+
+        if length > 1024 * 1024 { // 1MB limit
+            return Err(crate::error::FastError::buffer_overflow());
+        }
+
+        Ok((length, 4)) // Return (length, bytes_consumed)
+    }
+
+    #[inline(always)]
+    pub fn parse_varint(&mut self, data: &[u8]) -> Result<(u64, usize), crate::error::FastError> {
+        if data.is_empty() {
+            return Err(crate::error::FastError::invalid_message());
+        }
+
+        let mut value: u64 = 0;
+        let mut bytes_consumed = 0;
+
+        for (i, &byte) in data.iter().enumerate() {
+            if i >= 10 { // Varint max 10 bytes
+                return Err(crate::error::FastError::invalid_message());
+            }
+
+            value |= ((byte & 0x7F) as u64) << (i * 7);
+            bytes_consumed += 1;
+
+            if (byte & 0x80) == 0 {
+                break;
+            }
+        }
+
+        Ok((value, bytes_consumed))
+    }
+}
+
+impl Drop for FastHeaderParser {
+    fn drop(&mut self) {
+        return_fast_buffer(self.buffer.clone());
+    }
+}
+
+/// Zero-allocation metrics collection
+pub struct FastMetrics {
+    messages_sent: std::sync::atomic::AtomicU64,
+    messages_received: std::sync::atomic::AtomicU64,
+    bytes_sent: std::sync::atomic::AtomicU64,
+    bytes_received: std::sync::atomic::AtomicU64,
+    errors_count: std::sync::atomic::AtomicU64,
+}
+
+impl FastMetrics {
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            messages_sent: std::sync::atomic::AtomicU64::new(0),
+            messages_received: std::sync::atomic::AtomicU64::new(0),
+            bytes_sent: std::sync::atomic::AtomicU64::new(0),
+            bytes_received: std::sync::atomic::AtomicU64::new(0),
+            errors_count: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    #[inline(always)]
+    pub fn record_message_sent(&self, size: usize) {
+        self.messages_sent.fetch_add(1, Ordering::Relaxed);
+        self.bytes_sent.fetch_add(size as u64, Ordering::Relaxed);
+    }
+
+    #[inline(always)]
+    pub fn record_message_received(&self, size: usize) {
+        self.messages_received.fetch_add(1, Ordering::Relaxed);
+        self.bytes_received.fetch_add(size as u64, Ordering::Relaxed);
+    }
+
+    #[inline(always)]
+    pub fn record_error(&self) {
+        self.errors_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline(always)]
+    pub fn get_stats(&self) -> FastMetricsSnapshot {
+        FastMetricsSnapshot {
+            messages_sent: self.messages_sent.load(Ordering::Relaxed),
+            messages_received: self.messages_received.load(Ordering::Relaxed),
+            bytes_sent: self.bytes_sent.load(Ordering::Relaxed),
+            bytes_received: self.bytes_received.load(Ordering::Relaxed),
+            errors_count: self.errors_count.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Snapshot of fast metrics for reporting
+#[derive(Debug, Clone)]
+pub struct FastMetricsSnapshot {
+    pub messages_sent: u64,
+    pub messages_received: u64,
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    pub errors_count: u64,
+}
+
+impl FastMetricsSnapshot {
+    #[inline(always)]
+    pub fn messages_per_second(&self, elapsed_seconds: f64) -> f64 {
+        if elapsed_seconds > 0.0 {
+            (self.messages_sent + self.messages_received) as f64 / elapsed_seconds
+        } else {
+            0.0
+        }
+    }
+
+    #[inline(always)]
+    pub fn throughput_mbps(&self, elapsed_seconds: f64) -> f64 {
+        if elapsed_seconds > 0.0 {
+            let total_bytes = self.bytes_sent + self.bytes_received;
+            (total_bytes as f64 * 8.0) / (elapsed_seconds * 1024.0 * 1024.0) // Convert to Mbps
+        } else {
+            0.0
+        }
     }
 }

@@ -52,6 +52,8 @@ impl Default for TransportSettings {
 pub struct QuicTransport {
     backend: BackendImpl,
     connection_pool: Option<crate::connection_pool::ConnectionPool>,
+    crypto_accel: Option<crate::crypto_accel::HardwareCrypto>,
+    congestion_control: Option<crate::congestion::AdaptiveCongestionControl>,
 }
 
 #[derive(Clone, Debug)]
@@ -446,6 +448,8 @@ impl QuicTransport {
         Ok(Self {
             backend: transport.backend.clone(),
             connection_pool: Some(connection_pool),
+            crypto_accel: None,
+            congestion_control: None,
         })
     }
 
@@ -467,6 +471,8 @@ impl QuicTransport {
         Ok(Self {
             backend: BackendImpl::new(tls_config, settings)?,
             connection_pool: None,
+            crypto_accel: None,
+            congestion_control: None,
         })
     }
 
@@ -474,6 +480,8 @@ impl QuicTransport {
         Ok(Self {
             backend: BackendImpl::new_advanced(tls_config, settings)?,
             connection_pool: None,
+            crypto_accel: None,
+            congestion_control: None,
         })
     }
 
@@ -482,6 +490,8 @@ impl QuicTransport {
         let transport = Arc::new(Self {
             backend: self.backend.clone(),
             connection_pool: None,
+            crypto_accel: None,
+            congestion_control: None,
         });
         self.connection_pool = Some(crate::connection_pool::ConnectionPool::new(transport, config));
     }
@@ -506,6 +516,68 @@ impl QuicTransport {
     /// Check if connection pooling is enabled
     pub fn has_connection_pool(&self) -> bool {
         self.connection_pool.is_some()
+    }
+
+    /// Enable hardware crypto acceleration
+    pub fn enable_crypto_acceleration(&mut self, config: crate::crypto_accel::CryptoAccelConfig) {
+        self.crypto_accel = Some(crate::crypto_accel::HardwareCrypto::new(config));
+    }
+
+    /// Check if crypto acceleration is enabled
+    pub fn has_crypto_acceleration(&self) -> bool {
+        self.crypto_accel.is_some()
+    }
+
+    /// Get crypto acceleration statistics
+    pub fn crypto_stats(&self) -> Option<crate::crypto_accel::CryptoStatsSnapshot> {
+        self.crypto_accel.as_ref().map(|crypto| crypto.stats().get_stats())
+    }
+
+    /// Get hardware crypto capabilities
+    pub fn crypto_capabilities(&self) -> Option<&crate::crypto_accel::HardwareCapabilities> {
+        self.crypto_accel.as_ref().map(|crypto| crypto.hardware_capabilities())
+    }
+
+    /// Enable advanced congestion control
+    pub fn enable_congestion_control(&mut self, config: crate::congestion::CongestionControlConfig) {
+        self.congestion_control = Some(crate::congestion::AdaptiveCongestionControl::new(config));
+    }
+
+    /// Check if advanced congestion control is enabled
+    pub fn has_congestion_control(&self) -> bool {
+        self.congestion_control.is_some()
+    }
+
+    /// Update congestion control with network metrics
+    pub fn update_congestion_control(&mut self, metrics: &crate::congestion::NetworkMetrics) {
+        if let Some(ref mut cc) = self.congestion_control {
+            cc.adapt_to_conditions(metrics);
+        }
+    }
+
+    /// Get recommended congestion control algorithm
+    pub fn recommended_congestion_algorithm(&self) -> Option<crate::congestion::CongestionAlgorithm> {
+        self.congestion_control.as_ref().map(|cc| cc.recommended_algorithm())
+    }
+
+    /// Get congestion control statistics
+    pub fn congestion_stats(&self) -> Option<crate::congestion::CongestionControlStats> {
+        self.congestion_control.as_ref().map(|cc| cc.stats())
+    }
+
+    /// Get current bandwidth estimate
+    pub fn bandwidth_estimate(&self) -> Option<u64> {
+        self.congestion_control.as_ref().map(|cc| cc.bandwidth_estimate())
+    }
+
+    /// Get predicted RTT
+    pub fn predicted_rtt(&self) -> Option<std::time::Duration> {
+        self.congestion_control.as_ref().map(|cc| cc.predicted_rtt())
+    }
+
+    /// Get current network condition
+    pub fn network_condition(&self) -> Option<crate::congestion::NetworkCondition> {
+        self.congestion_control.as_ref().map(|cc| cc.network_condition())
     }
 }
 

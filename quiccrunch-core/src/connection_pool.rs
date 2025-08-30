@@ -50,7 +50,7 @@ pub enum ConnectionHealth {
 }
 
 /// Pooled connection with metadata
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PooledConnection {
     pub connection: Connection,
     pub endpoint: String,
@@ -95,6 +95,7 @@ impl PooledConnection {
 }
 
 /// High-performance connection pool
+#[derive(Debug)]
 pub struct ConnectionPool {
     config: ConnectionPoolConfig,
     transport: Arc<QuicTransport>,
@@ -362,5 +363,4 @@ mod tests {
         assert_eq!(config.max_total_connections, 50);
         assert_eq!(config.idle_timeout, Duration::from_secs(60));
     }
-}</content>
-</xai:function_call">Add connection pool module with health monitoring and lifecycle management
+}

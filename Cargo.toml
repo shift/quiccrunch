@@ -5,7 +5,7 @@ members = [
     "quiccrunch-cli",
     "quiccrunch-ffi",
     # "quiccrunch-security", # Temporarily disabled due to missing dependencies
-    "tests/load-testing",
+    # "tests/load-testing", # Temporarily disabled - directory removed for space
 ]
 resolver = "2"
 

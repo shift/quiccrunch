@@ -51,6 +51,8 @@
 mod error;
 pub mod transport;
 pub mod connection_pool;
+pub mod crypto_accel;
+pub mod congestion;
 mod stream;
 mod stream_splitter; // Stream splitting for concurrent RPC operations
 pub mod test_utils;
@@ -68,7 +70,6 @@ pub mod benchmark;
 // Performance optimization modules
 pub mod memory;
 pub mod simd;
-// pub mod simple_streaming;
 pub mod lockfree;
 pub mod adaptive; // New adaptive optimization module
 #[cfg(feature = "io-uring-advanced")]
@@ -78,6 +79,10 @@ pub mod io_uring_advanced;
 pub mod stream_optimized;
 pub mod cpu_optimizations;
 pub mod optimization_validation;
+
+// Zero-allocation components
+pub use memory::{FastBuffer, FastHeaderParser, FastMetrics, FastMetricsSnapshot, get_fast_buffer, return_fast_buffer};
+pub use error::ErrorCode;
 
 // Convenience module for all optimizations
 pub mod optimizations {
@@ -124,9 +129,11 @@ pub mod optimizations {
     }
 }
 
-pub use error::{Result, TransportError};
+pub use error::{Result, TransportError, FastError};
 pub use transport::{QuicTransport, Transport, Connection, TlsConfig, Incoming};
 pub use connection_pool::{ConnectionPool, ConnectionPoolConfig, ConnectionPoolStats, EndpointStats, ConnectionHealth};
+pub use crypto_accel::{HardwareCrypto, CryptoAccelConfig, HardwareCapabilities, CryptoStats, CryptoStatsSnapshot, BatchCryptoProcessor, CipherSuiteOptimizer};
+pub use congestion::{AdaptiveCongestionControl, CongestionControlConfig, NetworkMetrics, CongestionAlgorithm, NetworkCondition, CongestionControlStats};
 pub use stream::QuicStream;
 pub use stream_splitter::{SplitStream, StreamReader, StreamWriter, Splittable}; // Stream splitting support
 pub use metrics::{Metrics, Operation};

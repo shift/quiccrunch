@@ -224,7 +224,7 @@ impl IoUringAdvancedIncoming {
 }
 
 /// Configuration for io_uring transport optimizations
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TransportConfig {
     pub ring_size: u32,
     pub buffer_size: usize,
@@ -297,6 +297,15 @@ struct AdvancedBufferPool {
     in_use: AtomicUsize,
     group_id: u16,
     prefetch_depth: usize,
+    numa_pools: Vec<NumaBufferPool>, // Per-NUMA-node pools
+}
+
+/// NUMA-specific buffer pool for optimal memory locality
+struct NumaBufferPool {
+    numa_node: usize,
+    buffers: Vec<u16>, // Indices into registered_buffers
+    available_count: AtomicUsize,
+    memory_bandwidth: AtomicU64, // Track bandwidth usage
 }
 
 /// Pre-registered buffer with NUMA-local allocation
@@ -366,21 +375,27 @@ impl IoUringAdvancedTransport {
         }
 
         // Create io_uring with all optimizations
-        let mut ring_builder = IoUring::builder();
-        
-        if config.use_sqpoll {
-            ring_builder = ring_builder.setup_sqpoll(1); // 1ms timeout for responsiveness
-        }
-        
-        if config.use_iopoll {
-            ring_builder = ring_builder.setup_iopoll();
-        }
+        let ring_builder = IoUring::builder();
 
-        // Enable all performance features
-        ring_builder = ring_builder
+        // Apply conditional features
+        let ring_builder = if config.use_sqpoll {
+            ring_builder.setup_sqpoll(1) // 1ms timeout for responsiveness
+        } else {
+            ring_builder
+        };
+
+        let ring_builder = if config.use_iopoll {
+            ring_builder.setup_iopoll()
+        } else {
+            ring_builder
+        };
+
+        // Enable all performance features and build
+        let ring = ring_builder
             .setup_coop_taskrun()    // Cooperative task running
             .setup_taskrun_flag()    // Task run notifications
-            .setup_single_issuer();  // Single issuer optimization
+            .setup_single_issuer()   // Single issuer optimization
+            .build(config.ring_size)?;
         
         let ring = ring_builder.build(config.ring_size)?;
 
@@ -451,7 +466,7 @@ impl IoUringAdvancedTransport {
         
         // Prepare optimized receive operations
         for _ in 0..max_messages {
-            if let Some(buffer_id) = self.buffer_pool.acquire_with_prefetch() {
+            if let Some(buffer_id) = self.buffer_pool.acquire_buffer() {
                 let operation = RecvOperation {
                     buffer_id,
                     expected_size: self.predict_message_size(),
@@ -498,7 +513,7 @@ impl IoUringAdvancedTransport {
         let mut submitted = 0;
 
         for (data, addr) in messages {
-            if let Some(buffer_id) = self.buffer_pool.acquire_with_prefetch() {
+            if let Some(buffer_id) = self.buffer_pool.acquire_buffer() {
                 let buffer = &mut self.buffer_pool.registered_buffers[buffer_id as usize];
                 
                 // Use SIMD for ultra-fast memory copy
@@ -563,7 +578,7 @@ impl IoUringAdvancedTransport {
                 let msghdr = libc::msghdr {
                     msg_name: addr.as_ptr() as *mut libc::c_void,
                     msg_namelen: addr.len(),
-                    msg_iov: iovecs.as_mut_ptr().add(i),
+                    msg_iov: unsafe { iovecs.as_mut_ptr().add(i) },
                     msg_iovlen: 1,
                     msg_control: std::ptr::null_mut(),
                     msg_controllen: 0,
@@ -756,10 +771,112 @@ impl IoUringAdvancedTransport {
     fn set_numa_affinity(numa_node: usize) -> std::io::Result<()> {
         #[cfg(target_os = "linux")]
         {
-            // This would require numa library - simplified implementation
-            std::env::set_var("NUMA_NODE", numa_node.to_string());
+            use std::mem;
+
+            // Set memory allocation policy for NUMA node
+            unsafe {
+                // Use mbind to set NUMA memory policy
+                let nodemask = 1u64 << numa_node;
+                libc::mbind(
+                    std::ptr::null_mut(),
+                    0,
+                    libc::MPOL_BIND as i32,
+                    &nodemask as *const u64 as *const libc::c_void,
+                    64, // max node bits
+                    libc::MPOL_MF_MOVE as u32,
+                );
+            }
+
+            // Set CPU affinity to CPUs on this NUMA node
+            Self::set_cpu_affinity_for_numa_node(numa_node)?;
+
+            tracing::info!("Set NUMA affinity to node {}", numa_node);
         }
         Ok(())
+    }
+
+    /// Set CPU affinity for CPUs on a specific NUMA node
+    fn set_cpu_affinity_for_numa_node(numa_node: usize) -> std::io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::mem;
+
+            // Read NUMA topology from sysfs to find CPUs for this node
+            let cpu_list = Self::get_cpus_for_numa_node(numa_node)?;
+
+            if cpu_list.is_empty() {
+                return Ok(()); // No CPUs found, skip affinity setting
+            }
+
+            let mut cpu_set: libc::cpu_set_t = unsafe { mem::zeroed() };
+
+            for &cpu in &cpu_list {
+                if cpu < libc::CPU_SETSIZE as usize {
+                    unsafe {
+                        libc::CPU_SET(cpu, &mut cpu_set);
+                    }
+                }
+            }
+
+            unsafe {
+                if libc::sched_setaffinity(0, mem::size_of::<libc::cpu_set_t>(), &cpu_set) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+
+            tracing::debug!("Set CPU affinity to CPUs {:?} for NUMA node {}", cpu_list, numa_node);
+        }
+        Ok(())
+    }
+
+    /// Get list of CPUs belonging to a NUMA node
+    fn get_cpus_for_numa_node(numa_node: usize) -> std::io::Result<Vec<usize>> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::fs;
+
+            let path = format!("/sys/devices/system/node/node{}/cpulist", numa_node);
+            match fs::read_to_string(&path) {
+                Ok(content) => {
+                    Self::parse_cpu_list(&content)
+                }
+                Err(_) => {
+                    // Fallback: assume CPU 0 for node 0, others for higher nodes
+                    Ok(vec![numa_node])
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(vec![0]) // Fallback for non-Linux systems
+        }
+    }
+
+    /// Parse CPU list string (e.g., "0-3,7,8-11")
+    fn parse_cpu_list(content: &str) -> std::io::Result<Vec<usize>> {
+        let mut cpus = Vec::new();
+
+        for part in content.trim().split(',') {
+            if part.contains('-') {
+                // Range like "0-3"
+                let range: Vec<&str> = part.split('-').collect();
+                if range.len() == 2 {
+                    if let (Ok(start), Ok(end)) = (range[0].trim().parse::<usize>(), range[1].trim().parse::<usize>()) {
+                        for cpu in start..=end {
+                            cpus.push(cpu);
+                        }
+                    }
+                }
+            } else {
+                // Single CPU like "7"
+                if let Ok(cpu) = part.trim().parse::<usize>() {
+                    cpus.push(cpu);
+                }
+            }
+        }
+
+        Ok(cpus)
     }
 
     /// Set CPU affinity for the current thread
@@ -857,18 +974,48 @@ impl AdvancedBufferPool {
         let prefetch_queue = VecDeque::with_capacity(config.prefetch_depth);
         let group_id = 1;
 
-        // Create NUMA-aware buffers
-        for buffer_id in 0..config.buffer_count as u16 {
-            let data = Self::allocate_numa_buffer(config.buffer_size, config.numa_node)?;
-            
-            registered_buffers.push(RegisteredBuffer {
-                data,
-                buffer_id,
-                group_id,
-                numa_node: config.numa_node,
+        // Detect available NUMA nodes
+        let numa_nodes = Self::detect_numa_topology();
+        let mut numa_pools = Vec::with_capacity(numa_nodes.len());
+
+        // Initialize per-NUMA-node pools
+        for &node in &numa_nodes {
+            numa_pools.push(NumaBufferPool {
+                numa_node: node,
+                buffers: Vec::new(),
+                available_count: AtomicUsize::new(0),
+                memory_bandwidth: AtomicU64::new(0),
             });
-            
-            available.push_back(buffer_id);
+        }
+
+        // Distribute buffers across NUMA nodes
+        let buffers_per_node = config.buffer_count / numa_nodes.len().max(1);
+        let mut buffer_id = 0u16;
+
+        for (node_idx, &node) in numa_nodes.iter().enumerate() {
+            let node_buffer_count = if node_idx == numa_nodes.len() - 1 {
+                // Last node gets remaining buffers
+                config.buffer_count - (node_idx * buffers_per_node)
+            } else {
+                buffers_per_node
+            };
+
+            for _ in 0..node_buffer_count {
+                let data = Self::allocate_numa_buffer(config.buffer_size, Some(node))?;
+
+                registered_buffers.push(RegisteredBuffer {
+                    data,
+                    buffer_id,
+                    group_id,
+                    numa_node: Some(node),
+                });
+
+                available.push_back(buffer_id);
+                numa_pools[node_idx].buffers.push(buffer_id);
+                numa_pools[node_idx].available_count.fetch_add(1, Ordering::Relaxed);
+
+                buffer_id += 1;
+            }
         }
 
         // Register buffers with io_uring for zero-copy
@@ -892,23 +1039,166 @@ impl AdvancedBufferPool {
             in_use: AtomicUsize::new(0),
             group_id,
             prefetch_depth: config.prefetch_depth,
+            numa_pools,
         })
+    }
+
+    /// Detect NUMA topology of the system
+    fn detect_numa_topology() -> Vec<usize> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::fs;
+
+            let mut nodes = Vec::new();
+
+            // Read available NUMA nodes from sysfs
+            if let Ok(entries) = fs::read_dir("/sys/devices/system/node/") {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        if name.starts_with("node") {
+                            if let Some(node_str) = name.strip_prefix("node") {
+                                if let Ok(node) = node_str.parse::<usize>() {
+                                    nodes.push(node);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if nodes.is_empty() {
+                nodes.push(0); // Fallback to single node
+            }
+
+            nodes.sort();
+            nodes
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            vec![0] // Single NUMA node on non-Linux systems
+        }
+    }
+
+    /// Acquire buffer from optimal NUMA node
+    fn acquire_numa_aware(&mut self) -> Option<u16> {
+        // Find NUMA node with most available buffers and lowest memory pressure
+        let mut best_node_idx = 0;
+        let mut best_score = 0.0;
+
+        for (idx, pool) in self.numa_pools.iter().enumerate() {
+            let available = pool.available_count.load(Ordering::Relaxed) as f64;
+            let bandwidth = pool.memory_bandwidth.load(Ordering::Relaxed) as f64;
+
+            // Score based on availability and bandwidth (lower bandwidth = less contended)
+            let score = available / (bandwidth + 1.0);
+            if score > best_score {
+                best_score = score;
+                best_node_idx = idx;
+            }
+        }
+
+        // Try to get buffer from best NUMA node
+        if let Some(buffer_idx) = self.numa_pools[best_node_idx].buffers.iter()
+            .find(|&&buf_id| self.available.contains(&buf_id))
+            .cloned()
+        {
+            self.available.retain(|&id| id != buffer_idx);
+            self.numa_pools[best_node_idx].available_count.fetch_sub(1, Ordering::Relaxed);
+            self.in_use.fetch_add(1, Ordering::Relaxed);
+            return Some(buffer_idx);
+        }
+
+        // Fallback to any available buffer
+        self.acquire_with_prefetch()
     }
 
     /// Allocate NUMA-local buffer
     fn allocate_numa_buffer(size: usize, numa_node: Option<usize>) -> std::io::Result<Box<[u8]>> {
-        let mut buffer = vec![0u8; size];
-        
         #[cfg(target_os = "linux")]
         {
-            if let Some(_node) = numa_node {
-                // In a real implementation, this would use numa_alloc_onnode
-                // For now, just use regular allocation with a hint
-                unsafe {
+            if let Some(node) = numa_node {
+                // Try NUMA-aware allocation first
+                match Self::allocate_numa_specific_buffer(size, node) {
+                    Ok(buffer) => return Ok(buffer),
+                    Err(_) => {
+                        tracing::warn!("NUMA-specific allocation failed, falling back to regular allocation");
+                    }
+                }
+            }
+        }
+
+        // Fallback to regular allocation with optimizations
+        Self::allocate_optimized_buffer(size)
+    }
+
+    /// Allocate buffer specifically on a NUMA node
+    fn allocate_numa_specific_buffer(size: usize, numa_node: usize) -> std::io::Result<Box<[u8]>> {
+        #[cfg(target_os = "linux")]
+        {
+            // Try to use numa_alloc_onnode if available
+            // This is a simplified version - in production you'd link against libnuma
+            unsafe {
+                let ptr = libc::malloc(size);
+                if ptr.is_null() {
+                    return Err(std::io::Error::new(std::io::ErrorKind::OutOfMemory, "Failed to allocate buffer"));
+                }
+
+                // Set NUMA memory policy for this allocation
+                let nodemask = 1u64 << numa_node;
+                let result = libc::mbind(
+                    ptr,
+                    size,
+                    libc::MPOL_BIND as i32,
+                    &nodemask as *const u64 as *const libc::c_void,
+                    64, // max node bits
+                    0,  // flags
+                );
+
+                if result != 0 {
+                    libc::free(ptr);
+                    return Err(std::io::Error::last_os_error());
+                }
+
+                // Use huge pages if beneficial for this size
+                if size >= 2 * 1024 * 1024 { // 2MB+
+                    libc::madvise(ptr, size, libc::MADV_HUGEPAGE);
+                }
+
+                // Convert to Box<[u8]>
+                let slice = std::slice::from_raw_parts_mut(ptr as *mut u8, size);
+                Ok(slice.into())
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "NUMA allocation not supported on this platform"))
+        }
+    }
+
+    /// Allocate optimized buffer with performance hints
+    fn allocate_optimized_buffer(size: usize) -> std::io::Result<Box<[u8]>> {
+        let mut buffer = vec![0u8; size];
+
+        #[cfg(target_os = "linux")]
+        {
+            unsafe {
+                // Use huge pages for large allocations
+                if size >= 2 * 1024 * 1024 { // 2MB+
                     libc::madvise(
                         buffer.as_mut_ptr() as *mut libc::c_void,
                         size,
-                        libc::MADV_HUGEPAGE, // Use huge pages for better performance
+                        libc::MADV_HUGEPAGE,
+                    );
+                }
+
+                // Prefault pages to avoid page faults during operation
+                if size <= 64 * 1024 * 1024 { // Only for reasonable sizes
+                    libc::madvise(
+                        buffer.as_mut_ptr() as *mut libc::c_void,
+                        size,
+                        libc::MADV_WILLNEED,
                     );
                 }
             }
@@ -933,7 +1223,31 @@ impl AdvancedBufferPool {
         }
     }
 
+    /// Enhanced NUMA-aware buffer acquisition
+    pub fn acquire_buffer(&mut self) -> Option<u16> {
+        // Use NUMA-aware acquisition if we have multiple NUMA nodes
+        if self.numa_pools.len() > 1 {
+            self.acquire_numa_aware()
+        } else {
+            self.acquire_with_prefetch()
+        }
+    }
+
     fn release_with_prefetch(&mut self, buffer_id: u16) {
+        // Update NUMA pool statistics
+        if let Some(buffer) = self.registered_buffers.get(buffer_id as usize) {
+            if let Some(numa_node) = buffer.numa_node {
+                // Find the corresponding NUMA pool and update statistics
+                for pool in &self.numa_pools {
+                    if pool.numa_node == numa_node {
+                        pool.available_count.fetch_add(1, Ordering::Relaxed);
+                        // Could track bandwidth usage here based on buffer operations
+                        break;
+                    }
+                }
+            }
+        }
+
         // Add to prefetch queue if not full
         if self.prefetch_queue.len() < self.prefetch_depth {
             self.prefetch_queue.push_back(buffer_id);
