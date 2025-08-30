@@ -90,6 +90,7 @@ pub trait MessageHandler: Send + Sync + 'static {
 }
 
 /// Echo handler that returns the same message
+#[derive(Clone)]
 pub struct EchoHandler;
 
 impl MessageHandler for EchoHandler {

@@ -1,6 +1,7 @@
 use std::os::raw::{c_char, c_void};
 use std::sync::Arc;
 use std::collections::HashMap;
+use bytes::Bytes;
 use quiccrunch_core::{QuicClient as CoreClient, QuicConnection as CoreConnection};
 use crate::error::QuicError;
 use crate::types::{QuicCallback, QuicTlsConfig, QuicConnectionConfig, QuicMessage, c_str_to_str, str_to_c_str};
@@ -190,13 +191,15 @@ pub extern "C" fn quiccrunch_client_connect(
         Some(c) => c.clone(),
         None => return QuicError::InvalidHandle,
     };
-    
-    let result = FfiRuntime::block_on(async {
-        client.connect(address_str).await
+
+    let result: Result<CoreConnection, crate::error::QuicError> = FfiRuntime::block_on(async {
+        client.connect(address_str).await.map_err(|e| e.into())
     });
-    
+
     match result {
         Ok(connection) => {
+            // Get mutable reference after the async block to avoid borrow conflict
+            let client_internal = unsafe { &mut *(handle as *mut QuicClientInternal) };
             let id = client_internal.add_connection(connection);
             if !connection_id.is_null() {
                 unsafe { *connection_id = id; }
@@ -260,7 +263,7 @@ pub extern "C" fn quiccrunch_client_send_message(
     
     let data = crate::types::message_to_bytes(message).to_vec();
     
-    let result = FfiRuntime::block_on(async move {
+    let result: Result<(), crate::error::QuicError> = FfiRuntime::block_on(async move {
         let mut stream = connection.open_stream().await?;
         stream.send_message(Bytes::from(data)).await?;
         Ok(())

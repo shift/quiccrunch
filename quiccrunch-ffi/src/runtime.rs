@@ -23,15 +23,22 @@ impl FfiRuntime {
         F: std::future::Future<Output = Result<T, crate::error::QuicError>> + Send + 'static,
         T: Send + 'static,
     {
+        // Convert raw pointers to usize for thread safety
+        let callback_ptr = callback as usize;
+        let user_data_ptr = user_data as usize;
+
         // Use std::thread::spawn to avoid Send requirement for raw pointers
         std::thread::spawn(move || {
             let result = crate::RUNTIME.block_on(future);
+            // Convert back to function pointers
+            let callback_fn = unsafe { std::mem::transmute::<usize, crate::types::QuicCallback>(callback_ptr) };
+            let user_data_ptr = user_data_ptr as *mut std::os::raw::c_void;
             match result {
                 Ok(_) => {
-                    callback(user_data, crate::error::QuicError::Success, std::ptr::null_mut());
+                    callback_fn(user_data_ptr, crate::error::QuicError::Success, std::ptr::null_mut());
                 }
                 Err(error) => {
-                    callback(user_data, error, std::ptr::null_mut());
+                    callback_fn(user_data_ptr, error, std::ptr::null_mut());
                 }
             }
         });
@@ -46,15 +53,22 @@ impl FfiRuntime {
         F: std::future::Future<Output = Result<T, crate::error::QuicError>> + Send + 'static,
         T: Send + 'static,
     {
+        // Convert raw pointers to usize for thread safety
+        let callback_ptr = callback as usize;
+        let user_data_ptr = user_data as usize;
+
         crate::RUNTIME.spawn(async move {
             let result = future.await;
+            // Convert back to function pointers
+            let callback_fn = unsafe { std::mem::transmute::<usize, crate::types::QuicCallback>(callback_ptr) };
+            let user_data_ptr = user_data_ptr as *mut std::os::raw::c_void;
             match result {
                 Ok(data) => {
                     let boxed = Box::into_raw(Box::new(data));
-                    callback(user_data, crate::error::QuicError::Success, boxed as *mut std::os::raw::c_void);
+                    callback_fn(user_data_ptr, crate::error::QuicError::Success, boxed as *mut std::os::raw::c_void);
                 }
                 Err(error) => {
-                    callback(user_data, error, std::ptr::null_mut());
+                    callback_fn(user_data_ptr, error, std::ptr::null_mut());
                 }
             }
         });

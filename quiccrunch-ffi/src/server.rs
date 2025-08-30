@@ -222,19 +222,35 @@ pub extern "C" fn quiccrunch_server_serve(
     // For now, use the built-in echo handler
     // TODO: Implement custom message handler support
     let echo_handler = EchoHandler;
-    
-    let result = FfiRuntime::block_on(async {
+
+    let result = FfiRuntime::block_on(async move {
         loop {
             match listener.accept().await {
                 Ok(connection) => {
                     let handler = echo_handler.clone();
                     // Spawn a task to handle this connection
                     tokio::spawn(async move {
-                        // Handle the connection
-                        // This is a simplified version - real implementation would
-                        // integrate with the FFI message handler
-                        if let Err(e) = handler.handle_connection(connection).await {
-                            eprintln!("Error handling connection: {:?}", e);
+                        // Handle streams on this connection
+                        loop {
+                            match connection.accept_stream().await {
+                                Ok(mut stream) => {
+                                    let handler_clone = handler.clone();
+                                    tokio::spawn(async move {
+                                        // Handle messages on this stream
+                                        while let Ok(message) = stream.receive_message().await {
+                                            let response = handler_clone.handle(message).await;
+                                            if let Err(e) = stream.send_message(response.into()).await {
+                                                eprintln!("Error sending response: {:?}", e);
+                                                break;
+                                            }
+                                        }
+                                    });
+                                }
+                                Err(e) => {
+                                    eprintln!("Error accepting stream: {:?}", e);
+                                    break;
+                                }
+                            }
                         }
                     });
                 }
