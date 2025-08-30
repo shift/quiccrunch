@@ -1,5 +1,6 @@
 use std::time::Duration;
 use rustls::{Certificate, PrivateKey};
+use std::sync::Arc;
 
 #[cfg(feature = "backend-tquic")]
 pub mod tquic;
@@ -47,9 +48,10 @@ impl Default for TransportSettings {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct QuicTransport {
     backend: BackendImpl,
+    connection_pool: Option<crate::connection_pool::ConnectionPool>,
 }
 
 #[derive(Clone, Debug)]
@@ -436,6 +438,17 @@ impl QuicTransport {
         Self::with_settings(tls_config, TransportSettings::default())
     }
 
+    /// Create a new transport with connection pooling enabled
+    pub fn with_connection_pool(tls_config: TlsConfig, pool_config: crate::connection_pool::ConnectionPoolConfig) -> crate::Result<Self> {
+        let transport = Arc::new(Self::with_settings(tls_config, TransportSettings::default())?);
+        let connection_pool = crate::connection_pool::ConnectionPool::new(transport.clone(), pool_config);
+
+        Ok(Self {
+            backend: transport.backend.clone(),
+            connection_pool: Some(connection_pool),
+        })
+    }
+
     /// Get information about which backend is currently active
     pub fn backend_info(&self) -> &'static str {
         match &self.backend {
@@ -451,18 +464,60 @@ impl QuicTransport {
     }
 
     pub fn with_settings(tls_config: TlsConfig, settings: TransportSettings) -> crate::Result<Self> {
-        Ok(Self { backend: BackendImpl::new(tls_config, settings)? })
+        Ok(Self {
+            backend: BackendImpl::new(tls_config, settings)?,
+            connection_pool: None,
+        })
     }
 
     pub fn with_settings_advanced(tls_config: TlsConfig, settings: crate::config::QuicTransportSettings) -> crate::Result<Self> {
-        Ok(Self { backend: BackendImpl::new_advanced(tls_config, settings)? })
+        Ok(Self {
+            backend: BackendImpl::new_advanced(tls_config, settings)?,
+            connection_pool: None,
+        })
+    }
+
+    /// Enable connection pooling on this transport
+    pub fn enable_connection_pool(&mut self, config: crate::connection_pool::ConnectionPoolConfig) {
+        let transport = Arc::new(Self {
+            backend: self.backend.clone(),
+            connection_pool: None,
+        });
+        self.connection_pool = Some(crate::connection_pool::ConnectionPool::new(transport, config));
+    }
+
+    /// Return a connection to the pool (if pooling is enabled)
+    pub async fn return_connection(&self, endpoint: String, connection: Connection) {
+        if let Some(ref pool) = self.connection_pool {
+            pool.return_connection(endpoint, connection).await;
+        }
+        // If no pool, connection is dropped (normal behavior)
+    }
+
+    /// Get connection pool statistics (if pooling is enabled)
+    pub async fn pool_stats(&self) -> Option<crate::connection_pool::ConnectionPoolStats> {
+        if let Some(ref pool) = self.connection_pool {
+            Some(pool.stats().await)
+        } else {
+            None
+        }
+    }
+
+    /// Check if connection pooling is enabled
+    pub fn has_connection_pool(&self) -> bool {
+        self.connection_pool.is_some()
     }
 }
 
 #[async_trait::async_trait]
 impl Transport for QuicTransport {
     async fn connect(&self, addr: &str) -> crate::Result<Connection> {
-        self.backend.connect(addr).await
+        // Use connection pool if available
+        if let Some(ref pool) = self.connection_pool {
+            pool.get_connection(addr).await
+        } else {
+            self.backend.connect(addr).await
+        }
     }
 
     async fn listen(&self, addr: &str) -> crate::Result<Incoming> {
