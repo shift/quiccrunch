@@ -164,9 +164,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         cert: cert.clone(),
         key: key.clone(),
         ca_cert: ca_cert.clone(),
-        cert_pem: None, // Will use DER format
-        key_pem: None,
-        ca_cert_pem: None,
+        cert_pem: cert.0.clone(), // Use DER format for now
+        key_pem: key.0.clone(),
+        ca_cert_pem: ca_cert.0.clone(),
     };
     
     match args.mode {
