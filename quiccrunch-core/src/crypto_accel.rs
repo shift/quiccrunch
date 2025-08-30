@@ -55,7 +55,6 @@ impl HardwareCapabilities {
 
         // Use CPUID to detect hardware capabilities
         let cpuid = raw_cpuid::CpuId::new();
-        if cpuid.is_some() {
             if let Some(feature_info) = cpuid.get_feature_info() {
                 caps.aes_ni_available = feature_info.has_aesni();
                 caps.avx_available = feature_info.has_avx();
@@ -66,7 +65,6 @@ impl HardwareCapabilities {
                 caps.avx2_available = extended_features.has_avx2();
                 caps.sha_ni_available = extended_features.has_sha();
             }
-        }
 
         caps
     }

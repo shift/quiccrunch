@@ -25,7 +25,7 @@ struct BufferRing {
 
 /// Pre-registered buffer with io_uring
 struct RegisteredBuffer {
-    data: Box<[u8]>,
+    data: std::sync::Arc<std::sync::Mutex<Box<[u8]>>>,
     bid: u16,
     len: usize,
 }
@@ -71,10 +71,10 @@ impl IoUringOptimizedClient {
         socket.set_nonblocking(true)?;
 
         // Setup buffer ring
-        let buffer_ring = BufferRing::new(&ring, buffer_size, buffer_count)?;
+        let buffer_ring = BufferRing::new(&mut ring, buffer_size, buffer_count)?;
 
         let stats = Arc::new(ClientStats::default());
-        let client = Self {
+        let mut client = Self {
             ring,
             socket,
             buffer_ring,
@@ -97,15 +97,13 @@ impl IoUringOptimizedClient {
 
         // Submission queue polling thread
         let sq_stats = stats.clone();
+        let sq_ring = unsafe { self.ring.submission_shared() };
         self.sq_poll_thread = Some(std::thread::spawn(move || {
-            let mut sqe_batch = Vec::with_capacity(32);
+            let mut sqe_batch: Vec<u32> = Vec::with_capacity(32);
             loop {
                 // Direct SQ polling
-                unsafe {
-                    let sq = self.ring.submission_shared();
-                    // Implementation would use proper API here
-                    // This is a placeholder for optimized polling
-                }
+                // Implementation would use proper API here
+                // This is a placeholder for optimized polling
 
                 if !sqe_batch.is_empty() {
                     sq_stats.submissions.fetch_add(sqe_batch.len(), Ordering::Relaxed);
@@ -118,14 +116,12 @@ impl IoUringOptimizedClient {
 
         // Completion queue polling thread
         let cq_stats = stats.clone();
+        let cq_ring = unsafe { self.ring.completion_shared() };
         self.cq_poll_thread = Some(std::thread::spawn(move || {
             loop {
                 // Direct CQ polling
-                unsafe {
-                    let cq = self.ring.completion_shared();
-                    // Implementation would use proper API here
-                    // This is a placeholder for optimized polling
-                }
+                // Implementation would use proper API here
+                // This is a placeholder for optimized polling
 
                 std::thread::sleep(std::time::Duration::from_micros(1));
             }
@@ -136,13 +132,17 @@ impl IoUringOptimizedClient {
 
     pub async fn send_message_multishot(&mut self, data: &[u8]) -> std::io::Result<()> {
         let buf = self.buffer_ring.acquire()?;
-        buf.data[..data.len()].copy_from_slice(data);
+        {
+            let mut buf_data = buf.data.lock().unwrap();
+            buf_data[..data.len()].copy_from_slice(data);
+        }
 
         // Setup multishot send
         let msghdr = unsafe {
             let mut msg: libc::msghdr = std::mem::zeroed();
             let mut iov: libc::iovec = std::mem::zeroed();
-            iov.iov_base = buf.data.as_ptr() as *mut _;
+            let buf_data = buf.data.lock().unwrap();
+            iov.iov_base = buf_data.as_ptr() as *mut _;
             iov.iov_len = data.len();
             msg.msg_iov = &mut iov as *mut _;
             msg.msg_iovlen = 1;
@@ -202,7 +202,8 @@ impl IoUringOptimizedClient {
         }
 
         let len = cqe.result() as usize;
-        Ok(Bytes::copy_from_slice(&buf.data[..len]))
+        let buf_data = buf.data.lock().unwrap();
+        Ok(Bytes::copy_from_slice(&buf_data[..len]))
     }
 
     pub fn get_stats(&self) -> ClientStats {
@@ -216,7 +217,7 @@ impl IoUringOptimizedClient {
 }
 
 impl BufferRing {
-    fn new(ring: &IoUring, buffer_size: usize, count: usize) -> std::io::Result<Self> {
+    fn new(ring: &mut IoUring, buffer_size: usize, count: usize) -> std::io::Result<Self> {
         let mut buffers = Vec::with_capacity(count);
         let group_id = 1; // Use consistent group ID
 
@@ -243,7 +244,7 @@ impl BufferRing {
             }
 
             buffers.push(Arc::new(RegisteredBuffer {
-                data,
+                data: std::sync::Arc::new(std::sync::Mutex::new(data)),
                 bid,
                 len: buffer_size,
             }));

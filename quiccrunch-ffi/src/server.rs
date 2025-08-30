@@ -118,9 +118,7 @@ pub extern "C" fn quiccrunch_server_init(
     
     let server_internal = unsafe { &mut *(handle as *mut QuicServerInternal) };
     
-    let result = FfiRuntime::block_on(async {
-        CoreServer::new().await
-    });
+    let result = QuicServer::new();
     
     match result {
         Ok(server) => {

@@ -49,12 +49,14 @@ impl From<quiccrunch_core::TransportError> for QuicError {
         use quiccrunch_core::TransportError::*;
         match err {
             ConnectionFailed(_) => QuicError::ConnectionFailed,
-            Timeout(_) => QuicError::TimeoutError,
-            Tls(_) => QuicError::TlsError,
-            Io(_) => QuicError::Error,
-            InvalidAddress(_) => QuicError::AddressError,
-            StreamClosed => QuicError::StreamClosed,
-            _ => QuicError::Error,
+            TimeoutError(_) => QuicError::TimeoutError,
+            CertificateError(_) => QuicError::TlsError,
+            StreamError(_) => QuicError::StreamClosed,
+            ConfigError(_) => QuicError::InvalidArgument,
+            ProtocolError(_) => QuicError::Error,
+            SerializationError(_) => QuicError::SerializationError,
+            InvalidMessage(_) => QuicError::InvalidArgument,
+            Fast(_) => QuicError::Error,
         }
     }
 }

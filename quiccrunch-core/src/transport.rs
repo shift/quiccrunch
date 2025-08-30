@@ -282,7 +282,7 @@ impl BackendImpl {
             #[cfg(feature = "io-uring-advanced")]
             BackendImpl::IoUringAdvanced(ctx) => {
                 let conn = ctx.connect(addr).await?;
-                Ok(Connection { inner: ConnectionInner::IoUringAdvanced(conn.inner), max_message_size: 65536 })
+                Ok(Connection { inner: ConnectionInner::IoUringAdvanced(conn), max_message_size: 65536 })
             }
         }
     }
@@ -296,9 +296,9 @@ impl BackendImpl {
             #[cfg(feature = "io-uring-advanced")]
             BackendImpl::IoUringAdvanced(ctx) => {
                 let incoming = ctx.listen(addr).await?;
-                Ok(Incoming { 
-                    inner: IncomingInner::IoUringAdvanced(incoming.inner), 
-                    settings: TransportSettings { 
+                Ok(Incoming {
+                    inner: IncomingInner::IoUringAdvanced(incoming),
+                    settings: TransportSettings {
                         max_concurrent_uni_streams: 1000,
                         max_concurrent_bidi_streams: 1000,
                         stream_receive_window: 65536,

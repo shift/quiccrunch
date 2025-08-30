@@ -75,6 +75,9 @@ env_logger = "0.11"
 # System monitoring for benchmarks
 sysinfo = { version = "0.30", optional = true }
 
+# Benchmarking dependencies
+statrs = "0.16"                    # Statistical analysis for benchmarking
+
 [dev-dependencies.opentelemetry]
 version = "0.21"
 

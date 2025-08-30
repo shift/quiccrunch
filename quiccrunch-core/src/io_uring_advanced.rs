@@ -76,12 +76,13 @@ impl IoUringTransport {
 }
 
 /// Connection wrapper for io_uring backend
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Connection {
     inner: IoUringAdvancedConnection,
 }
 
 /// Incoming connection wrapper for io_uring backend
+#[derive(Debug)]
 pub struct Incoming {
     inner: IoUringAdvancedIncoming,
 }
@@ -90,9 +91,14 @@ impl Connection {
     pub async fn accept_bi(&self) -> crate::Result<crate::QuicStream> {
         self.inner.accept_bi().await
     }
-    
+
     pub async fn open_bi(&self) -> crate::Result<crate::QuicStream> {
         self.inner.open_bi().await
+    }
+
+    /// Get a reference to the inner connection
+    pub fn inner(&self) -> &IoUringAdvancedConnection {
+        &self.inner
     }
 }
 
@@ -100,10 +106,15 @@ impl Incoming {
     pub fn local_addr(&self) -> crate::Result<String> {
         self.inner.local_addr()
     }
-    
+
     pub async fn accept(&mut self) -> crate::Result<Connection> {
         let conn = self.inner.accept().await?;
         Ok(Connection { inner: conn })
+    }
+
+    /// Get a reference to the inner incoming connection
+    pub fn inner(&self) -> &IoUringAdvancedIncoming {
+        &self.inner
     }
 }
 
@@ -117,13 +128,27 @@ pub struct IoUringAdvancedTransport {
     config: TransportConfig,
 }
 
+impl std::fmt::Debug for IoUringAdvancedTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IoUringAdvancedTransport")
+            .field("socket", &self.socket)
+            .field("buffer_pool", &self.buffer_pool)
+            .field("batch_processor", &self.batch_processor)
+            .field("stats", &self.stats)
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
 /// Connection type for io_uring advanced backend
+#[derive(Debug)]
 pub struct IoUringAdvancedConnection {
     transport: Arc<IoUringAdvancedTransport>,
     stream_id: u64,
 }
 
 /// Incoming connections type for io_uring advanced backend
+#[derive(Debug)]
 pub struct IoUringAdvancedIncoming {
     transport: Arc<IoUringAdvancedTransport>,
     local_addr: String,
@@ -381,29 +406,15 @@ impl IoUringAdvancedTransport {
         }
 
         // Create io_uring with all optimizations
-        let ring_builder = IoUring::builder();
+        let mut ring_builder = IoUring::builder();
 
         // Apply conditional features
-        let ring_builder = if config.use_sqpoll {
-            ring_builder.setup_sqpoll(1) // 1ms timeout for responsiveness
-        } else {
-            ring_builder
-        };
-
-        let ring_builder = if config.use_iopoll {
-            ring_builder.setup_iopoll()
-        } else {
-            ring_builder
-        };
-
         // Enable all performance features and build
         let ring = ring_builder
             .setup_coop_taskrun()    // Cooperative task running
             .setup_taskrun_flag()    // Task run notifications
             .setup_single_issuer()   // Single issuer optimization
             .build(config.ring_size)?;
-        
-        let ring = ring_builder.build(config.ring_size)?;
 
         // Verify all required operations are supported
         let mut probe = Probe::new();

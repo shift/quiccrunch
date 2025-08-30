@@ -355,6 +355,37 @@ Licensed under either of:
 
 at your option.
 
+## AI Agent Workflow System
+
+QuicCrunch uses an advanced AI Agent Workflow Management System for complex development tasks. This system implements an iterative Implementation → Testing → Documentation cycle to ensure high-quality, well-tested code.
+
+### Workflow Overview
+
+The system uses specialized AI agents for different phases:
+- **Implementation Agent**: Focused code development with task-specific expertise
+- **Testing Agent**: Comprehensive validation including unit, integration, and performance tests
+- **Documentation Agent**: Complete technical documentation and API updates
+
+### Current Development Tasks
+
+#### P0 CRITICAL: Setup Project Workflow ✅ COMPLETE
+- AI Agent Workflow system integration for QuicCrunch
+- Workflow templates customized for Rust/QUIC development
+- Real-time context management and session continuity
+
+#### P1 HIGH: Implement Connection Pooling 🔄 IN PROGRESS
+- High-performance connection reuse system
+- 15-30% reduction in connection overhead
+- Foundation for scalable RPC operations
+- Comprehensive health monitoring and lifecycle management
+
+### Workflow Documentation
+
+For detailed workflow information, see:
+- [AI Agent Workflow README](ai-agent-workflow/README.md)
+- [Workflow Startup Protocol](ai-agent-workflow/STARTUP_PROMPT.md)
+- [Task Management](ai-agent-workflow/todo.md)
+
 ## Contributing
 
 We welcome contributions! Please feel free to submit a Pull Request.

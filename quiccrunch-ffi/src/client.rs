@@ -100,9 +100,7 @@ pub extern "C" fn quiccrunch_client_init(
     
     let client_internal = unsafe { &mut *(handle as *mut QuicClientInternal) };
     
-    let result = FfiRuntime::block_on(async {
-        CoreClient::new().await
-    });
+    let result = QuicClient::new();
     
     match result {
         Ok(client) => {
@@ -263,7 +261,7 @@ pub extern "C" fn quiccrunch_client_send_message(
     let data = crate::types::message_to_bytes(message).to_vec();
     
     let result = FfiRuntime::block_on(async move {
-        let mut stream = connection.open_bi().await?;
+        let mut stream = connection.open_stream().await?;
         stream.send_message(&data).await?;
         Ok(())
     });
