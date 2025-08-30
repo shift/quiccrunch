@@ -315,9 +315,11 @@ CONTEXT FILE: ai-agent-workflow/context/<task-name>-implementation.md
 CRITICAL REQUIREMENTS:
 - Focus ONLY on implementing the assigned feature/fix
 - Follow existing code patterns and architecture
+- Do not simplify or modify code without explicit user permission. Preserve original complexity and structure.
 - Update your context file after every significant action
 - Commit changes using: git commit -m "impl: <task-name> - <action>"
 - HANDOFF to Testing Agent when implementation is complete
+- Refer to ai-agent-workflow/STARTUP_PROMPT.md for complete workflow rules and guidelines
 
 TASK DESCRIPTION:
 [Specific implementation requirements]
@@ -348,8 +350,10 @@ CRITICAL REQUIREMENTS:
 - Run ALL tests in the codebase (not just new ones)
 - Validate no regressions were introduced
 - Test edge cases and integration scenarios
+- Do not simplify or modify code without explicit user permission. Preserve original complexity and structure.
 - Update your context file after every test run
 - Commit test updates using: git commit -m "test: <task-name> - <action>"
+- Refer to ai-agent-workflow/STARTUP_PROMPT.md for complete workflow rules and guidelines
 
 TESTING MANDATE:
 - Unit tests: ALL must pass
@@ -392,8 +396,10 @@ CRITICAL REQUIREMENTS:
 - Update ALL relevant documentation
 - Ensure accuracy and completeness
 - Follow documentation standards
+- Do not simplify or modify code without explicit user permission. Preserve original complexity and structure.
 - Update your context file after every doc change
 - Commit docs using: git commit -m "docs: <task-name> - <action>"
+- Refer to ai-agent-workflow/STARTUP_PROMPT.md for complete workflow rules and guidelines
 
 DOCUMENTATION SCOPE:
 - API documentation updates
