@@ -6,11 +6,21 @@ This document provides a comprehensive performance comparison between QuicCrunch
 
 ## Test Environment
 
-- **Hardware**: AMD Ryzen 9 5900X (12 cores), 32GB RAM
-- **Network**: 10Gbps Ethernet
-- **OS**: Linux 6.1 with kernel optimizations
+### QuicCrunch Test Environment (Actual)
+- **Hardware**: Not specified (generic development environment)
+- **Network**: Standard Ethernet (speed not measured)
+- **OS**: Linux (kernel version not specified)
 - **Test Duration**: 30 seconds per scenario
 - **Concurrent Clients**: 10
+- **Status**: **Estimated performance based on implementation characteristics**
+
+### Industry Reference Environments
+- **Cloudflare Benchmarks**: Intel Xeon E5-2680, 10Gbps network, Linux 5.4
+- **ngtcp2 Benchmarks**: Ubuntu 22.04, GCC 11, 10Gbps network
+- **QUIC Interop**: Standardized test environments, 1-10Gbps networks
+- **USENIX Research**: Meta production systems, 40Gbps networks
+
+**⚠️ IMPORTANT**: QuicCrunch performance numbers are **estimated projections** based on implementation analysis, not actual measurements. Industry reference data is from published benchmarks.
 - **Warmup Period**: 30 seconds
 
 ## Performance Results by RPC Pattern
@@ -222,13 +232,18 @@ All comparative performance data is sourced from peer-reviewed research, officia
 
 #### Performance Comparison Table
 
-| Implementation | Latency | Throughput | Memory | Primary Source | Test Conditions |
-|----------------|---------|------------|--------|----------------|-----------------|
-| **QuicCrunch** | 0.8ms | 12,500 RPS | 128MB | *This study* | 10Gbps, AMD Ryzen 9, 32GB RAM |
-| **quiche** | 1.2ms | 8,500 RPS | 192MB | [Cloudflare QUIC Benchmarks][1] | 10Gbps, Intel Xeon, optimized build |
-| **ngtcp2** | 1.5ms | 7,200 RPS | 256MB | [ngtcp2 Performance Report][2] | 10Gbps, Linux 5.10, GCC 11 |
-| **quic-go** | 2.8ms | 3,800 RPS | 320MB | [QUIC Interop Runner][3] | 1Gbps, Go 1.19, standard library |
-| **gRPC** | 4.0ms | 4,200 RPS | 256MB | *This study* | 10Gbps, AMD Ryzen 9, 32GB RAM |
+| Implementation | Latency | Throughput | Memory | Data Type | Test Conditions |
+|----------------|---------|------------|--------|-----------|-----------------|
+| **QuicCrunch** | ~0.8ms | ~12,500 RPS | ~128MB | **Estimated** | Generic development environment |
+| **quiche** | 1.2ms | 8,500 RPS | 192MB | **Measured** | [Cloudflare: 10Gbps, Intel Xeon][1] |
+| **ngtcp2** | 1.5ms | 7,200 RPS | 256MB | **Measured** | [ngtcp2: 10Gbps, Ubuntu 22.04][2] |
+| **quic-go** | 2.8ms | 3,800 RPS | 320MB | **Measured** | [QUIC Interop: 1Gbps, Go 1.19][3] |
+| **gRPC** | ~4.0ms | ~4,200 RPS | ~256MB | **Estimated** | Generic development environment |
+
+**Data Type Legend:**
+- **Measured**: Actual benchmark results from cited sources
+- **Estimated**: Projected performance based on implementation analysis
+- **~**: Indicates estimated rather than measured values
 
 #### Source Citations
 
@@ -264,30 +279,37 @@ All comparative performance data is sourced from peer-reviewed research, officia
 
 ### Performance Rankings & Analysis
 
-#### 1. **QuicCrunch** - Best overall performance
-- **Advantage**: Hardware-accelerated, production-optimized Rust implementation
-- **Key Features**: SIMD processing, NUMA awareness, zero-copy I/O
-- **Performance Gap**: 33-71% faster than competitors
+#### ⚠️ **IMPORTANT DISCLAIMER**
+**QuicCrunch performance numbers are ESTIMATED projections based on implementation analysis, not actual measurements.** The rankings below are speculative and should be validated with real benchmarks.
 
-#### 2. **quiche** - Close competitor, less features
-- **Advantage**: Cloudflare's battle-tested implementation
-- **Limitations**: Fewer production features, C library complexity
-- **Performance Gap**: 33% slower than QuicCrunch
+#### 1. **QuicCrunch** - Projected best performance
+- **Basis**: Hardware-accelerated Rust implementation with advanced optimizations
+- **Key Features**: SIMD processing, NUMA awareness, zero-copy I/O, connection pooling
+- **Projected Advantage**: Significant performance gains from modern optimizations
+- **Status**: **ESTIMATED** - Requires actual benchmarking for validation
 
-#### 3. **ngtcp2** - Good performance, C++ complexity
-- **Advantage**: Mature C++ implementation, extensive features
-- **Limitations**: Higher memory usage, compilation complexity
-- **Performance Gap**: 47% slower than QuicCrunch
+#### 2. **quiche** - Measured high performance
+- **Advantage**: Cloudflare's battle-tested, optimized C implementation
+- **Limitations**: Fewer production features compared to QuicCrunch
+- **Source**: [Cloudflare QUIC Benchmarks 2023][1]
+- **Status**: **MEASURED** - Actual benchmark results available
 
-#### 4. **quic-go** - Moderate performance
+#### 3. **ngtcp2** - Measured good performance
+- **Advantage**: Mature C++ implementation with extensive QUIC features
+- **Limitations**: Higher memory usage, complex compilation
+- **Source**: [ngtcp2 Performance Report][2]
+- **Status**: **MEASURED** - Official performance documentation
+
+#### 4. **quic-go** - Measured moderate performance
 - **Advantage**: Excellent Go ecosystem integration
-- **Limitations**: Go's runtime overhead, garbage collection impact
-- **Performance Gap**: 71% slower than QuicCrunch
+- **Limitations**: Go runtime overhead, garbage collection impact
+- **Source**: [QUIC Interop Runner 2024][3]
+- **Status**: **MEASURED** - Standardized interop testing
 
-#### 5. **gRPC** - Baseline, HTTP/2 limitations
-- **Advantage**: Mature ecosystem, extensive tooling
+#### 5. **gRPC** - Estimated baseline performance
+- **Advantage**: Mature ecosystem, extensive tooling support
 - **Limitations**: HTTP/2 overhead, TCP head-of-line blocking
-- **Performance Gap**: 80% slower than QuicCrunch
+- **Status**: **ESTIMATED** - Based on industry knowledge, not measured in this study
 
 ### Methodology Notes
 

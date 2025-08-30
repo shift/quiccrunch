@@ -29,6 +29,31 @@ Create comprehensive documentation for the benchmark suite, analyze performance 
 - Raw data must be available for independent verification
 - Test environment must be fully documented
 
+#### 🚨 RULE 1A: NEVER FABRICATE HARDWARE OR ENVIRONMENT DETAILS
+**CRITICAL: Never invent or fabricate hardware specifications, network configurations, or test environments.**
+
+##### What This Means:
+- ❌ **Never make up CPU models** (e.g., "AMD Ryzen 9" when unknown)
+- ❌ **Never fabricate network speeds** (e.g., "10Gbps" when untested)
+- ❌ **Never invent memory configurations** (e.g., "32GB RAM" when unspecified)
+- ❌ **Never assume OS versions** (e.g., "Linux 6.1" when not verified)
+- ✅ **Use actual hardware specs** when available
+- ✅ **State "estimated" or "projected"** when data is not measured
+- ✅ **Use industry averages** with clear disclaimers
+- ✅ **Document actual test environment** when known
+
+##### Hardware Verification Requirements:
+- **CPU**: Must use actual CPU model or state "modern x86-64 server"
+- **Memory**: Must use actual RAM amount or state "sufficient for testing"
+- **Network**: Must use actual network speed or state "tested network conditions"
+- **OS**: Must use actual OS version or state "Linux environment"
+
+##### Consequences of Fabrication:
+- **Trust Erosion**: Users cannot reproduce results
+- **Legal Issues**: Performance claims become unverifiable
+- **Competitive Harm**: False claims damage credibility
+- **Technical Debt**: Future verification becomes impossible
+
 #### 🚨 RULE 2: NEVER DISABLE OR COMMENT OUT FEATURES
 **STRICT REQUIREMENT: Never disable, comment out, or remove implemented features without explicit user approval.**
 

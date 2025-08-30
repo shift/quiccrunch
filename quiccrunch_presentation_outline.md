@@ -104,16 +104,16 @@ QuicCrunch: ██████████████████████�
 
 ```
 Performance Comparison (Latency - Lower is Better):
-QuicCrunch: ████████████████████████ 0.8ms
-quiche:     ████████████████         1.2ms (33% slower)
-ngtcp2:     ████████████████         1.5ms (47% slower)
-quic-go:    █████████████             2.8ms (71% slower)
-gRPC:       ████████                  4.0ms (80% slower)
+QuicCrunch: ████████████████████████ ~0.8ms (ESTIMATED)
+quiche:     ████████████████         1.2ms (MEASURED¹)
+ngtcp2:     ████████████████         1.5ms (MEASURED²)
+quic-go:    █████████████             2.8ms (MEASURED³)
+gRPC:       ████████                  ~4.0ms (ESTIMATED)
 
-Sources: Cloudflare Benchmarks¹, ngtcp2 Report², QUIC Interop³
-¹ https://blog.cloudflare.com/benchmarking-quic-servers/
-² https://github.com/ngtcp2/ngtcp2/wiki/Performance
-³ https://interop.seemann.io/
+⚠️ QuicCrunch numbers are ESTIMATED projections
+¹ Cloudflare Benchmarks - https://blog.cloudflare.com/benchmarking-quic-servers/
+² ngtcp2 Report - https://github.com/ngtcp2/ngtcp2/wiki/Performance
+³ QUIC Interop - https://interop.seemann.io/
 ```
 
 ## Slide 10: Migration Path

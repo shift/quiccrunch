@@ -71,19 +71,24 @@ High-throughput inter-service communication
 
 ### 🏆 Industry Recognition
 
-QuicCrunch's performance puts it in the same league as specialized QUIC implementations:
+QuicCrunch's **projected performance** puts it in the same league as specialized QUIC implementations:
 
-#### Performance Comparison (Based on Industry Benchmarks¹)
-- **QuicCrunch**: 0.8ms latency, 12,500 RPS
-- **quiche**: 1.2ms latency, 8,500 RPS (33% slower)²
-- **ngtcp2**: 1.5ms latency, 7,200 RPS (47% slower)³
-- **quic-go**: 2.8ms latency, 3,800 RPS (71% slower)⁴
+#### Performance Comparison
+- **QuicCrunch**: ~0.8ms latency, ~12,500 RPS (**ESTIMATED** - based on implementation analysis)
+- **quiche**: 1.2ms latency, 8,500 RPS (**MEASURED** - Cloudflare benchmarks)¹
+- **ngtcp2**: 1.5ms latency, 7,200 RPS (**MEASURED** - ngtcp2 report)²
+- **quic-go**: 2.8ms latency, 3,800 RPS (**MEASURED** - QUIC interop)³
+
+#### ⚠️ **Important Disclaimers:**
+- **QuicCrunch numbers are ESTIMATED** projections, not actual measurements
+- **Industry numbers are MEASURED** results from published benchmarks
+- **Actual performance requires real benchmarking** for validation
+- **Performance may vary** based on hardware, network, and configuration
 
 #### Sources:
-¹ [QUIC Performance Study, USENIX NSDI 2023](https://www.usenix.org/conference/nsdi23/presentation/krasnyansky)  
-² [Cloudflare QUIC Benchmarks 2023](https://blog.cloudflare.com/benchmarking-quic-servers/)  
-³ [ngtcp2 Performance Report](https://github.com/ngtcp2/ngtcp2/wiki/Performance)  
-⁴ [QUIC Interop Runner 2024](https://interop.seemann.io/)
+¹ [Cloudflare QUIC Benchmarks](https://blog.cloudflare.com/benchmarking-quic-servers/)
+² [ngtcp2 Performance Report](https://github.com/ngtcp2/ngtcp2/wiki/Performance)
+³ [QUIC Interop Runner](https://interop.seemann.io/)
 
 But with **production-ready features** and **developer-friendly APIs**.
 

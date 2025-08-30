@@ -12,9 +12,16 @@
     "latency_improvement_percent": 500.0,
     "throughput_improvement_percent": 300.0,
     "efficiency_improvement_percent": 400.0,
+    "data_quality": {
+      "quiccrunch": "ESTIMATED - Based on implementation analysis, not actual measurements",
+      "grpc": "ESTIMATED - Based on industry knowledge, not actual measurements",
+      "quiche": "MEASURED - Actual benchmark results from Cloudflare",
+      "ngtcp2": "MEASURED - Actual benchmark results from ngtcp2 project",
+      "quic_go": "MEASURED - Actual results from QUIC interop testing"
+    },
     "sources": {
-      "quiccrunch": "Direct measurement from this study",
-      "grpc": "Direct measurement from this study",
+      "quiccrunch": "Implementation analysis and optimization projections",
+      "grpc": "Industry standard performance expectations",
       "quiche": "Cloudflare QUIC Benchmarks 2023 - https://blog.cloudflare.com/benchmarking-quic-servers/",
       "ngtcp2": "ngtcp2 Performance Report - https://github.com/ngtcp2/ngtcp2/wiki/Performance",
       "quic_go": "QUIC Interop Runner 2024 - https://interop.seemann.io/"

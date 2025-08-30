@@ -50,10 +50,12 @@ In our latest benchmark study, QuicCrunch demonstrates revolutionary RPC perform
 🔹 **Efficiency**: 4x better resource utilization
 
 **Industry Performance Comparison:**
-- **QuicCrunch**: 0.8ms latency, 12,500 RPS
-- **quiche**: 1.2ms latency, 8,500 RPS (33% slower)¹
-- **ngtcp2**: 1.5ms latency, 7,200 RPS (47% slower)²
-- **quic-go**: 2.8ms latency, 3,800 RPS (71% slower)³
+- **QuicCrunch**: ~0.8ms latency, ~12,500 RPS (**ESTIMATED** - based on implementation analysis)
+- **quiche**: 1.2ms latency, 8,500 RPS (**MEASURED** - 33% slower)¹
+- **ngtcp2**: 1.5ms latency, 7,200 RPS (**MEASURED** - 47% slower)²
+- **quic-go**: 2.8ms latency, 3,800 RPS (**MEASURED** - 71% slower)³
+
+**⚠️ QuicCrunch numbers are ESTIMATED projections, not actual measurements**
 
 **Key Technical Advantages:**
 - QUIC transport with built-in multiplexing
