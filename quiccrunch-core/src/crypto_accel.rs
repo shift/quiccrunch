@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::Result;
 use aesni::{Aes128, Aes256};
-use aes_gcm::{AesGcm, Key, Nonce};
-use aes_gcm::aead::{Aead, NewAead};
+use aes_gcm::{Aes128Gcm, Key, Nonce};
+use aes_gcm::aead::{Aead, KeyInit};
 
 /// Configuration for hardware crypto acceleration
 #[derive(Clone, Debug)]
@@ -156,17 +156,17 @@ impl BatchCryptoProcessor {
     /// Hardware-accelerated single encryption using AES-NI
     fn encrypt_single_aes_ni(&self, plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         // Use AES-GCM with hardware acceleration
-        let key = Key::from_slice(key);
-        let cipher = AesGcm::<Aes128, _>::new(key); // Use Aes128 for compatibility
+        let key = Key::<Aes128Gcm>::from_slice(key);
+        let cipher = Aes128Gcm::new(key);
 
         // Generate a random nonce (12 bytes for GCM)
         let mut nonce_bytes = [0u8; 12];
-        getrandom::getrandom(&mut nonce_bytes).map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        getrandom::getrandom(&mut nonce_bytes).map_err(|e| crate::TransportError::ConfigError(format!("Random generation failed: {}", e)))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         // Encrypt the plaintext
         let ciphertext = cipher.encrypt(nonce, plaintext)
-            .map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+            .map_err(|e| crate::TransportError::ProtocolError(format!("AES-GCM operation failed: {}", e)))?;
 
         // Prepend nonce to ciphertext for decryption
         let mut result = nonce_bytes.to_vec();
@@ -178,15 +178,15 @@ impl BatchCryptoProcessor {
     /// Software-based single encryption fallback
     fn encrypt_single_software(&self, plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         // Use software AES-GCM as fallback
-        let key = Key::from_slice(key);
-        let cipher = AesGcm::<Aes128, _>::new(key);
+        let key = Key::<Aes128Gcm>::from_slice(key);
+        let cipher = Aes128Gcm::new(key);
 
         let mut nonce_bytes = [0u8; 12];
-        getrandom::getrandom(&mut nonce_bytes).map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        getrandom::getrandom(&mut nonce_bytes).map_err(|e| crate::TransportError::ConfigError(format!("Random generation failed: {}", e)))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = cipher.encrypt(nonce, plaintext)
-            .map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+            .map_err(|e| crate::TransportError::ProtocolError(format!("AES-GCM operation failed: {}", e)))?;
 
         let mut result = nonce_bytes.to_vec();
         result.extend_from_slice(&ciphertext);
@@ -197,17 +197,17 @@ impl BatchCryptoProcessor {
     /// Hardware-accelerated single decryption using AES-NI
     fn decrypt_single_aes_ni(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         if ciphertext.len() < 12 {
-            return Err(crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, "Ciphertext too short")));
+            return Err(crate::TransportError::InvalidMessage("Ciphertext too short".to_string()));
         }
 
-        let key = Key::from_slice(key);
-        let cipher = AesGcm::<Aes128, _>::new(key);
+        let key = Key::<Aes128Gcm>::from_slice(key);
+        let cipher = Aes128Gcm::new(key);
 
         let nonce = Nonce::from_slice(&ciphertext[..12]);
         let ciphertext = &ciphertext[12..];
 
         let plaintext = cipher.decrypt(nonce, ciphertext)
-            .map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+            .map_err(|e| crate::TransportError::ProtocolError(format!("AES-GCM operation failed: {}", e)))?;
 
         Ok(plaintext)
     }
@@ -215,17 +215,17 @@ impl BatchCryptoProcessor {
     /// Software-based single decryption fallback
     fn decrypt_single_software(&self, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         if ciphertext.len() < 12 {
-            return Err(crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, "Ciphertext too short")));
+            return Err(crate::TransportError::ProtocolError("Ciphertext too short".to_string()));
         }
 
-        let key = Key::from_slice(key);
-        let cipher = AesGcm::<Aes128, _>::new(key);
+        let key = Key::<Aes128Gcm>::from_slice(key);
+        let cipher = Aes128Gcm::new(key);
 
         let nonce = Nonce::from_slice(&ciphertext[..12]);
         let ciphertext = &ciphertext[12..];
 
         let plaintext = cipher.decrypt(nonce, ciphertext)
-            .map_err(|e| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+            .map_err(|e| crate::TransportError::ProtocolError(format!("AES-GCM operation failed: {}", e)))?;
 
         Ok(plaintext)
     }

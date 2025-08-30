@@ -52,7 +52,7 @@ impl Default for TransportSettings {
 pub struct QuicTransport {
     backend: BackendImpl,
     connection_pool: Option<crate::connection_pool::ConnectionPool>,
-    crypto_accel: Option<crate::crypto_accel::HardwareCrypto>,
+    crypto_accel: Option<Arc<crate::crypto_accel::HardwareCrypto>>,
     congestion_control: Option<crate::congestion::AdaptiveCongestionControl>,
 }
 
@@ -531,7 +531,7 @@ impl QuicTransport {
 
     /// Enable hardware crypto acceleration
     pub fn enable_crypto_acceleration(&mut self, config: crate::crypto_accel::CryptoAccelConfig) {
-        self.crypto_accel = Some(crate::crypto_accel::HardwareCrypto::new(config));
+        self.crypto_accel = Some(Arc::new(crate::crypto_accel::HardwareCrypto::new(config)));
     }
 
     /// Check if crypto acceleration is enabled
