@@ -164,6 +164,10 @@ harness = false
 name = "optimization_fixes"
 harness = false
 
+[[bench]]
+name = "connection_pool"
+harness = false
+
 [features]
 # Backends map to optional deps (mutually exclusive at compile time)
 backend-quinn = ["dep:quinn"]
