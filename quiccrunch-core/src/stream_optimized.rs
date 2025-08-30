@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 use bytes::Bytes;
-use tokio::time;
+
 use crate::memory::{PooledBuffer, MessageBuffer};
 // use crate::simd;
 use crate::lockfree::{StreamHandle, ConnectionHandle};
@@ -86,10 +86,10 @@ enum StreamInner {
     #[cfg(feature = "backend-tquic")]
     Tquic { 
         handle: StreamHandle,
-        send_buffer: Option<MessageBuffer>,
-        recv_buffer: Option<PooledBuffer>,
+        _send_buffer: Option<MessageBuffer>,
+        _recv_buffer: Option<PooledBuffer>,
     },
-    Optimized {
+    _Optimized {
         connection: ConnectionHandle,
         stream_id: u64,
         send_buffer: MessageBuffer,
@@ -174,8 +174,8 @@ impl OptimizedQuicStream {
         Self {
             inner: StreamInner::Tquic { 
                 handle,
-                send_buffer: None,
-                recv_buffer: None,
+                _send_buffer: None,
+                _recv_buffer: None,
             },
             max_message_size,
             stats: StreamStats::default(),
@@ -203,10 +203,10 @@ impl OptimizedQuicStream {
             }
             #[cfg(all(feature = "backend-tquic", not(feature = "backend-quinn")))]
             {
-                StreamInner::Tquic { 
+                StreamInner::Tquic {
                     handle,
-                    send_buffer: Some(MessageBuffer::with_capacity(config.chunk_size)),
-                    recv_buffer: Some(PooledBuffer::get(config.chunk_size)),
+                    _send_buffer: Some(MessageBuffer::with_capacity(config.chunk_size)),
+                    _recv_buffer: Some(PooledBuffer::get(config.chunk_size)),
                 }
             }
             #[cfg(not(any(feature = "backend-quinn", feature = "backend-tquic")))]
@@ -308,7 +308,7 @@ impl OptimizedQuicStream {
             StreamInner::Tquic { handle, .. } => {
                 handle.write(data, false).await?;
             }
-            StreamInner::Optimized { .. } => {
+            StreamInner::_Optimized { .. } => {
                 // Advanced zero-copy implementation would go here
                 unimplemented!("Optimized backend not yet implemented");
             }
@@ -354,7 +354,7 @@ impl OptimizedQuicStream {
             StreamInner::Tquic { handle, .. } => {
                 handle.write(data, false).await?;
             }
-            StreamInner::Optimized { .. } => {
+            StreamInner::_Optimized { .. } => {
                 unimplemented!("Optimized backend not yet implemented");
             }
         }
@@ -409,7 +409,7 @@ impl OptimizedQuicStream {
                 handle.read(self.config.chunk_size).await?
                     .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into()))
             }
-            StreamInner::Optimized { .. } => {
+            StreamInner::_Optimized { .. } => {
                 unimplemented!("Optimized backend not yet implemented");
             }
         }
@@ -464,7 +464,7 @@ impl OptimizedQuicStream {
                 handle.read(self.config.chunk_size).await?
                     .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into()))
             }
-            StreamInner::Optimized { .. } => {
+            StreamInner::_Optimized { .. } => {
                 unimplemented!("Optimized backend not yet implemented");
             }
         }
@@ -482,7 +482,7 @@ impl OptimizedQuicStream {
             StreamInner::Tquic { handle, .. } => {
                 handle.close().await?;
             }
-            StreamInner::Optimized { .. } => {
+            StreamInner::_Optimized { .. } => {
                 unimplemented!("Optimized backend not yet implemented");
             }
         }

@@ -332,6 +332,7 @@ pub struct ConnectionStatsSnapshot {
 
 /// High-performance command processor for stream operations
 pub struct StreamProcessor {
+    #[allow(dead_code)]
     connection_id: u64,
     channels: ConnectionChannels,
     backend: Box<dyn StreamBackend + Send>,

@@ -64,6 +64,7 @@ impl CpuOptimizations {
             CPU_FEATURES = Some(CpuFeatures::detect());
         });
 
+        #[allow(static_mut_refs)]
         let features = unsafe { CPU_FEATURES.as_ref().unwrap().clone() };
 
         Self {
@@ -336,7 +337,7 @@ impl CpuOptimizations {
 
         let start = Instant::now();
         for _ in 0..iterations {
-            let bytes = unsafe {
+            let _bytes = unsafe {
                 std::slice::from_raw_parts(
                     data.as_ptr() as *const u8,
                     data.len() * 4

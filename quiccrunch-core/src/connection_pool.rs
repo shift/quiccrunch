@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock};
-use crate::transport::{QuicTransport, Connection, TlsConfig, TransportSettings, Transport};
+use tokio::sync::RwLock;
+use crate::transport::{QuicTransport, Connection, Transport};
 use crate::Result;
 
 /// Configuration for connection pool behavior

@@ -5,9 +5,10 @@
 /// encryption performance by 50-80%.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
+
 use crate::Result;
-use aesni::{Aes128, Aes256};
+
 use aes_gcm::{Aes128Gcm, Key, Nonce};
 use aes_gcm::aead::{Aead, KeyInit};
 
@@ -78,6 +79,7 @@ impl HardwareCapabilities {
 pub struct BatchCryptoProcessor {
     config: CryptoAccelConfig,
     hw_caps: HardwareCapabilities,
+    #[allow(dead_code)]
     batch_buffer: Vec<u8>,
 }
 

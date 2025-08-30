@@ -15,7 +15,7 @@ use bytes::Bytes;
 use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-use crate::memory::{PooledBuffer, MessageBuffer};
+use crate::memory::PooledBuffer;
 use crate::simd;
 
 /// Configuration for io_uring transport optimizations
@@ -34,8 +34,11 @@ pub struct Config {
 #[derive(Clone, Debug)]
 pub struct IoUringTransport {
     inner: Arc<IoUringAdvancedTransport>,
+    #[allow(dead_code)]
     tls_config: crate::transport::TlsConfig,
+    #[allow(dead_code)]
     settings: crate::config::QuicTransportSettings,
+    #[allow(dead_code)]
     config: Config,
 }
 
@@ -320,6 +323,7 @@ struct AdvancedBufferPool {
     available: VecDeque<u16>,
     prefetch_queue: VecDeque<u16>,
     in_use: AtomicUsize,
+    #[allow(dead_code)]
     group_id: u16,
     prefetch_depth: usize,
     numa_pools: Vec<NumaBufferPool>, // Per-NUMA-node pools
@@ -338,7 +342,9 @@ struct NumaBufferPool {
 #[derive(Debug)]
 struct RegisteredBuffer {
     data: Box<[u8]>,
+    #[allow(dead_code)]
     buffer_id: u16,
+    #[allow(dead_code)]
     group_id: u16,
     numa_node: Option<usize>,
 }
@@ -346,24 +352,26 @@ struct RegisteredBuffer {
 /// Advanced batch processor with operation coalescing
 #[derive(Debug)]
 struct BatchProcessor {
+    #[allow(dead_code)]
     send_batch: Vec<SendOperation>,
     recv_batch: Vec<RecvOperation>,
     coalesced_sends: Vec<CoalescedSend>,
+    #[allow(dead_code)]
     max_batch_size: usize,
 }
 
 #[derive(Debug)]
 struct SendOperation {
-    data: Bytes,
-    addr: SockAddr,
-    buffer_id: Option<u16>,
-    priority: u8,
+    _data: Bytes,
+    _addr: SockAddr,
+    _buffer_id: Option<u16>,
+    _priority: u8,
 }
 
 #[derive(Debug)]
 struct RecvOperation {
     buffer_id: u16,
-    expected_size: usize,
+    _expected_size: usize,
 }
 
 /// Coalesced send operation for vectorized I/O
@@ -486,7 +494,7 @@ impl IoUringAdvancedTransport {
             if let Some(buffer_id) = self.buffer_pool.acquire_buffer() {
                 let operation = RecvOperation {
                     buffer_id,
-                    expected_size: self.predict_message_size(),
+                    _expected_size: self.predict_message_size(),
                 };
                 self.batch_processor.recv_batch.push(operation);
             } else {
@@ -529,7 +537,7 @@ impl IoUringAdvancedTransport {
         let mut submission = self.ring.submission();
         let mut submitted = 0;
 
-        for (data, addr) in messages {
+        for (data, _addr) in messages {
             if let Some(buffer_id) = self.buffer_pool.acquire_buffer() {
                 let buffer = &mut self.buffer_pool.registered_buffers[buffer_id as usize];
                 
@@ -788,15 +796,11 @@ impl IoUringAdvancedTransport {
     fn set_numa_affinity(numa_node: usize) -> std::io::Result<()> {
         #[cfg(target_os = "linux")]
         {
-            use std::mem;
-
             // Set memory allocation policy for NUMA node
-            unsafe {
-                // Use mbind to set NUMA memory policy
-                let nodemask = 1u64 << numa_node;
-                // TODO: NUMA memory binding requires additional libc constants
-                // libc::mbind(...);
-            }
+            // Use mbind to set NUMA memory policy
+            let _nodemask = 1u64 << numa_node;
+            // TODO: NUMA memory binding requires additional libc constants
+            // libc::mbind(...);
 
             // Set CPU affinity to CPUs on this NUMA node
             Self::set_cpu_affinity_for_numa_node(numa_node)?;
@@ -1144,7 +1148,7 @@ impl AdvancedBufferPool {
     }
 
     /// Allocate buffer specifically on a NUMA node
-    fn allocate_numa_specific_buffer(size: usize, numa_node: usize) -> std::io::Result<Box<[u8]>> {
+    fn allocate_numa_specific_buffer(size: usize, _numa_node: usize) -> std::io::Result<Box<[u8]>> {
         // Simplified NUMA allocation - in production this would use libnuma
         // For now, just use regular allocation with NUMA hints
         Self::allocate_optimized_buffer(size)

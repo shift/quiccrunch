@@ -150,7 +150,7 @@ impl BackendImpl {
         }
 
         // Fallback to tQUIC as the default backend when available
-        #[cfg(feature = "backend-tquic")]
+        #[cfg(all(not(feature = "io-uring-advanced"), feature = "backend-tquic"))]
         {
             // Convert simple settings to advanced settings and delegate to tquic
             let advanced_settings = crate::config::QuicTransportSettings {
@@ -167,9 +167,9 @@ impl BackendImpl {
                 enable_multipath: true,
                 enable_hystart: true,
             };
-            Self::new_advanced(tls_config, advanced_settings)
+            return Self::new_advanced(tls_config, advanced_settings);
         }
-        #[cfg(all(not(feature = "backend-tquic"), feature = "backend-quinn"))]
+        #[cfg(all(not(feature = "io-uring-advanced"), not(feature = "backend-tquic"), feature = "backend-quinn"))]
         {
             // Fallback to Quinn only when tQUIC is not available
             Ok(BackendImpl::Quinn(QuinnCtx::new(tls_config, settings)?))
@@ -636,6 +636,7 @@ pub struct CongestionState {
 #[derive(Clone, Debug)]
 pub struct Connection {
     inner: ConnectionInner,
+    #[allow(dead_code)]
     max_message_size: usize,
 }
 

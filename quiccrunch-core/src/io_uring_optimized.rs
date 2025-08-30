@@ -20,6 +20,7 @@ struct BufferRing {
     buffers: Vec<Arc<RegisteredBuffer>>,
     provided: AtomicUsize,
     consumed: AtomicUsize,
+    #[allow(dead_code)]
     group_id: u16,
 }
 
@@ -27,6 +28,7 @@ struct BufferRing {
 struct RegisteredBuffer {
     data: std::sync::Arc<std::sync::Mutex<Box<[u8]>>>,
     bid: u16,
+    #[allow(dead_code)]
     len: usize,
 }
 
@@ -93,11 +95,11 @@ impl IoUringOptimizedClient {
 
     fn start_polling_threads(&mut self) -> std::io::Result<()> {
         let stats = self.stats.clone();
-        let ring_fd = self.ring.as_raw_fd();
+        let _ring_fd = self.ring.as_raw_fd();
 
         // Submission queue polling thread
         let sq_stats = stats.clone();
-        let sq_ring = unsafe { self.ring.submission_shared() };
+        let _sq_ring = unsafe { self.ring.submission_shared() };
         self.sq_poll_thread = Some(std::thread::spawn(move || {
             let mut sqe_batch: Vec<u32> = Vec::with_capacity(32);
             loop {
@@ -115,8 +117,8 @@ impl IoUringOptimizedClient {
         }));
 
         // Completion queue polling thread
-        let cq_stats = stats.clone();
-        let cq_ring = unsafe { self.ring.completion_shared() };
+        let _cq_stats = stats.clone();
+        let _cq_ring = unsafe { self.ring.completion_shared() };
         self.cq_poll_thread = Some(std::thread::spawn(move || {
             loop {
                 // Direct CQ polling
@@ -230,7 +232,7 @@ impl BufferRing {
                 data.as_mut_ptr(),
                 buffer_size as i32,
                 1,
-                group_id,
+            group_id,
                 bid
             );
 

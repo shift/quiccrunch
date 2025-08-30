@@ -5,10 +5,10 @@
 /// QUIC transport performance by 25-50%.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
-use crate::Result;
+
+
 
 /// Configuration for advanced congestion control
 #[derive(Clone, Debug)]
@@ -347,7 +347,7 @@ impl NetworkConditionDetector {
             return false;
         }
 
-        let current_condition = self.detect_condition();
+        let _current_condition = self.detect_condition();
         let previous_metrics: Vec<_> = self.recent_metrics.iter().rev().skip(1).take(5).collect();
 
         if previous_metrics.is_empty() {
@@ -502,7 +502,7 @@ impl AdaptiveCongestionControl {
     }
 
     /// Switch to best performing algorithm for current conditions
-    fn switch_algorithm(&mut self, metrics: &NetworkMetrics) {
+    fn switch_algorithm(&mut self, _metrics: &NetworkMetrics) {
         let condition = self.condition_detector.detect_condition();
 
         let recommended = match condition {

@@ -1,6 +1,6 @@
 use std::time::Duration;
 use bytes::Bytes;
-use tokio::io::AsyncWriteExt;
+
 use tokio::time;
 #[cfg(feature = "backend-quinn")]
 use quinn::{SendStream as QuinnSend, RecvStream as QuinnRecv};
@@ -47,7 +47,7 @@ impl QuicStream {
         {
             // Create a mock stream handle for compatibility
             use crossbeam_channel::bounded;
-            use std::sync::Arc;
+
             
             let (write_tx, _write_rx) = bounded(1000);
             let (read_tx, _read_rx) = bounded(1000);

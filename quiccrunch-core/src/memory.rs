@@ -8,7 +8,6 @@ use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use bytes::{Bytes, BytesMut};
 
-/// Thread-local buffer pool for reusing Vec<u8> allocations
 thread_local! {
     static BUFFER_POOL: RefCell<BufferPool> = RefCell::new(BufferPool::new());
     static POOL_STATS: RefCell<PoolStats> = RefCell::new(PoolStats::default());
@@ -359,7 +358,6 @@ impl FastBuffer {
     }
 }
 
-/// Thread-local fast buffer pool
 thread_local! {
     static FAST_BUFFER_POOL: RefCell<Vec<FastBuffer>> = RefCell::new(Vec::new());
 }

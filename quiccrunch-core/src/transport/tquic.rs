@@ -47,11 +47,13 @@ enum StreamCommand {
     Write {
         stream_id: u64,
         data: Bytes,
+        #[allow(dead_code)]
         fin: bool,
         respond_to: oneshot::Sender<Result<(), crate::TransportError>>,
     },
     Read {
         stream_id: u64,
+        #[allow(dead_code)]
         buffer_size: usize,
         respond_to: oneshot::Sender<Result<Option<Bytes>, crate::TransportError>>,
     },
@@ -65,6 +67,7 @@ enum StreamCommand {
 /// This provides a working implementation while we work around tQUIC's thread safety limitations
 #[derive(Clone)]
 pub struct TquicCtx {
+    #[allow(dead_code)]
     tls_config: TlsConfig,
     settings: crate::config::QuicTransportSettings,
     /// Connection counter
@@ -83,11 +86,11 @@ impl std::fmt::Debug for TquicCtx {
 }
 
 /// Simulated packet handler that will be replaced with real tQUIC integration
-struct MockPacketHandler {
+struct _MockPacketHandler {
     local_addr: SocketAddr,
 }
 
-impl MockPacketHandler {
+impl _MockPacketHandler {
     fn new(local_addr: SocketAddr) -> Self {
         Self { local_addr }
     }
@@ -214,7 +217,7 @@ impl TquicCtx {
             }
             
             let handle = ConnHandle {
-                connection_id,
+            connection_id,
                 stream_tx,
             };
 
@@ -272,6 +275,7 @@ impl TquicCtx {
 
 /// Stream backend that handles tquic stream operations
 struct TquicStreamBackend {
+    #[allow(dead_code)]
     connection_id: u64,
     stream_tx: mpsc::Sender<StreamCommand>,
 }

@@ -186,7 +186,7 @@ use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
 use std::time::{Duration, SystemTime};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::Future;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use capnp::message::{Builder, ReaderOptions};
@@ -1156,6 +1156,7 @@ impl<T> RpcStreamSink<T> {
 /// [`RpcStreamSink::finish()`]: RpcStreamSink::finish
 pub struct RpcStreamReceiver<T = Bytes> {
     reader: StreamReader,
+    #[allow(dead_code)]
     stream_id: StreamId,
     _phantom: PhantomData<T>,
 }
@@ -1193,8 +1194,8 @@ pub type RpcStreamSource<T> = RpcStreamReceiver<T>;
 
 impl<T> RpcStreamReceiver<T> {
     pub fn new(reader: StreamReader, stream_id: StreamId) -> Self {
-        Self { 
-            reader, 
+        Self {
+            reader,
             stream_id,
             _phantom: PhantomData,
         }
@@ -1258,7 +1259,7 @@ impl<T> Stream for RpcStreamReceiver<T> {
     
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Use a waker to handle the async operation
-        let waker = cx.waker().clone();
+        let _waker = cx.waker().clone();
         
         // Since we can't easily poll the async next() method directly,
         // we'll use a simple approach and return Pending most of the time
@@ -2188,7 +2189,7 @@ impl RpcServer {
     }
     
     /// Parse stream chunk message
-    fn parse_stream_chunk(data: Bytes) -> RpcResult<(Bytes, bool)> {
+    fn _parse_stream_chunk(data: Bytes) -> RpcResult<(Bytes, bool)> {
         let mut data_ref = data.as_ref();
         let reader = capnp::serialize::read_message_from_flat_slice(&mut data_ref, ReaderOptions::new())
             .map_err(|e| RpcError::SerializationError(format!("Failed to read stream chunk: {}", e)))?;
