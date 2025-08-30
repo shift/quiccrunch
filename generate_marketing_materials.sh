@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Generate QuicCrunch Marketing Materials
 # Creates promotional content showcasing QuicCrunch vs gRPC performance

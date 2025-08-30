@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # QuicCrunch vs gRPC Promotional Benchmark Runner
 # This script runs comprehensive performance comparisons for marketing materials
