@@ -25,17 +25,45 @@ ai-agent-workflow/
 ## Active Tasks
 *Currently in progress*
 
+### Setup Project Workflow
+- **Status**: In Progress
+- **Priority**: P0 CRITICAL
+- **Created**: 2025-08-30 15:20 CEST
+- **Context**: [context/setup-project-workflow-implementation.md](context/setup-project-workflow-implementation.md)
+- **Task**: [tasks/setup-project-workflow.md](tasks/setup-project-workflow.md)
+- **Description**: Initialize AI Agent Workflow system for QuicCrunch project
+- **Current Phase**: Implementation Agent customizing workflow for Rust/QUIC development
+
+### Implement Connection Pooling
+- **Status**: Ready for Implementation
+- **Priority**: P1 HIGH
+- **Created**: 2025-08-30 15:50 CEST
+- **Context**: [context/implement-connection-pooling.md](context/implement-connection-pooling.md)
+- **Task**: [tasks/implement-connection-pooling.md](tasks/implement-connection-pooling.md)
+- **Description**: Implement connection pooling to reduce connection overhead by 15-30%
+- **Current Phase**: Task created, ready for Implementation Agent assignment
+
 ## P0 CRITICAL Tasks
 *Must complete first - Foundation building*
+- ✅ **Setup Project Workflow**: AI Agent Workflow system integration for QuicCrunch
 
 ## P1 HIGH Priority Tasks
 *Core functionality and features*
+- 🔄 **Implement Connection Pooling**: High-performance connection reuse system
+- 📋 **Hardware Crypto Acceleration**: AES-NI integration for TLS performance
+- 📋 **Advanced Congestion Control**: Adaptive algorithm selection
 
 ## P2 MEDIUM Priority Tasks
 *Enhancements and optimizations*
+- 📋 **Batch Packet Processing**: Enhanced io_uring batch operations
+- 📋 **NUMA-Aware Optimizations**: Multi-socket system optimization
+- 📋 **Zero-Allocation Hot Paths**: Memory allocation elimination
 
 ## P3 LOW Priority Tasks
 *Nice-to-have improvements*
+- 📋 **Machine Learning Optimization**: Predictive performance tuning
+- 📋 **Kernel Bypass Research**: DPDK/AF_XDP integration exploration
+- 📋 **GPU Acceleration**: Specialized workload acceleration
 
 ## Completed Tasks
 *Finished work with references*
