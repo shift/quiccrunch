@@ -72,6 +72,7 @@ pub mod memory;
 pub mod simd;
 pub mod lockfree;
 pub mod adaptive; // New adaptive optimization module
+pub mod promotional_benchmarks;
 #[cfg(feature = "io-uring-advanced")]
 pub mod io_uring_optimized;
 #[cfg(feature = "io-uring-advanced")]
