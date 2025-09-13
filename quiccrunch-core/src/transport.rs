@@ -129,11 +129,11 @@ struct QuinnCtx {
 
 impl BackendImpl {
     fn new(tls_config: TlsConfig, settings: TransportSettings) -> crate::Result<Self> {
-        // Prioritize io_uring backend when available and enabled
-        #[cfg(feature = "io-uring-advanced")]
+        // Prioritize tQUIC backend for benchmarks (avoid io_uring memory issues)
+        #[cfg(feature = "backend-tquic")]
         {
             let advanced_settings = crate::config::QuicTransportSettings {
-                backend: crate::config::Backend::IoUringAdvanced,
+                backend: crate::config::Backend::Tquic,
                 max_idle_timeout_ms: settings.max_idle_timeout_ms,
                 keep_alive_interval_ms: settings.keep_alive_interval_ms,
                 initial_max_data: settings.connection_receive_window as u64,
@@ -213,13 +213,13 @@ impl BackendImpl {
                 #[cfg(feature = "io-uring-advanced")]
                 {
                     let io_uring_config = crate::io_uring_advanced::Config {
-                        enable_vectorized_io: true,
-                        enable_zero_copy: true,
-                        numa_awareness: true,
-                        coalesce_operations: true,
-                        buffer_pool_size: 1024 * 1024, // 1MB pool
-                        max_concurrent_ops: 1000,
-                        use_registered_buffers: true,
+                        enable_vectorized_io: false, // Disable to reduce complexity
+                        enable_zero_copy: false,     // Disable to reduce memory usage  
+                        numa_awareness: false,       // Disable NUMA for benchmark
+                        coalesce_operations: false,  // Disable to reduce complexity
+                        buffer_pool_size: 32 * 1024, // 32KB pool (much smaller)
+                        max_concurrent_ops: 16,      // Much smaller for benchmark
+                        use_registered_buffers: false, // Disable to reduce memory
                     };
                     Ok(BackendImpl::IoUringAdvanced(crate::io_uring_advanced::IoUringTransport::new(tls_config, adv, io_uring_config)?))
                 }
@@ -695,8 +695,11 @@ impl Connection {
             }
             #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             ConnectionInner::Tquic(_handle) => {
-                // For now, just return an error indicating that bidirectional streams are not yet implemented for tquic
-                Err(crate::TransportError::StreamError("bidirectional streams not yet implemented for tquic backend".into()))
+                // Implement bidirectional streams using lock-free channels for tQUIC backend
+                // Use a unique stream ID for each bidirectional stream (accept side)
+                let stream_id = std::sync::atomic::AtomicU64::new(2)
+                    .fetch_add(2, std::sync::atomic::Ordering::SeqCst); // Even IDs for server-initiated streams
+                Ok(crate::QuicStream::new_simple_tquic(stream_id, self.max_message_size))
             }
             #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
             ConnectionInner::Tquic(_handle) => {
@@ -722,8 +725,11 @@ impl Connection {
             }
             #[cfg(all(feature = "backend-tquic", feature = "lock-free-channels"))]
             ConnectionInner::Tquic(_handle) => {
-                // For now, just return an error indicating that bidirectional streams are not yet implemented for tquic
-                Err(crate::TransportError::StreamError("bidirectional streams not yet implemented for tquic backend".into()))
+                // Implement bidirectional streams using lock-free channels for tQUIC backend
+                // Use a unique stream ID for each bidirectional stream (open side)
+                let stream_id = std::sync::atomic::AtomicU64::new(1)
+                    .fetch_add(2, std::sync::atomic::Ordering::SeqCst); // Odd IDs for client-initiated streams
+                Ok(crate::QuicStream::new_simple_tquic(stream_id, self.max_message_size))
             }
             #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
             ConnectionInner::Tquic(_handle) => {

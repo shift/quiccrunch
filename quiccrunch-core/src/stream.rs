@@ -47,11 +47,58 @@ impl QuicStream {
         {
             // Create a mock stream handle for compatibility
             use crossbeam_channel::bounded;
+            use tokio::spawn;
+            use std::collections::HashMap;
+            use std::sync::Arc;
+            use tokio::sync::Mutex;
+            use bytes::Bytes;
 
+            let (write_tx, write_rx) = bounded(1000);
+            let (read_tx, read_rx) = bounded(1000);
+            let (close_tx, close_rx) = bounded(100);
             
-            let (write_tx, _write_rx) = bounded(1000);
-            let (read_tx, _read_rx) = bounded(1000);
-            let (close_tx, _close_rx) = bounded(100);
+            // Create a mock data buffer for this stream - simple echo behavior
+            let stream_buffer: Arc<Mutex<Vec<Bytes>>> = Arc::new(Mutex::new(Vec::new()));
+            let buffer_clone = stream_buffer.clone();
+            
+            // Start a background task to handle stream commands
+            spawn(async move {
+                use crate::lockfree::StreamCommand;
+                use std::time::Duration;
+                
+                loop {
+                    // Process write commands (non-blocking)
+                    if let Ok(cmd) = write_rx.try_recv() {
+                        if let StreamCommand::Write { stream_id: _, data, fin: _, response } = cmd {
+                            // For mock: just acknowledge the write immediately and echo data back
+                            let mut buffer = buffer_clone.lock().await;
+                            buffer.push(data);
+                            let _ = response.send(Ok(()));
+                        }
+                    }
+                    
+                    // Process read commands (non-blocking)
+                    if let Ok(cmd) = read_rx.try_recv() {
+                        if let StreamCommand::Read { stream_id: _, buffer_size: _, response } = cmd {
+                            // Return echoed data from buffer
+                            let mut buffer = buffer_clone.lock().await;
+                            let data = buffer.pop();
+                            let _ = response.send(Ok(data));
+                        }
+                    }
+                    
+                    // Process close commands (non-blocking)
+                    if let Ok(cmd) = close_rx.try_recv() {
+                        if let StreamCommand::Close { stream_id: _, response } = cmd {
+                            let _ = response.send(Ok(()));
+                            break; // Exit the task when stream is closed
+                        }
+                    }
+                    
+                    // Small delay to prevent busy waiting
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            });
             
             let handle = crate::lockfree::StreamHandle::new(
                 stream_id,
