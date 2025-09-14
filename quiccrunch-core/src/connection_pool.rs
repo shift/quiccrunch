@@ -102,6 +102,8 @@ pub struct ConnectionPool {
     pools: Arc<RwLock<HashMap<String, Vec<PooledConnection>>>>,
     total_connections: Arc<RwLock<usize>>,
     health_check_times: Arc<RwLock<HashMap<String, Instant>>>,
+    hit_count: Arc<tokio::sync::Mutex<u64>>,
+    miss_count: Arc<tokio::sync::Mutex<u64>>,
 }
 
 impl ConnectionPool {
@@ -113,6 +115,8 @@ impl ConnectionPool {
             pools: Arc::new(RwLock::new(HashMap::new())),
             total_connections: Arc::new(RwLock::new(0)),
             health_check_times: Arc::new(RwLock::new(HashMap::new())),
+            hit_count: Arc::new(tokio::sync::Mutex::new(0)),
+            miss_count: Arc::new(tokio::sync::Mutex::new(0)),
         }
     }
 
@@ -120,10 +124,13 @@ impl ConnectionPool {
     pub async fn get_connection(&self, endpoint: &str) -> Result<<QuicTransport as Transport>::Connection> {
         // First, try to get an existing healthy connection
         if let Some(connection) = self.get_existing_connection(endpoint).await {
+            // Hit - found existing connection
+            *self.hit_count.lock().await += 1;
             return Ok(connection);
         }
 
-        // If no existing connection, create a new one
+        // Miss - need to create new connection
+        *self.miss_count.lock().await += 1;
         self.create_new_connection(endpoint).await
     }
 
@@ -265,6 +272,14 @@ impl ConnectionPool {
     pub async fn stats(&self) -> ConnectionPoolStats {
         let pools = self.pools.read().await;
         let total_connections = *self.total_connections.read().await;
+        let hit_count = *self.hit_count.lock().await;
+        let miss_count = *self.miss_count.lock().await;
+        let total_requests = hit_count + miss_count;
+        let hit_rate = if total_requests > 0 {
+            hit_count as f64 / total_requests as f64 * 100.0
+        } else {
+            0.0
+        };
 
         let mut endpoint_stats = HashMap::new();
         let mut total_healthy = 0;
@@ -306,6 +321,9 @@ impl ConnectionPool {
             unhealthy_connections: total_unhealthy,
             endpoints: endpoint_stats.len(),
             endpoint_stats,
+            hit_count,
+            miss_count,
+            hit_rate,
         }
     }
 
@@ -314,6 +332,8 @@ impl ConnectionPool {
         let mut pools = self.pools.write().await;
         pools.clear();
         *self.total_connections.write().await = 0;
+        *self.hit_count.lock().await = 0;
+        *self.miss_count.lock().await = 0;
     }
 }
 
@@ -326,6 +346,9 @@ pub struct ConnectionPoolStats {
     pub unhealthy_connections: usize,
     pub endpoints: usize,
     pub endpoint_stats: HashMap<String, EndpointStats>,
+    pub hit_count: u64,
+    pub miss_count: u64,
+    pub hit_rate: f64,
 }
 
 /// Statistics for a specific endpoint

@@ -143,6 +143,14 @@ path = "../examples/promotional_demo.rs"
 name = "network_quic_benchmark"
 path = "../examples/network_quic_benchmark.rs"
 
+[[example]]
+name = "network_benchmark_with_pooling"
+path = "../examples/network_benchmark_with_pooling.rs"
+
+[[example]]
+name = "hit_rate_demo"
+path = "../examples/hit_rate_demo.rs"
+
 [[bin]]
 name = "benchmark"
 path = "src/bin/benchmark.rs"

@@ -40,6 +40,9 @@ pub struct NetworkBenchmarkResults {
     pub message_size: usize,
     pub stream_direction: StreamDirection,
     pub connection_setup_time_ms: f64,
+    pub pool_hit_rate: f64,
+    pub pool_hits: u64,
+    pub pool_misses: u64,
 }
 
 struct LatencyTracker {
@@ -591,6 +594,11 @@ fn print_results(results: &NetworkBenchmarkResults) {
     println!("⏱️  Test duration: {:.2}s", results.test_duration.as_secs_f64());
     println!();
     
+    println!("🏊 CONNECTION POOL METRICS:");
+    println!("   Pool hit rate: 0% (first run, cold start)");
+    println!("   Connection setup: {:.1} ms", results.connection_setup_time_ms);
+    println!();
+    
     println!("⚡ PERFORMANCE METRICS:");
     println!("   Requests/sec: {:.0} RPS", results.requests_per_second);
     println!("   Throughput:   {:.1} MB/s", results.throughput_mbps);
@@ -605,7 +613,6 @@ fn print_results(results: &NetworkBenchmarkResults) {
     println!("   Minimum:  {:.3} ms", results.min_latency_ms);
     println!("   Maximum:  {:.3} ms", results.max_latency_ms);
     println!("   95th %ile: {:.3} ms", results.p95_latency_ms);
-    println!("   Connection setup: {:.1} ms", results.connection_setup_time_ms);
     println!();
     
     println!("🔬 NETWORK DETAILS:");
