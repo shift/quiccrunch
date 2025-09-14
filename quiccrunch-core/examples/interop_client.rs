@@ -17,15 +17,20 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> quiccrunch::Result<()> {
+use quiccrunch_core::config::{Backend, QuicTransportSettings};
+use quiccrunch_core::transport::{TlsConfig, QuicTransport};
+use quiccrunch_core::Result;
+
+#[tokio::main]
+async fn main() -> Result<()> {
     tracing_subscriber::fmt::try_init().ok();
     let args = Args::parse();
 
     let tls_cfg = crate::certs::generate_node_cert("quic-client");
     let (cert, key, ca) = (tls_cfg.cert, tls_cfg.key, tls_cfg.ca_cert);
-    let tls = quiccrunch::transport::TlsConfig { cert, key, ca_cert: ca };
-    let adv = quiccrunch::config::QuicTransportSettings { backend: quiccrunch::config::Backend::Quinn, ..Default::default() };
-    let transport = quiccrunch::transport::QuicTransport::with_settings_advanced(tls, adv)?;
+    let tls = TlsConfig { cert_pem: cert, key_pem: key, ca_cert_pem: ca };
+    let adv = QuicTransportSettings { backend: Backend::Quinn, ..Default::default() };
+    let transport = QuicTransport::with_settings(tls, adv)?;
 
     use quiccrunch_core::Transport; // bring trait into scope
     let conn = transport.connect(&args.addr).await?;

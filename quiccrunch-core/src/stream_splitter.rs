@@ -116,6 +116,11 @@ pub struct StreamReader {
 }
 
 impl StreamReader {
+    /// Create a new StreamReader from a SplitStream
+    pub fn new(splitter: SplitStream) -> Self {
+        Self { splitter }
+    }
+    
     /// Receive a message from the stream
     pub async fn receive_message(&self) -> Result<Bytes> {
         self.splitter.receive_message().await
@@ -129,6 +134,11 @@ pub struct StreamWriter {
 }
 
 impl StreamWriter {
+    /// Create a new StreamWriter from a SplitStream
+    pub fn new(splitter: SplitStream) -> Self {
+        Self { splitter }
+    }
+    
     /// Send a message over the stream
     pub async fn send_message(&self, data: Bytes) -> Result<()> {
         self.splitter.send_message(data).await

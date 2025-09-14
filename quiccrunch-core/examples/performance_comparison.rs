@@ -16,9 +16,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (cert, key) = cert_utils::generate_node_cert(&ca_cert_obj, "localhost")?;
 
     let tls_config = TlsConfig {
-        cert,
-        key,
-        ca_cert,
+        cert_pem: cert,
+        key_pem: key,
+        ca_cert_pem: ca_cert,
     };
 
     println!("Testing Quinn backend...");

@@ -1,5 +1,5 @@
 use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, PKCS_ECDSA_P256_SHA256};
-use crate::transport::TlsConfig;
+use crate::transport::tquic::TlsConfig;
 use rustls;
 
 pub fn generate_ca_cert() -> rustls::Certificate {

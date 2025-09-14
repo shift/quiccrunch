@@ -20,7 +20,6 @@ struct BufferRing {
     buffers: Vec<Arc<RegisteredBuffer>>,
     provided: AtomicUsize,
     consumed: AtomicUsize,
-    #[allow(dead_code)]
     group_id: u16,
 }
 
@@ -28,16 +27,26 @@ struct BufferRing {
 struct RegisteredBuffer {
     data: std::sync::Arc<std::sync::Mutex<Box<[u8]>>>,
     bid: u16,
-    #[allow(dead_code)]
     len: usize,
 }
 
 #[derive(Default)]
-struct ClientStats {
+pub struct ClientStats {
     submissions: AtomicUsize,
     completions: AtomicUsize,
     buffer_hits: AtomicUsize,
     buffer_misses: AtomicUsize,
+}
+
+impl Clone for ClientStats {
+    fn clone(&self) -> Self {
+        Self {
+            submissions: AtomicUsize::new(self.submissions.load(Ordering::Relaxed)),
+            completions: AtomicUsize::new(self.completions.load(Ordering::Relaxed)),
+            buffer_hits: AtomicUsize::new(self.buffer_hits.load(Ordering::Relaxed)),
+            buffer_misses: AtomicUsize::new(self.buffer_misses.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl IoUringOptimizedClient {

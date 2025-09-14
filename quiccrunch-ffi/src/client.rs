@@ -10,7 +10,7 @@ use crate::runtime::FfiRuntime;
 /// Internal client handle structure
 pub struct QuicClientInternal {
     client: Option<CoreClient>,
-    connections: HashMap<u32, Arc<CoreConnection>>,
+    connections: HashMap<u32, Arc<tokio::sync::Mutex<CoreConnection>>>,
     next_connection_id: u32,
 }
 
@@ -26,11 +26,11 @@ impl QuicClientInternal {
     fn add_connection(&mut self, conn: CoreConnection) -> u32 {
         let id = self.next_connection_id;
         self.next_connection_id += 1;
-        self.connections.insert(id, Arc::new(conn));
+        self.connections.insert(id, Arc::new(tokio::sync::Mutex::new(conn)));
         id
     }
     
-    fn get_connection(&self, id: u32) -> Option<Arc<CoreConnection>> {
+    fn get_connection(&self, id: u32) -> Option<Arc<tokio::sync::Mutex<CoreConnection>>> {
         self.connections.get(&id).cloned()
     }
     
@@ -101,7 +101,7 @@ pub extern "C" fn quiccrunch_client_init(
     
     let client_internal = unsafe { &mut *(handle as *mut QuicClientInternal) };
     
-    let result = CoreClient::new();
+    let result = FfiRuntime::block_on(CoreClient::new());
     
     match result {
         Ok(client) => {
@@ -192,7 +192,7 @@ pub extern "C" fn quiccrunch_client_connect(
         None => return QuicError::InvalidHandle,
     };
 
-    let result: Result<CoreConnection, crate::error::QuicError> = FfiRuntime::block_on(async {
+    let result: Result<CoreConnection, crate::error::QuicError> = FfiRuntime::block_on(async move {
         client.connect(address_str).await.map_err(|e| e.into())
     });
 
@@ -264,6 +264,7 @@ pub extern "C" fn quiccrunch_client_send_message(
     let data = crate::types::message_to_bytes(message).to_vec();
     
     let result: Result<(), crate::error::QuicError> = FfiRuntime::block_on(async move {
+        let mut connection = connection.lock().await;
         let mut stream = connection.open_stream().await?;
         stream.send_message(Bytes::from(data)).await?;
         Ok(())

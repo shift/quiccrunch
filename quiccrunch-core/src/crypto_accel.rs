@@ -79,7 +79,6 @@ impl HardwareCapabilities {
 pub struct BatchCryptoProcessor {
     config: CryptoAccelConfig,
     hw_caps: HardwareCapabilities,
-    #[allow(dead_code)]
     batch_buffer: Vec<u8>,
 }
 

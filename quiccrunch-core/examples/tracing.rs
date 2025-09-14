@@ -42,13 +42,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Starting QuicCrunch example with tracing");
 
     // Generate TLS certificates (in production you'd load real certs)
-    let (ca_cert, _) = cert_utils::generate_ca_cert()?;
-    let (cert, key) = cert_utils::generate_node_cert(&ca_cert, "localhost")?;
+    let (ca_cert, _ca_key, ca_cert_obj) = cert_utils::generate_ca_cert()?;
+    let (cert, key) = cert_utils::generate_node_cert(&ca_cert_obj, "localhost")?;
     
     let tls_config = TlsConfig {
-        cert,
-        key,
-        ca_cert,
+        cert_pem: cert,
+        key_pem: key,
+        ca_cert_pem: ca_cert,
     };
 
     // Create transport

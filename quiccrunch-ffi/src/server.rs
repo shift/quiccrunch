@@ -109,7 +109,7 @@ pub extern "C" fn quiccrunch_server_init(
     
     let server_internal = unsafe { &mut *(handle as *mut QuicServerInternal) };
     
-    let result = CoreServer::new();
+    let result = FfiRuntime::block_on(CoreServer::new());
     
     match result {
         Ok(server) => {
@@ -169,7 +169,7 @@ pub extern "C" fn quiccrunch_server_listen(
     let server_internal = unsafe { &mut *(handle as *mut QuicServerInternal) };
     
     let server = match &server_internal.server {
-        Some(s) => s.clone(),
+        Some(s) => s,
         None => return QuicError::InvalidHandle,
     };
     
@@ -217,7 +217,7 @@ pub extern "C" fn quiccrunch_server_serve(
     let result = FfiRuntime::block_on(async move {
         loop {
             match listener.accept().await {
-                Ok(connection) => {
+                Ok(mut connection) => {
                     let handler = echo_handler.clone();
                     // Spawn a task to handle this connection
                     tokio::spawn(async move {

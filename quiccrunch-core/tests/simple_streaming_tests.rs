@@ -1,7 +1,7 @@
 //! Simple streaming tests that actually work
 
-use quiccrunch_core::simple_streaming::*;
-use quiccrunch_core::{QuicTransport, TlsConfig};
+use quiccrunch_core::transport::simple_streaming::*;
+use quiccrunch_core::{QuicTransport, TlsConfig, Transport};
 use bytes::Bytes;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use tokio::time::sleep;
 
 async fn setup_simple_test() -> (SimpleStreamingClient, tokio::task::JoinHandle<()>) {
     let transport = QuicTransport::new(TlsConfig::default()).unwrap();
-    let listener = transport.bind("127.0.0.1:0").await.unwrap();
+    let listener = transport.listen("127.0.0.1:0").await.unwrap();
     let server_addr = listener.local_addr().unwrap();
     
     // For now, just use a placeholder server

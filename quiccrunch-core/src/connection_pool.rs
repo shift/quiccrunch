@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use crate::transport::{QuicTransport, Connection, Transport};
+use crate::transport::{QuicTransport, Transport};
 use crate::Result;
 
 /// Configuration for connection pool behavior
@@ -52,7 +52,7 @@ pub enum ConnectionHealth {
 /// Pooled connection with metadata
 #[derive(Clone, Debug)]
 pub struct PooledConnection {
-    pub connection: Connection,
+    pub connection: <QuicTransport as Transport>::Connection,
     pub endpoint: String,
     pub created_at: Instant,
     pub last_used: Instant,
@@ -61,7 +61,7 @@ pub struct PooledConnection {
 }
 
 impl PooledConnection {
-    pub fn new(connection: Connection, endpoint: String) -> Self {
+    pub fn new(connection: <QuicTransport as Transport>::Connection, endpoint: String) -> Self {
         let now = Instant::now();
         Self {
             connection,
@@ -95,7 +95,7 @@ impl PooledConnection {
 }
 
 /// High-performance connection pool
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConnectionPool {
     config: ConnectionPoolConfig,
     transport: Arc<QuicTransport>,
@@ -117,7 +117,7 @@ impl ConnectionPool {
     }
 
     /// Get or create a connection for the specified endpoint
-    pub async fn get_connection(&self, endpoint: &str) -> Result<Connection> {
+    pub async fn get_connection(&self, endpoint: &str) -> Result<<QuicTransport as Transport>::Connection> {
         // First, try to get an existing healthy connection
         if let Some(connection) = self.get_existing_connection(endpoint).await {
             return Ok(connection);
@@ -128,7 +128,7 @@ impl ConnectionPool {
     }
 
     /// Get an existing healthy connection from the pool
-    async fn get_existing_connection(&self, endpoint: &str) -> Option<Connection> {
+    async fn get_existing_connection(&self, endpoint: &str) -> Option<<QuicTransport as Transport>::Connection> {
         let mut pools = self.pools.write().await;
 
         if let Some(pool) = pools.get_mut(endpoint) {
@@ -184,7 +184,7 @@ impl ConnectionPool {
     }
 
     /// Create a new connection for the endpoint
-    async fn create_new_connection(&self, endpoint: &str) -> Result<Connection> {
+    async fn create_new_connection(&self, endpoint: &str) -> Result<<QuicTransport as Transport>::Connection> {
         let mut total_connections = self.total_connections.write().await;
 
         // Check if we've reached the global connection limit
@@ -217,7 +217,7 @@ impl ConnectionPool {
     }
 
     /// Return a connection to the pool
-    pub async fn return_connection(&self, endpoint: String, connection: Connection) {
+    pub async fn return_connection(&self, endpoint: String, connection: <QuicTransport as Transport>::Connection) {
         let mut pools = self.pools.write().await;
 
         let pool = pools.entry(endpoint.clone()).or_insert_with(Vec::new);
@@ -235,20 +235,9 @@ impl ConnectionPool {
 
     /// Perform health check on a connection
     async fn health_check_connection(&self, mut pooled_conn: PooledConnection) -> Option<PooledConnection> {
-        // Simple health check - try to get flow control status
-        // For backends that don't support it, assume healthy
-        match pooled_conn.connection.flow_control_status() {
-            Ok(_) => {
-                pooled_conn.health = ConnectionHealth::Healthy;
-                Some(pooled_conn)
-            },
-            Err(_) => {
-                // If flow control status fails, assume healthy for now
-                // In a real implementation, this would be more sophisticated
-                pooled_conn.health = ConnectionHealth::Healthy;
-                Some(pooled_conn)
-            }
-        }
+        // This is a placeholder. A real implementation would check the connection status.
+        pooled_conn.health = ConnectionHealth::Healthy;
+        Some(pooled_conn)
     }
 
     /// Evict expired connections from all pools
@@ -352,7 +341,7 @@ pub struct EndpointStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::TransportSettings;
+    use crate::config::QuicTransportSettings as TransportSettings;
     use std::sync::Arc;
 
     #[tokio::test]

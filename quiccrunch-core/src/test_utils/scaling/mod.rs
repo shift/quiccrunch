@@ -3,7 +3,7 @@ mod types;
 
 use tokio::process::Command;
 use error::{BenchError, Result};
-use crate::transport::TransportSettings;
+use crate::config::QuicTransportSettings as TransportSettings;
 #[cfg(feature = "backend-quinn")]
 #[allow(unused_imports)]
 use quinn as _quinn_unused_to_force_feature;
@@ -283,8 +283,8 @@ impl FrequencyScaling {
         let _transport_settings = TransportSettings::default();
         
         println!("Initializing QUIC transport...");
-        let transport_settings = TransportSettings::default();
-        let transport = QuicTransport::with_settings(tls_config, transport_settings).map_err(|e| {
+        let _transport_settings = TransportSettings::default();
+        let transport = QuicTransport::new(tls_config.into()).await.map_err(|e| {
             eprintln!("Transport setup failed: {}", e);
             BenchError::System(format!("Transport setup failed: {}", e))
         })?;
@@ -321,7 +321,7 @@ impl FrequencyScaling {
         println!("Spawning server handler task...");
         let server_handle = tokio::spawn(async move {
             println!("Server: Waiting for incoming connection...");
-            let conn = incoming.accept().await.expect("Accept failed");
+            let mut conn = crate::transport::Listener::accept(&mut incoming).await.expect("Accept failed");
             println!("Server: Accepted connection, opening bidirectional stream...");
             let mut stream = conn.open_bi().await.expect("Open stream failed");
             println!("Server: Bidirectional stream established");
@@ -365,7 +365,7 @@ impl FrequencyScaling {
         // Try connection with retry
         let mut retry_count = 0;
         let max_retries = 3;
-        let client = loop {
+        let mut client = loop {
             println!("Client: Attempting connection {}/{} to {}...", retry_count + 1, max_retries, addr_str);
             match transport.connect(&addr_str).await {
                 Ok(c) => {
@@ -384,7 +384,7 @@ impl FrequencyScaling {
                 }
             }
         };
-        let mut stream = client.open_bi().await.map_err(|e| BenchError::System(format!("Open stream failed: {}", e)))?;
+        let mut client = client.open_bi().await.map_err(|e| BenchError::System(format!("Open stream failed: {}", e)))?;
         
         // Test message sizes with their corresponding latencies and bandwidths
         let sizes = vec![
@@ -407,13 +407,13 @@ impl FrequencyScaling {
                 println!("Client: Sending message of size {}", size);
                 let start = std::time::Instant::now();
                 
-                stream.send_message(data.clone()).await
+                client.send_message(data.clone()).await
                     .map_err(|e| BenchError::System(format!("Send failed: {}", e)))?;
                 println!("Client: Message sent, waiting for response");
                 
                 let received_data = tokio::time::timeout(
                     Duration::from_secs(5),
-                    stream.receive_message()
+                    client.receive_message()
                 ).await
                     .map_err(|e| BenchError::System(format!("Receive timeout: {}", e)))?
                     .map_err(|e| BenchError::System(format!("Receive failed: {}", e)))?;

@@ -193,7 +193,7 @@ use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 use tokio::sync::RwLock;
 use futures::Stream;
-use crate::{Connection, QuicStream, TransportError, StreamReader, StreamWriter, Splittable};
+use crate::{QuicStream, TransportError, StreamReader, StreamWriter, Splittable, transport::tquic::TquicConnection as Connection};
 use crate::schema::rpc_capnp::*;
 
 /// Service information for discovery
@@ -1156,7 +1156,6 @@ impl<T> RpcStreamSink<T> {
 /// [`RpcStreamSink::finish()`]: RpcStreamSink::finish
 pub struct RpcStreamReceiver<T = Bytes> {
     reader: StreamReader,
-    #[allow(dead_code)]
     stream_id: StreamId,
     _phantom: PhantomData<T>,
 }
@@ -1931,7 +1930,7 @@ impl RpcServer {
     }
     
     /// Handle incoming connection - core server functionality
-    pub async fn handle_connection(&self, connection: Connection) -> RpcResult<()> {
+    pub async fn handle_connection(&self, mut connection: QuicStream) -> RpcResult<()> {
         loop {
             // Accept incoming bidirectional stream
             let stream = match connection.accept_bi().await {
@@ -2933,8 +2932,8 @@ impl RpcClient {
         }
     }
     
-    /// Call a remote method with context
-    pub async fn call_with_context(&self, context: &mut RpcContext, params: Bytes) -> RpcResult<Bytes> {
+    /// Call an RPC method with context  
+    pub async fn call_with_context(&mut self, context: &mut RpcContext, params: Bytes) -> RpcResult<Bytes> {
         let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
         context.request_id = request_id;
         
@@ -2963,13 +2962,13 @@ impl RpcClient {
     }
     
     /// Simple call with service and method names
-    pub async fn call(&self, service: &str, method: &str, params: Bytes) -> RpcResult<Bytes> {
+    pub async fn call(&mut self, service: &str, method: &str, params: Bytes) -> RpcResult<Bytes> {
         let mut context = RpcContext::new(service.to_string(), method.to_string());
         self.call_with_context(&mut context, params).await
     }
     
     /// Server streaming call: single request, multiple responses
-    pub async fn server_streaming_call(&self, service: &str, method: &str, params: Bytes) -> RpcResult<RpcStreamReceiver> {
+    pub async fn server_streaming_call(&mut self, service: &str, method: &str, params: Bytes) -> RpcResult<RpcStreamReceiver> {
         let mut context = RpcContext::new(service.to_string(), method.to_string());
         context.request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
         
@@ -2988,7 +2987,7 @@ impl RpcClient {
     }
     
     /// Client streaming call: multiple requests, single response
-    pub async fn client_streaming_call(&self, service: &str, method: &str) -> RpcResult<(RpcStreamSink, impl std::future::Future<Output = RpcResult<Bytes>>)> {
+    pub async fn client_streaming_call(&mut self, service: &str, method: &str) -> RpcResult<(RpcStreamSink, impl std::future::Future<Output = RpcResult<Bytes>>)> {
         let mut context = RpcContext::new(service.to_string(), method.to_string());
         context.request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
         
@@ -3015,7 +3014,7 @@ impl RpcClient {
     }
     
     /// Bidirectional streaming call: multiple requests, multiple responses
-    pub async fn bidirectional_streaming_call(&self, service: &str, method: &str) -> RpcResult<(RpcStreamSink, RpcStreamReceiver)> {
+    pub async fn bidirectional_streaming_call(&mut self, service: &str, method: &str) -> RpcResult<(RpcStreamSink, RpcStreamReceiver)> {
         let mut context = RpcContext::new(service.to_string(), method.to_string());
         context.request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
         
@@ -3137,7 +3136,7 @@ impl PooledRpcClient {
     
     pub async fn call(&self, service: &str, method: &str, params: Bytes) -> RpcResult<Bytes> {
         match self.pool.get_client() {
-            Some(client) => client.call(service, method, params).await,
+            Some(mut client) => client.call(service, method, params).await,
             None => Err(RpcError::ServiceUnavailable("No connections available".to_string())),
         }
     }

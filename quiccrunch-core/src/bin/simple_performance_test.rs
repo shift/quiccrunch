@@ -1,6 +1,8 @@
 use std::time::Instant;
 use quiccrunch_core::{
-    transport::{QuicTransport, TlsConfig},
+    transport::QuicTransport,
+    transport::tquic::TlsConfig,
+    Transport,
 };
 use serde_json;
 use chrono;
@@ -73,7 +75,7 @@ async fn run_simple_performance_test() -> Result<SimplePerformanceResults, Box<d
     println!("🌐 Testing transport initialization...");
     let transport_start = Instant::now();
     let tls_config = TlsConfig::default();
-    let _transport = QuicTransport::new(tls_config);
+    let _transport = tokio::runtime::Runtime::new().unwrap().block_on(QuicTransport::new(tls_config.into())).unwrap();
     let transport_duration = transport_start.elapsed();
     let transport_success = true; // If we get here, it succeeded
     println!("   ✅ Transport initialized in {:.2}ms", transport_duration.as_millis() as f64);

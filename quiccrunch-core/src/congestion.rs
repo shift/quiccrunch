@@ -77,7 +77,7 @@ impl Default for NetworkMetrics {
 }
 
 /// Bandwidth estimation using delivery rate
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BandwidthEstimator {
     config: CongestionControlConfig,
     delivery_rates: VecDeque<f64>,
@@ -160,7 +160,7 @@ impl BandwidthEstimator {
 }
 
 /// RTT prediction using exponential smoothing
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RttPredictor {
     config: CongestionControlConfig,
     rtt_samples: VecDeque<Duration>,
@@ -254,7 +254,7 @@ impl RttPredictor {
 }
 
 /// Network condition detector
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NetworkConditionDetector {
     config: CongestionControlConfig,
     recent_metrics: VecDeque<NetworkMetrics>,
@@ -392,7 +392,7 @@ pub enum CongestionAlgorithm {
 }
 
 /// Main adaptive congestion control system
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AdaptiveCongestionControl {
     config: CongestionControlConfig,
     bandwidth_estimator: BandwidthEstimator,

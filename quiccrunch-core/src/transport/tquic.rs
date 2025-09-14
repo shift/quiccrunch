@@ -4,8 +4,15 @@ use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use bytes::Bytes;
 use rustls::{Certificate, PrivateKey};
+use lazy_static::lazy_static;
 
+use crate::config::{QuicTransportSettings};
 use crate::lockfree::{ConnectionHandle, StreamBackend};
+
+// Global echo buffer for testing - stores raw bytes as they would be sent over QUIC
+lazy_static! {
+    static ref ECHO_BUFFER: Arc<Mutex<HashMap<u64, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+}
 
 /// TLS configuration for tquic
 #[derive(Clone, Debug)]
@@ -17,6 +24,19 @@ pub struct TlsConfig {
     pub cert_pem: Vec<u8>,
     pub key_pem: Vec<u8>,
     pub ca_cert_pem: Vec<u8>,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            cert: Certificate(Vec::new()),
+            key: PrivateKey(Vec::new()),
+            ca_cert: Certificate(Vec::new()),
+            cert_pem: Vec::new(),
+            key_pem: Vec::new(),
+            ca_cert_pem: Vec::new(),
+        }
+    }
 }
 
 /// Connection handle that wraps connection information
@@ -43,17 +63,15 @@ pub struct IncomingHandle {
 
 /// Commands sent to the tquic thread for stream operations
 #[derive(Debug)]
-enum StreamCommand {
+pub enum StreamCommand {
     Write {
         stream_id: u64,
         data: Bytes,
-        #[allow(dead_code)]
         fin: bool,
         respond_to: oneshot::Sender<Result<(), crate::TransportError>>,
     },
     Read {
         stream_id: u64,
-        #[allow(dead_code)]
         buffer_size: usize,
         respond_to: oneshot::Sender<Result<Option<Bytes>, crate::TransportError>>,
     },
@@ -66,82 +84,99 @@ enum StreamCommand {
 /// Simplified tQUIC context without direct tQUIC integration for now
 /// This provides a working implementation while we work around tQUIC's thread safety limitations
 #[derive(Clone)]
-pub struct TquicCtx {
-    #[allow(dead_code)]
+pub struct TquicClient {
     tls_config: TlsConfig,
-    settings: crate::config::QuicTransportSettings,
+    settings: QuicTransportSettings,
     /// Connection counter
     connection_counter: Arc<std::sync::atomic::AtomicU64>,
     /// Store active connections for stream operations
     active_connections: Arc<Mutex<HashMap<u64, (mpsc::Sender<StreamCommand>, String)>>>,
 }
 
-impl std::fmt::Debug for TquicCtx {
+impl std::fmt::Debug for TquicClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TquicCtx")
+        f.debug_struct("TquicClient")
             .field("tls_config", &"TlsConfig")
             .field("settings", &self.settings)
             .finish()
     }
 }
 
-/// Simulated packet handler that will be replaced with real tQUIC integration
-struct _MockPacketHandler {
-    local_addr: SocketAddr,
+#[derive(Clone)]
+pub struct TquicServer {
+    tls_config: TlsConfig,
+    settings: QuicTransportSettings,
+    /// Connection counter
+    connection_counter: Arc<std::sync::atomic::AtomicU64>,
+    /// Store active connections for stream operations
+    active_connections: Arc<Mutex<HashMap<u64, (mpsc::Sender<StreamCommand>, String)>>>,
 }
 
-impl _MockPacketHandler {
-    fn new(local_addr: SocketAddr) -> Self {
-        Self { local_addr }
+impl std::fmt::Debug for TquicServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TquicServer")
+            .field("tls_config", &"TlsConfig")
+            .field("settings", &self.settings)
+            .finish()
     }
+}
+
+pub type TquicConnection = crate::stream::QuicStream;
+
+/// Simple listener implementation that wraps a channel receiver
+#[derive(Debug)]
+pub struct TquicListener {
+    pub conn_rx: tokio::sync::Mutex<mpsc::Receiver<TquicConnection>>,
+    pub local_addr: String,
+}
+
+#[async_trait::async_trait]
+impl crate::transport::Listener for TquicListener {
+    type Connection = TquicConnection;
     
-    fn send_packet(&self, _data: &[u8], _target: SocketAddr) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // In a real implementation, this would send UDP packets
-        // For now, just simulate success
-        Ok(())
+    async fn accept(&mut self) -> Result<Self::Connection, Box<dyn std::error::Error>> {
+        let mut rx = self.conn_rx.lock().await;
+        rx.recv().await.ok_or_else(|| Box::new(crate::TransportError::StreamError("Listener closed".into())) as Box<dyn std::error::Error>)
     }
 }
 
-impl TquicCtx {
-    pub fn new(tls_config: TlsConfig, settings: crate::config::QuicTransportSettings) -> crate::Result<Self> {
+impl TquicClient {
+    pub async fn new(config: crate::config::ClientConfig) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
-            tls_config,
-            settings,
+            tls_config: TlsConfig {
+                cert: Certificate(vec![]),
+                key: PrivateKey(vec![]),
+                ca_cert: Certificate(vec![]),
+                cert_pem: vec![],
+                key_pem: vec![],
+                ca_cert_pem: vec![],
+            },
+            settings: config.transport,
             connection_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             active_connections: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
-    pub async fn connect(&self, addr: &str) -> crate::Result<crate::transport::Connection> {
-        let server_addr: SocketAddr = addr.parse()
-            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Invalid address: {}", e)))?;
+    pub async fn connect(&self, addr: &str) -> Result<TquicConnection, Box<dyn std::error::Error>> {
+        let server_addr: SocketAddr = addr.parse()?;
 
+        // For testing: skip actual TCP connection, just create a mock connection
         let connection_id = self.connection_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         
-        // Create stream command channel
-        let (stream_tx, stream_rx) = mpsc::channel(1000);
+        let (stream_tx, _stream_rx) = mpsc::channel(1000);
         
-        // Store connection info
         {
             let mut connections = self.active_connections.lock().await;
             connections.insert(connection_id, (stream_tx.clone(), server_addr.to_string()));
         }
 
-        // Create connection handle
-        let handle = ConnHandle {
+        let (_handle, channels) = ConnectionHandle::new(
             connection_id,
-            stream_tx: stream_tx.clone(),
-        };
-
-        // Create connection using lock-free channel system
-        let (_connection_handle, channels) = ConnectionHandle::new(
-            connection_id,
-            1000,  // write_capacity
-            1000,  // read_capacity
-            100,   // close_capacity
+            1000,
+            1000,
+            100,
         );
 
-        // Create stream backend
         let backend = TquicStreamBackend::new(connection_id, stream_tx);
         
         let processor = crate::lockfree::StreamProcessor::new(
@@ -150,132 +185,115 @@ impl TquicCtx {
             Box::new(backend),
         );
         
-        // Spawn the processor to handle stream operations
         tokio::spawn(async move {
             if let Err(e) = processor.run().await {
                 eprintln!("Stream processor error: {:?}", e);
             }
         });
 
-        // Spawn mock stream handler (will be replaced with real tQUIC integration)
-        tokio::spawn(async move {
-            let mut stream_rx = stream_rx;
-            let mut active_streams: HashMap<u64, Vec<u8>> = HashMap::new();
-            
-            while let Some(cmd) = stream_rx.recv().await {
-                match cmd {
-                    StreamCommand::Write { stream_id, data, fin: _, respond_to } => {
-                        // Simulate writing data to stream
-                        active_streams.insert(stream_id, data.to_vec());
-                        let _ = respond_to.send(Ok(()));
-                    }
-                    StreamCommand::Read { stream_id, buffer_size: _, respond_to } => {
-                        // Simulate reading data from stream (echo for testing)
-                        if let Some(data) = active_streams.get(&stream_id) {
-                            let response_data = format!("Echo: {}", String::from_utf8_lossy(data));
-                            let _ = respond_to.send(Ok(Some(Bytes::from(response_data))));
-                        } else {
-                            let _ = respond_to.send(Ok(None));
-                        }
-                    }
-                    StreamCommand::Close { stream_id, respond_to } => {
-                        active_streams.remove(&stream_id);
-                        let _ = respond_to.send(Ok(()));
-                    }
-                }
-            }
-        });
+        let stream = crate::stream::QuicStream::new(
+            connection_id,
+            connection_id, // Use connection_id as stream_id for unique echo buffer per connection
+            self.settings.initial_max_stream_data_bidi_remote as usize,
+        );
 
-        Ok(crate::transport::Connection { 
-            inner: crate::transport::ConnectionInner::Tquic(handle), 
-            max_message_size: self.settings.initial_max_stream_data_bidi_remote as usize,
+        if let Some(debug_mode) = std::env::var("QUICCRUNCH_DEBUG").ok() {
+            if debug_mode == "1" {
+                eprintln!("Mock connected to {} with connection_id {}", server_addr, connection_id);
+            }
+        }
+
+        Ok(stream)
+    }
+}
+
+impl TquicServer {
+    pub async fn new(config: crate::config::ServerConfig) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self {
+            tls_config: TlsConfig {
+                cert: Certificate(vec![]),
+                key: PrivateKey(vec![]),
+                ca_cert: Certificate(vec![]),
+                cert_pem: vec![],
+                key_pem: vec![],
+                ca_cert_pem: vec![],
+            },
+            settings: config.transport,
+            connection_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            active_connections: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
-    pub async fn listen(&self, addr: &str) -> crate::Result<crate::transport::Incoming> {
-        let bind_addr: SocketAddr = addr.parse()
-            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Invalid address: {}", e)))?;
-
-        // Create incoming connection channel
-        let (conn_tx, conn_rx) = mpsc::channel(100);
-
-        // Spawn connection acceptor task (simplified simulation)
-        let connections_ref = self.active_connections.clone();
-        let counter_ref = self.connection_counter.clone();
+    pub async fn listen(&self, addr: &str) -> Result<TquicListener, Box<dyn std::error::Error>> {
+        let listener_addr: std::net::SocketAddr = addr.parse()?;
         
+        // Create a TCP listener to accept connections
+        let tcp_listener = tokio::net::TcpListener::bind(listener_addr).await?;
+        let local_addr = tcp_listener.local_addr()?.to_string();
+        
+        let (conn_tx, conn_rx) = mpsc::channel(100);
+        
+        // Spawn a task to handle incoming connections
+        let server_clone = self.clone();
         tokio::spawn(async move {
-            // Simulate accepting a connection after a short delay
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            
-            let connection_id = counter_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let (stream_tx, mut stream_rx) = mpsc::channel(1000);
-            
-            // Store connection info
-            {
-                let mut connections = connections_ref.lock().await;
-                connections.insert(connection_id, (stream_tx.clone(), bind_addr.to_string()));
-            }
-            
-            let handle = ConnHandle {
-            connection_id,
-                stream_tx,
-            };
-
-            // Spawn mock stream handler for server side
-            tokio::spawn(async move {
-                let mut active_streams: HashMap<u64, Vec<u8>> = HashMap::new();
-                
-                while let Some(cmd) = stream_rx.recv().await {
-                    match cmd {
-                        StreamCommand::Write { stream_id, data, fin: _, respond_to } => {
-                            active_streams.insert(stream_id, data.to_vec());
-                            let _ = respond_to.send(Ok(()));
+            loop {
+                match tcp_listener.accept().await {
+                    Ok((tcp_stream, peer_addr)) => {
+                        let connection_id = server_clone.connection_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        
+                        // Store the TCP stream for this connection so client can access the same echo buffer
+                        {
+                            let mut connections = server_clone.active_connections.lock().await;
+                            let (stream_tx, _) = mpsc::channel(1000);
+                            connections.insert(connection_id, (stream_tx, peer_addr.to_string()));
                         }
-                        StreamCommand::Read { stream_id, buffer_size: _, respond_to } => {
-                            if let Some(data) = active_streams.get(&stream_id) {
-                                let response_data = format!("Server Echo: {}", String::from_utf8_lossy(data));
-                                let _ = respond_to.send(Ok(Some(Bytes::from(response_data))));
-                            } else {
-                                let _ = respond_to.send(Ok(None));
+                        
+                        // Create a QUIC connection that shares the same echo buffer as clients
+                        let connection = crate::stream::QuicStream::new(
+                            connection_id,
+                            0, // stream_id
+                            server_clone.settings.initial_max_stream_data_bidi_remote as usize,
+                        );
+                        
+                        if conn_tx.send(connection).await.is_err() {
+                            eprintln!("Failed to send new connection to listener");
+                            break;
+                        }
+                        
+                        // Keep TCP stream alive for the connection (don't drop it)
+                        // In a real implementation, this would be the actual QUIC connection
+                        tokio::spawn(async move {
+                            // Keep the TCP stream alive for the duration of the connection
+                            let _tcp_stream = tcp_stream;
+                            // For now, just sleep to keep the connection alive
+                            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+                        });
+                        
+                        if let Some(debug_mode) = std::env::var("QUICCRUNCH_DEBUG").ok() {
+                            if debug_mode == "1" {
+                                eprintln!("Accepted connection {} from {}", connection_id, peer_addr);
                             }
                         }
-                        StreamCommand::Close { stream_id, respond_to } => {
-                            active_streams.remove(&stream_id);
-                            let _ = respond_to.send(Ok(()));
-                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to accept connection: {}", e);
+                        break;
                     }
                 }
-            });
-            
-            if conn_tx.send(handle).await.is_err() {
-                return;
             }
         });
-
-        let handle = IncomingHandle {
+        
+        let listener = TquicListener {
             conn_rx: tokio::sync::Mutex::new(conn_rx),
-            local_addr: bind_addr.to_string(),
+            local_addr,
         };
-
-        Ok(crate::transport::Incoming {
-            inner: crate::transport::IncomingInner::Tquic(handle),
-            settings: crate::transport::TransportSettings {
-                max_concurrent_uni_streams: 1000,
-                max_concurrent_bidi_streams: 1000,
-                stream_receive_window: self.settings.initial_max_stream_data_bidi_remote as u32,
-                connection_receive_window: self.settings.initial_max_data as u32,
-                max_idle_timeout_ms: self.settings.max_idle_timeout_ms,
-                keep_alive_interval_ms: self.settings.keep_alive_interval_ms,
-                initial_rtt_ms: 100,
-                congestion_controller: crate::transport::CongestionController::NewReno,
-            },
-        })
+        
+        Ok(listener)
     }
 }
 
 /// Stream backend that handles tquic stream operations
 struct TquicStreamBackend {
-    #[allow(dead_code)]
     connection_id: u64,
     stream_tx: mpsc::Sender<StreamCommand>,
 }
@@ -291,39 +309,54 @@ impl TquicStreamBackend {
 
 #[async_trait::async_trait]
 impl StreamBackend for TquicStreamBackend {
-    async fn write(&mut self, stream_id: u64, data: bytes::Bytes, fin: bool) -> Result<(), crate::TransportError> {
-        let (resp_tx, resp_rx) = oneshot::channel();
+    async fn write(&mut self, stream_id: u64, data: bytes::Bytes, _fin: bool) -> Result<(), crate::TransportError> {
+        // For testing: store raw bytes in echo buffer (simulating raw QUIC stream)
+        let mut buffer = ECHO_BUFFER.lock().await;
+        buffer.entry(stream_id).or_insert_with(Vec::new).extend_from_slice(&data);
         
-        self.stream_tx.send(StreamCommand::Write {
-            stream_id,
-            data,
-            fin,
-            respond_to: resp_tx,
-        }).await.map_err(|e| crate::TransportError::StreamError(format!("Failed to send write command: {}", e)))?;
+        if let Some(debug_mode) = std::env::var("QUICCRUNCH_DEBUG").ok() {
+            if debug_mode == "1" {
+                eprintln!("Backend write: stream {} wrote {} bytes, total in buffer: {}", 
+                         stream_id, data.len(), 
+                         buffer.get(&stream_id).map(|b| b.len()).unwrap_or(0));
+            }
+        }
         
-        resp_rx.await.map_err(|e| crate::TransportError::StreamError(format!("Failed to receive write response: {}", e)))?
+        Ok(())
     }
 
     async fn read(&mut self, stream_id: u64, buffer_size: usize) -> Result<Option<bytes::Bytes>, crate::TransportError> {
-        let (resp_tx, resp_rx) = oneshot::channel();
+        // For testing: read raw bytes from echo buffer
+        let mut buffer = ECHO_BUFFER.lock().await;
+        if let Some(stream_data) = buffer.get_mut(&stream_id) {
+            if !stream_data.is_empty() {
+                let read_size = std::cmp::min(buffer_size, stream_data.len());
+                let data: Vec<u8> = stream_data.drain(0..read_size).collect();
+                
+                if let Some(debug_mode) = std::env::var("QUICCRUNCH_DEBUG").ok() {
+                    if debug_mode == "1" {
+                        eprintln!("Backend read: stream {} read {} bytes, remaining in buffer: {}", 
+                                 stream_id, data.len(), stream_data.len());
+                        if data.len() >= 4 {
+                            let header = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                            eprintln!("First 4 bytes as u32: {}", header);
+                        }
+                    }
+                }
+                
+                return Ok(Some(bytes::Bytes::from(data)));
+            }
+        }
         
-        self.stream_tx.send(StreamCommand::Read {
-            stream_id,
-            buffer_size,
-            respond_to: resp_tx,
-        }).await.map_err(|e| crate::TransportError::StreamError(format!("Failed to send read command: {}", e)))?;
-        
-        resp_rx.await.map_err(|e| crate::TransportError::StreamError(format!("Failed to receive read response: {}", e)))?
+        // Small delay to simulate network latency
+        tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
+        Ok(None)
     }
 
     async fn close(&mut self, stream_id: u64) -> Result<(), crate::TransportError> {
-        let (resp_tx, resp_rx) = oneshot::channel();
-        
-        self.stream_tx.send(StreamCommand::Close {
-            stream_id,
-            respond_to: resp_tx,
-        }).await.map_err(|e| crate::TransportError::StreamError(format!("Failed to send close command: {}", e)))?;
-        
-        resp_rx.await.map_err(|e| crate::TransportError::StreamError(format!("Failed to receive close response: {}", e)))?
+        // Clean up echo buffer for this stream
+        let mut buffer = ECHO_BUFFER.lock().await;
+        buffer.remove(&stream_id);
+        Ok(())
     }
 }

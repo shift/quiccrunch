@@ -16,26 +16,28 @@
 
 //! High-level QUIC client API for easy integration
 
-use crate::transport::{QuicTransport, Transport, TlsConfig, Connection};
+use crate::transport::{QuicTransport, Transport};
+use crate::transport::tquic::TlsConfig;
 use crate::{Result, QuicStream};
 use bytes::Bytes;
 
 /// Easy-to-use QUIC client
+#[derive(Clone)]
 pub struct QuicClient {
     transport: QuicTransport,
 }
 
 impl QuicClient {
     /// Create a new client with self-signed certificates (for testing)
-    pub fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         let tls_config = crate::test_utils::certs::generate_self_signed_cert("quic-client")?;
-        let transport = QuicTransport::new(tls_config)?;
+        let transport = QuicTransport::new(tls_config.into()).await?;
         Ok(Self { transport })
     }
 
     /// Create a new client with custom TLS configuration
-    pub fn with_tls_config(tls_config: TlsConfig) -> Result<Self> {
-        let transport = QuicTransport::new(tls_config)?;
+    pub async fn with_tls_config(tls_config: TlsConfig) -> Result<Self> {
+        let transport = QuicTransport::new(tls_config.into()).await?;
         Ok(Self { transport })
     }
 
@@ -49,22 +51,22 @@ impl QuicClient {
 /// A QUIC connection that provides easy-to-use stream operations
 #[derive(Clone)]
 pub struct QuicConnection {
-    inner: Connection,
+    inner: QuicStream,
 }
 
 impl QuicConnection {
     /// Open a new bidirectional stream
-    pub async fn open_stream(&self) -> Result<QuicStream> {
+    pub async fn open_stream(&mut self) -> Result<QuicStream> {
         self.inner.open_bi().await
     }
 
     /// Accept an incoming bidirectional stream
-    pub async fn accept_stream(&self) -> Result<QuicStream> {
+    pub async fn accept_stream(&mut self) -> Result<QuicStream> {
         self.inner.accept_bi().await
     }
 
     /// Send a message and receive a response (convenience method)
-    pub async fn request(&self, message: impl Into<Bytes>) -> Result<Bytes> {
+    pub async fn request(&mut self, message: impl Into<Bytes>) -> Result<Bytes> {
         let mut stream = self.open_stream().await?;
         stream.send_message(message.into()).await?;
         stream.receive_message().await

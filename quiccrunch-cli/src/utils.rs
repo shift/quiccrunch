@@ -1,35 +1,20 @@
 /// Utility functions for the CLI
-use anyhow::Result;
-use std::path::Path;
+use anyhow::{anyhow, Result};
+use std::time::Duration;
 
-/// Validate that a file exists and is readable
-pub fn validate_file_exists(path: &str) -> Result<()> {
-    if !Path::new(path).exists() {
-        anyhow::bail!("File '{}' does not exist", path);
-    }
-    Ok(())
-}
-
-/// Validate that a directory exists or can be created
-pub fn ensure_directory_exists(path: &str) -> Result<()> {
-    std::fs::create_dir_all(path)
-        .map_err(|e| anyhow::anyhow!("Failed to create directory '{}': {}", path, e))?;
-    Ok(())
-}
-
-/// Parse an endpoint string into host and port
+/// Parses an endpoint string (e.g., "localhost:8080") into a (host, port) tuple.
 pub fn parse_endpoint(endpoint: &str) -> Result<(String, u16)> {
-    if let Some((host, port_str)) = endpoint.rsplit_once(':') {
-        let port = port_str.parse::<u16>()
-            .map_err(|_| anyhow::anyhow!("Invalid port number: {}", port_str))?;
-        Ok((host.to_string(), port))
-    } else {
-        anyhow::bail!("Endpoint must be in format 'host:port', got: {}", endpoint);
+    let parts: Vec<&str> = endpoint.split(':').collect();
+    if parts.len() != 2 {
+        return Err(anyhow!("Invalid endpoint format. Expected host:port"));
     }
+    let host = parts[0].to_string();
+    let port = parts[1].parse::<u16>()?;
+    Ok((host, port))
 }
 
-/// Format duration in a human-readable way
-pub fn format_duration(duration: std::time::Duration) -> String {
+/// Formats a duration into a human-readable string.
+pub fn format_duration(duration: Duration) -> String {
     let secs = duration.as_secs_f64();
     if secs < 1.0 {
         format!("{:.1}ms", secs * 1000.0)
@@ -40,38 +25,33 @@ pub fn format_duration(duration: std::time::Duration) -> String {
     }
 }
 
-/// Format bytes in a human-readable way
+/// Formats bytes into a human-readable string (e.g., KB, MB).
 pub fn format_bytes(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    let mut size = bytes as f64;
-    let mut unit_index = 0;
-    
-    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
-        size /= 1024.0;
-        unit_index += 1;
-    }
-    
-    if unit_index == 0 {
-        format!("{} {}", bytes, UNITS[unit_index])
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
-        format!("{:.1} {}", size, UNITS[unit_index])
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
 }
 
-/// Format requests per second
+/// Formats requests per second.
 pub fn format_rps(rps: f64) -> String {
-    if rps >= 1000.0 {
-        format!("{:.1}k req/s", rps / 1000.0)
-    } else {
+    if rps < 1000.0 {
         format!("{:.1} req/s", rps)
+    } else {
+        format!("{:.1}k req/s", rps / 1000.0)
     }
 }
 
 /// Progress bar utility for long-running operations
+#[allow(dead_code)]
 pub struct ProgressBar {
     bar: indicatif::ProgressBar,
 }
 
+#[allow(dead_code)]
 impl ProgressBar {
     pub fn new(total: u64, message: &str) -> Self {
         let bar = indicatif::ProgressBar::new(total);
@@ -100,8 +80,10 @@ impl ProgressBar {
 }
 
 /// Interactive prompts for user input
+#[allow(dead_code)]
 pub struct Prompts;
 
+#[allow(dead_code)]
 impl Prompts {
     /// Prompt for text input
     pub fn text(message: &str, default: Option<&str>) -> Result<String> {

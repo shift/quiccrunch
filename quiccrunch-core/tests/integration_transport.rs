@@ -3,9 +3,7 @@ use bytes::Bytes;
 use std::time::Duration;
 use quiccrunch_core::{QuicTransport, Transport};
 // Note: avoid direct quinn dependency in tests; keep a shadow struct for compile-time only values
-#[allow(dead_code)]
 struct TransportConfig;
-#[allow(dead_code)]
 struct VarInt(u32);
 impl TransportConfig { fn default() -> Self { TransportConfig } }
 impl VarInt { fn from_u32(v: u32) -> Self { VarInt(v) } }

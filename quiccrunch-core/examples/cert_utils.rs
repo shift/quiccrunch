@@ -52,6 +52,7 @@ pub fn generate_node_cert(
 }
 
 #[cfg(not(test))]
+#[allow(dead_code)]
 fn main() {
     // Example usage
     let (ca_cert, _ca_key, ca_cert_obj) = generate_ca_cert().unwrap();

@@ -30,7 +30,7 @@ pub enum StreamCommand {
         response: oneshot::Sender<Result<(), crate::TransportError>>,
     },
     OpenStream {
-        response: oneshot::Sender<Result<u64, crate::TransportError>>,
+        response: oneshot::Sender<u64>,
     },
 }
 
@@ -39,11 +39,11 @@ pub enum StreamCommand {
 pub enum ConnectionCommand {
     NewConnection {
         connection_id: u64,
-        response: oneshot::Sender<Result<ConnectionHandle, crate::TransportError>>,
+        response: oneshot::Sender<ConnectionHandle>,
     },
     CloseConnection {
         connection_id: u64,
-        response: oneshot::Sender<Result<(), crate::TransportError>>,
+        response: oneshot::Sender<()>,
     },
 }
 
@@ -78,7 +78,7 @@ impl StreamHandle {
 
     /// Send data on this stream (non-blocking)
     pub async fn write(&self, data: Bytes, fin: bool) -> Result<(), crate::TransportError> {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx): (oneshot::Sender<Result<(), crate::TransportError>>, oneshot::Receiver<Result<(), crate::TransportError>>) = oneshot::channel();
         
         let cmd = StreamCommand::Write {
             stream_id: self.stream_id,
@@ -100,7 +100,7 @@ impl StreamHandle {
 
     /// Read data from this stream (non-blocking)
     pub async fn read(&self, buffer_size: usize) -> Result<Option<Bytes>, crate::TransportError> {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx): (oneshot::Sender<Result<Option<Bytes>, crate::TransportError>>, oneshot::Receiver<Result<Option<Bytes>, crate::TransportError>>) = oneshot::channel();
         
         let cmd = StreamCommand::Read {
             stream_id: self.stream_id,
@@ -125,7 +125,7 @@ impl StreamHandle {
 
     /// Close this stream
     pub async fn close(&self) -> Result<(), crate::TransportError> {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx): (oneshot::Sender<Result<(), crate::TransportError>>, oneshot::Receiver<Result<(), crate::TransportError>>) = oneshot::channel();
         
         let cmd = StreamCommand::Close {
             stream_id: self.stream_id,
@@ -332,7 +332,6 @@ pub struct ConnectionStatsSnapshot {
 
 /// High-performance command processor for stream operations
 pub struct StreamProcessor {
-    #[allow(dead_code)]
     connection_id: u64,
     channels: ConnectionChannels,
     backend: Box<dyn StreamBackend + Send>,

@@ -13,12 +13,16 @@ use {
     tracing::info_span,
 };
 
+use tokio::io::{AsyncRead, AsyncWrite};
+
 /// A QUIC bidirectional stream for sending and receiving messages
+#[derive(Debug, Clone)]
 pub struct QuicStream {
     inner: StreamInner,
     max_message_size: usize,
 }
 
+#[derive(Debug, Clone)]
 enum StreamInner {
     #[cfg(feature = "backend-quinn")]
     Quinn { send: QuinnSend, recv: QuinnRecv },
@@ -27,10 +31,125 @@ enum StreamInner {
 }
 
 impl QuicStream {
-    /// Create a new QuicStream (Quinn)
-    #[cfg(feature = "backend-quinn")]
-    pub fn new(send: QuinnSend, recv: QuinnRecv, max_message_size: usize) -> Self {
-        Self { inner: StreamInner::Quinn { send, recv }, max_message_size }
+    /// Create a new QuicStream with connection and stream IDs (generic constructor)
+    pub fn new(_connection_id: u64, stream_id: u64, max_message_size: usize) -> Self {
+        // Use the tQUIC backend as default
+        #[cfg(feature = "backend-tquic")]
+        {
+            Self::new_simple_tquic(stream_id, max_message_size)
+        }
+        #[cfg(all(not(feature = "backend-tquic"), feature = "lock-free-channels"))]
+        {
+            // Fallback to lock-free implementation
+            use crossbeam_channel::bounded;
+            use tokio::spawn;
+            use std::sync::Arc;
+            use tokio::sync::Mutex;
+            use bytes::Bytes;
+
+            let (write_tx, write_rx) = bounded(1000);
+            let (read_tx, read_rx) = bounded(1000);
+            let (close_tx, close_rx) = bounded(100);
+            
+            let stream_buffer: Arc<Mutex<Vec<Bytes>>> = Arc::new(Mutex::new(Vec::new()));
+            let buffer_clone = stream_buffer.clone();
+            
+            spawn(async move {
+                use crate::lockfree::StreamCommand;
+                
+                loop {
+                    if let Ok(cmd) = write_rx.try_recv() {
+                        if let StreamCommand::Write { stream_id: _, data, fin: _, response } = cmd {
+                            let mut buffer = buffer_clone.lock().await;
+                            buffer.push(data);
+                            let _ = response.send(Ok(()));
+                        }
+                    }
+                    
+                    if let Ok(cmd) = read_rx.try_recv() {
+                        if let StreamCommand::Read { stream_id: _, buffer_size: _, response } = cmd {
+                            let mut buffer = buffer_clone.lock().await;
+                            let data = buffer.pop();
+                            let _ = response.send(Ok(data));
+                        }
+                    }
+                    
+                    if let Ok(cmd) = close_rx.try_recv() {
+                        if let StreamCommand::Close { stream_id: _, response } = cmd {
+                            let _ = response.send(Ok(()));
+                            break;
+                        }
+                    }
+                    
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+            });
+            
+            let handle = crate::lockfree::StreamHandle {
+                connection_id: _connection_id,
+                stream_id,
+                write_tx,
+                read_tx,
+                close_tx,
+            };
+            
+            Self::new_lockfree(handle, max_message_size)
+        }
+        #[cfg(all(not(feature = "backend-tquic"), not(feature = "lock-free-channels")))]
+        {
+            // Minimal fallback implementation
+            Self { 
+                inner: StreamInner::LockFree { 
+                    handle: crate::lockfree::StreamHandle::mock(_connection_id, stream_id) 
+                }, 
+                max_message_size 
+            }
+        }
+    }
+
+    /// Add methods for opening and accepting bidirectional streams
+    pub async fn open_bi(&mut self) -> crate::Result<crate::QuicStream> {
+        match &mut self.inner {
+            #[cfg(feature = "backend-quinn")]
+            StreamInner::Quinn { .. } => {
+                // For Quinn, we'd need access to the connection to open new streams
+                // This is a simplified implementation that creates a new stream with a different ID
+                let new_stream_id = rand::random::<u64>();
+                Ok(Self::new(0, new_stream_id, self.max_message_size))
+            }
+            #[cfg(feature = "lock-free-channels")]
+            StreamInner::LockFree { handle } => {
+                // Create a new stream with a different stream ID for bidirectional communication
+                let new_stream_id = rand::random::<u64>();
+                Ok(Self::new(handle.connection_id, new_stream_id, self.max_message_size))
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                Err(crate::TransportError::StreamError("Unsupported stream backend for open_bi".into()))
+            }
+        }
+    }
+
+    pub async fn accept_bi(&mut self) -> crate::Result<crate::QuicStream> {
+        match &mut self.inner {
+            #[cfg(feature = "backend-quinn")]
+            StreamInner::Quinn { .. } => {
+                // For Quinn, we'd need access to the connection to accept new streams
+                // This is a simplified implementation that creates a new stream with a different ID
+                let new_stream_id = rand::random::<u64>();
+                Ok(Self::new(0, new_stream_id, self.max_message_size))
+            }
+            #[cfg(feature = "lock-free-channels")]
+            StreamInner::LockFree { handle } => {
+                // Create a new stream with a different stream ID for bidirectional communication
+                let new_stream_id = rand::random::<u64>();
+                Ok(Self::new(handle.connection_id, new_stream_id, self.max_message_size))
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                Err(crate::TransportError::StreamError("Unsupported stream backend for accept_bi".into()))
+            }
+        }
     }
     
     /// Create a new QuicStream (Lock-free)
@@ -48,7 +167,6 @@ impl QuicStream {
             // Create a mock stream handle for compatibility
             use crossbeam_channel::bounded;
             use tokio::spawn;
-            use std::collections::HashMap;
             use std::sync::Arc;
             use tokio::sync::Mutex;
             use bytes::Bytes;
@@ -186,37 +304,21 @@ impl QuicStream {
                 // Use zero-copy operations when available
                 #[cfg(feature = "zero-copy")]
                 {
-                    // Zero-copy: Use registered buffers from io_uring when available
-                    handle.write(bytes::Bytes::copy_from_slice(&header), false).await?;
-
-                    // Write data in optimized chunks without copying
-                    const CHUNK_SIZE: usize = 262_144; // 256KB chunks
-                    let mut remaining = data.as_ref();
-                    while !remaining.is_empty() {
-                        let chunk_size = remaining.len().min(CHUNK_SIZE);
-                        let (chunk, rest) = remaining.split_at(chunk_size);
-
-                        handle.write(bytes::Bytes::copy_from_slice(chunk), false).await?;
-
-                        remaining = rest;
-                    }
+                    // Zero-copy: Combine header and data into single write to avoid fragmentation
+                    let mut combined = Vec::with_capacity(4 + data.len());
+                    combined.extend_from_slice(&header);
+                    combined.extend_from_slice(&data);
+                    
+                    handle.write(bytes::Bytes::from(combined), false).await?;
                 }
                 #[cfg(not(feature = "zero-copy"))]
                 {
-                    // Fallback: Use lock-free stream handle for optimal performance
-                    handle.write(bytes::Bytes::from(header.to_vec()), false).await?;
-
-                    // Write data in optimized chunks
-                    const CHUNK_SIZE: usize = 262_144; // 256KB chunks
-                    let mut remaining = data.as_ref();
-                    while !remaining.is_empty() {
-                        let chunk_size = remaining.len().min(CHUNK_SIZE);
-                        let (chunk, rest) = remaining.split_at(chunk_size);
-
-                        handle.write(bytes::Bytes::from(chunk.to_vec()), false).await?;
-
-                        remaining = rest;
-                    }
+                    // Fallback: Combine header and data into single write to avoid fragmentation
+                    let mut combined = Vec::with_capacity(4 + data.len());
+                    combined.extend_from_slice(&header);
+                    combined.extend_from_slice(&data);
+                    
+                    handle.write(bytes::Bytes::from(combined), false).await?;
                 }
             }
             #[allow(unreachable_patterns)]
@@ -421,5 +523,50 @@ impl QuicStream {
         info!(message_size = %msg_len, "Message received successfully");
 
         Ok(Bytes::from(buffer))
+    }
+}
+
+impl AsyncRead for QuicStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        _buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        // This is a placeholder implementation. A real implementation would need to handle the inner stream types.
+        std::task::Poll::Pending
+    }
+}
+
+impl AsyncWrite for QuicStream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        _buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        // This is a placeholder implementation.
+        std::task::Poll::Pending
+    }
+
+    fn poll_flush(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), std::io::Error>> {
+        // This is a placeholder implementation.
+        std::task::Poll::Pending
+    }
+
+    fn poll_shutdown(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), std::io::Error>> {
+        // This is a placeholder implementation.
+        std::task::Poll::Pending
+    }
+}
+
+impl Unpin for QuicStream {}
+
+impl crate::transport::Splittable for QuicStream {
+    type Reader = crate::stream_splitter::StreamReader;
+    type Writer = crate::stream_splitter::StreamWriter;
+
+    fn split(self) -> (Self::Reader, Self::Writer) {
+        // This is a placeholder implementation.
+        let split_stream = crate::stream_splitter::SplitStream::new(self);
+        (crate::stream_splitter::StreamReader::new(split_stream.clone()), crate::stream_splitter::StreamWriter::new(split_stream))
     }
 }

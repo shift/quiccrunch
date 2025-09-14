@@ -17,6 +17,7 @@ use std::collections::VecDeque;
 use std::net::SocketAddr;
 use crate::memory::PooledBuffer;
 use crate::simd;
+use crate::transport::tquic::TlsConfig;
 
 /// Configuration for io_uring transport optimizations
 #[derive(Clone, Debug)]
@@ -31,20 +32,45 @@ pub struct Config {
 }
 
 /// Transport layer for io_uring backend
-#[derive(Clone, Debug)]
 pub struct IoUringTransport {
     inner: Arc<IoUringAdvancedTransport>,
-    #[allow(dead_code)]
-    tls_config: crate::transport::TlsConfig,
-    #[allow(dead_code)]
+    tls_config: TlsConfig,
     settings: crate::config::QuicTransportSettings,
-    #[allow(dead_code)]
     config: Config,
+}
+
+impl std::fmt::Debug for IoUringTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IoUringTransport")
+            .field("inner", &self.inner)
+            .field("tls_config", &"TlsConfig")
+            .field("settings", &self.settings)
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
+impl Clone for IoUringTransport {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            tls_config: TlsConfig {
+                cert: self.tls_config.cert.clone(),
+                key: self.tls_config.key.clone(),
+                ca_cert: self.tls_config.ca_cert.clone(),
+                cert_pem: self.tls_config.cert_pem.clone(),
+                key_pem: self.tls_config.key_pem.clone(),
+                ca_cert_pem: self.tls_config.ca_cert_pem.clone(),
+            },
+            settings: self.settings.clone(),
+            config: self.config.clone(),
+        }
+    }
 }
 
 impl IoUringTransport {
     pub fn new(
-        tls_config: crate::transport::TlsConfig,
+        tls_config: TlsConfig,
         settings: crate::config::QuicTransportSettings,
         config: Config,
     ) -> crate::Result<Self> {
@@ -342,9 +368,7 @@ struct NumaBufferPool {
 #[derive(Debug)]
 struct RegisteredBuffer {
     data: Box<[u8]>,
-    #[allow(dead_code)]
     buffer_id: u16,
-    #[allow(dead_code)]
     group_id: u16,
     numa_node: Option<usize>,
 }
@@ -352,11 +376,9 @@ struct RegisteredBuffer {
 /// Advanced batch processor with operation coalescing
 #[derive(Debug)]
 struct BatchProcessor {
-    #[allow(dead_code)]
     send_batch: Vec<SendOperation>,
     recv_batch: Vec<RecvOperation>,
     coalesced_sends: Vec<CoalescedSend>,
-    #[allow(dead_code)]
     max_batch_size: usize,
 }
 

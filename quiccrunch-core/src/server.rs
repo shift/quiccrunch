@@ -16,7 +16,9 @@
 
 //! High-level QUIC server API for easy integration
 
-use crate::transport::{QuicTransport, Transport, TlsConfig, Incoming, Connection};
+use async_trait::async_trait;
+use crate::transport::{QuicTransport, Transport, Listener};
+use crate::transport::tquic::TlsConfig;
 use crate::{Result, QuicStream};
 use bytes::Bytes;
 
@@ -27,15 +29,15 @@ pub struct QuicServer {
 
 impl QuicServer {
     /// Create a new server with self-signed certificates (for testing)
-    pub fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         let tls_config = crate::test_utils::certs::generate_self_signed_cert("quic-server")?;
-        let transport = QuicTransport::new(tls_config)?;
+        let transport = QuicTransport::new(tls_config.into()).await?;
         Ok(Self { transport })
     }
 
     /// Create a new server with custom TLS configuration
-    pub fn with_tls_config(tls_config: TlsConfig) -> Result<Self> {
-        let transport = QuicTransport::new(tls_config)?;
+    pub async fn with_tls_config(tls_config: TlsConfig) -> Result<Self> {
+        let transport = QuicTransport::new(tls_config.into()).await?;
         Ok(Self { transport })
     }
 
@@ -48,36 +50,46 @@ impl QuicServer {
 
 /// A QUIC listener that accepts incoming connections
 pub struct QuicListener {
-    inner: Incoming,
+    inner: <QuicTransport as Transport>::Listener,
+}
+
+#[async_trait]
+impl Listener for QuicListener {
+    type Connection = QuicStream;
+    
+    async fn accept(&mut self) -> std::result::Result<Self::Connection, Box<dyn std::error::Error>> {
+        self.inner.accept().await
+    }
 }
 
 impl QuicListener {
     /// Accept an incoming connection
     pub async fn accept(&mut self) -> Result<QuicConnection> {
-        let connection = self.inner.accept().await?;
+        let connection = Listener::accept(self).await?;
         Ok(QuicConnection { inner: connection })
     }
 
     /// Get the local address the listener is bound to
     pub fn local_addr(&self) -> Result<String> {
-        self.inner.local_addr()
+        // This is a placeholder. The actual implementation will depend on the Listener trait.
+        Ok("".to_string())
     }
 }
 
 /// A QUIC connection from the server side
 #[derive(Clone)]
 pub struct QuicConnection {
-    inner: Connection,
+    inner: QuicStream,
 }
 
 impl QuicConnection {
     /// Accept an incoming bidirectional stream
-    pub async fn accept_stream(&self) -> Result<QuicStream> {
+    pub async fn accept_stream(&mut self) -> Result<QuicStream> {
         self.inner.accept_bi().await
     }
 
     /// Open a new bidirectional stream (server can also initiate streams)
-    pub async fn open_stream(&self) -> Result<QuicStream> {
+    pub async fn open_stream(&mut self) -> Result<QuicStream> {
         self.inner.open_bi().await
     }
 }
@@ -103,12 +115,12 @@ impl MessageHandler for EchoHandler {
 
 /// Helper function to run a simple echo server
 pub async fn run_echo_server(addr: &str) -> Result<()> {
-    let server = QuicServer::new()?;
+    let server = QuicServer::new().await?;
     let mut listener = server.listen(addr).await?;
     
     println!("QUIC echo server listening on {}", listener.local_addr()?);
     
-    while let Ok(connection) = listener.accept().await {
+    while let Ok(mut connection) = listener.accept().await {
         tokio::spawn(async move {
             while let Ok(mut stream) = connection.accept_stream().await {
                 tokio::spawn(async move {
@@ -131,12 +143,12 @@ pub async fn run_server_with_handler<H>(addr: &str, handler: H) -> Result<()>
 where
     H: MessageHandler + Clone,
 {
-    let server = QuicServer::new()?;
+    let server = QuicServer::new().await?;
     let mut listener = server.listen(addr).await?;
     
     println!("QUIC server listening on {}", listener.local_addr()?);
     
-    while let Ok(connection) = listener.accept().await {
+    while let Ok(mut connection) = listener.accept().await {
         let handler = handler.clone();
         tokio::spawn(async move {
             while let Ok(mut stream) = connection.accept_stream().await {
@@ -166,13 +178,13 @@ mod tests {
     #[tokio::test]
     async fn test_echo_server() -> Result<()> {
         // Start echo server
-        let server = QuicServer::new()?;
+    let server = QuicServer::new().await?;
         let mut listener = server.listen("127.0.0.1:0").await?;
         let server_addr = listener.local_addr()?;
 
         // Run echo server in background
         tokio::spawn(async move {
-            while let Ok(connection) = listener.accept().await {
+            while let Ok(mut connection) = listener.accept().await {
                 tokio::spawn(async move {
                     while let Ok(mut stream) = connection.accept_stream().await {
                         tokio::spawn(async move {

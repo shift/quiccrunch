@@ -129,7 +129,7 @@ pub mod optimizations {
 }
 
 pub use error::{Result, TransportError, FastError};
-pub use transport::{QuicTransport, Transport, Connection, TlsConfig, Incoming};
+pub use transport::{QuicTransport, Transport};
 pub use connection_pool::{ConnectionPool, ConnectionPoolConfig, ConnectionPoolStats, EndpointStats, ConnectionHealth};
 pub use crypto_accel::{HardwareCrypto, CryptoAccelConfig, HardwareCapabilities, CryptoStats, CryptoStatsSnapshot, BatchCryptoProcessor, CipherSuiteOptimizer};
 pub use congestion::{AdaptiveCongestionControl, CongestionControlConfig, NetworkMetrics, CongestionAlgorithm, NetworkCondition, CongestionControlStats};
