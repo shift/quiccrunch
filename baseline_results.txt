@@ -9,492 +9,82 @@ To build Python bindings, run: cd bindings/python && maturin develop
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
 package:   /home/shift/code/quiccrunch/quiccrunch-core/Cargo.toml
 workspace: /home/shift/code/quiccrunch/Cargo.toml
-   Compiling proc-macro2 v1.0.101
-   Compiling unicode-ident v1.0.18
-   Compiling autocfg v1.5.0
-   Compiling libc v0.2.175
-   Compiling cfg-if v1.0.3
-   Compiling libm v0.2.15
-   Compiling shlex v1.3.0
-   Compiling memchr v2.7.5
-   Compiling serde v1.0.219
-   Compiling cc v1.2.34
-   Compiling rustix v1.0.8
-   Compiling num-traits v0.2.19
-   Compiling getrandom v0.3.3
-   Compiling ring v0.17.14
-   Compiling anyhow v1.0.99
-   Compiling zerocopy v0.8.26
-   Compiling either v1.15.0
-   Compiling quote v1.0.40
-   Compiling itertools v0.10.5
-   Compiling syn v2.0.106
-   Compiling getrandom v0.2.16
    Compiling syn v1.0.109
-   Compiling rand_core v0.6.4
-   Compiling lock_api v0.4.13
-   Compiling regex-syntax v0.8.5
-   Compiling parking_lot_core v0.9.11
-   Compiling fnv v1.0.7
-   Compiling equivalent v1.0.2
-   Compiling prettyplease v0.2.37
-   Compiling ppv-lite86 v0.2.21
-   Compiling linux-raw-sys v0.9.4
-   Compiling ident_case v1.0.1
-   Compiling allocator-api2 v0.2.21
-   Compiling foldhash v0.1.5
-   Compiling bitflags v2.9.3
-   Compiling bytes v1.10.1
-   Compiling hashbrown v0.15.5
-   Compiling pin-project-lite v0.2.16
-   Compiling strsim v0.11.1
-   Compiling heck v0.5.0
-   Compiling untrusted v0.9.0
-   Compiling indexmap v2.11.0
-   Compiling regex-automata v0.4.9
-   Compiling rand_chacha v0.3.1
-   Compiling utf8parse v0.2.2
-   Compiling crossbeam-utils v0.8.21
-   Compiling fastrand v2.3.0
-   Compiling paste v1.0.15
-   Compiling fixedbitset v0.4.2
-   Compiling once_cell v1.21.3
-   Compiling futures-core v0.3.31
-   Compiling bytemuck v1.23.2
-   Compiling scopeguard v1.2.0
-   Compiling tempfile v3.21.0
-   Compiling petgraph v0.6.5
-   Compiling safe_arch v0.7.4
-   Compiling anstyle-parse v0.2.7
-   Compiling regex v1.11.1
-   Compiling rand v0.8.5
-   Compiling aho-corasick v1.1.3
-   Compiling indexmap v1.9.3
-   Compiling matrixmultiply v0.3.10
-   Compiling darling_core v0.20.11
-   Compiling multimap v0.10.1
-   Compiling log v0.4.27
-   Compiling futures-sink v0.3.31
-   Compiling rustversion v1.0.22
-   Compiling anstyle v1.0.11
-   Compiling typenum v1.18.0
-   Compiling rust_decimal v1.37.2
-   Compiling anstyle-query v1.1.4
-   Compiling crc32fast v1.5.0
-   Compiling colorchoice v1.0.4
-   Compiling slab v0.4.11
-   Compiling is_terminal_polyfill v1.70.1
-   Compiling powerfmt v0.2.0
-   Compiling anstream v0.6.20
-   Compiling deranged v0.4.0
-   Compiling futures-channel v0.3.31
-   Compiling wide v0.7.33
-   Compiling serde_derive v1.0.219
-   Compiling prost-derive v0.12.6
-   Compiling darling_macro v0.20.11
-   Compiling futures-macro v0.3.31
-   Compiling prost v0.12.6
-   Compiling darling v0.20.11
-   Compiling prost-types v0.12.6
-   Compiling num-integer v0.1.46
-   Compiling prost-build v0.12.6
-   Compiling num-complex v0.4.6
-   Compiling approx v0.5.1
-   Compiling cmake v0.1.54
-   Compiling priority-queue v1.4.0
-   Compiling futures-task v0.3.31
-   Compiling hashbrown v0.12.3
-   Compiling plotters-backend v0.3.7
-   Compiling serde_json v1.0.143
-   Compiling num-conv v0.1.0
-   Compiling adler2 v2.0.1
-   Compiling futures-io v0.3.31
-   Compiling rawpointer v0.2.1
-   Compiling pin-utils v0.1.0
-   Compiling time-core v0.1.4
-   Compiling arrayvec v0.7.6
-   Compiling capnp v0.18.13
-   Compiling time v0.3.41
-   Compiling futures-util v0.3.31
-   Compiling capnpc v0.18.1
-   Compiling miniz_oxide v0.8.9
-   Compiling nalgebra-macros v0.1.0
-   Compiling simba v0.6.0
-   Compiling tquic v1.6.0
-   Compiling tonic-build v0.10.2
-   Compiling num-rational v0.4.2
-   Compiling serde_with_macros v3.14.0
-   Compiling enumflags2_derive v0.7.12
-   Compiling tokio-macros v2.5.0
-   Compiling rand_distr v0.4.3
-   Compiling signal-hook-registry v1.4.6
-   Compiling mio v1.0.4
-   Compiling socket2 v0.6.0
-   Compiling minimal-lexical v0.2.1
-   Compiling data-encoding v2.9.0
-   Compiling ryu v1.0.20
-   Compiling rustls v0.21.12
-   Compiling smallvec v1.15.1
-   Compiling base64 v0.22.1
-   Compiling io-uring v0.6.4
-   Compiling itoa v1.0.15
-   Compiling heck v0.4.1
-   Compiling clap_lex v0.7.5
-   Compiling thiserror v1.0.69
-   Compiling lazy_static v1.5.0
-   Compiling parking_lot v0.12.4
-   Compiling pem v3.0.5
-   Compiling clap_builder v4.5.44
-   Compiling strum_macros v0.24.3
-   Compiling sct v0.7.1
-   Compiling rustls-webpki v0.101.7
-   Compiling tokio v1.47.1
-   Compiling serde_with v3.14.0
-   Compiling nom v7.1.3
-   Compiling sfv v0.9.4
-   Compiling flate2 v1.1.2
-   Compiling enumflags2 v0.7.12
-   Compiling futures-executor v0.3.31
-   Compiling env_filter v0.1.3
-   Compiling quiccrunch-core v0.1.0 (/home/shift/code/quiccrunch/quiccrunch-core)
-   Compiling nalgebra v0.29.0
-   Compiling yasna v0.5.2
-   Compiling plotters-bitmap v0.3.7
-   Compiling plotters-svg v0.3.7
-   Compiling crossbeam-channel v0.5.15
-   Compiling thiserror-impl v1.0.69
-   Compiling tracing-attributes v0.1.30
-   Compiling clap_derive v4.5.45
    Compiling tracing-core v0.1.34
-   Compiling lru v0.12.5
-   Compiling bitflags v1.3.2
-   Compiling hashbrown v0.14.5
-   Compiling hex v0.4.3
-   Compiling iana-time-zone v0.1.63
-   Compiling strum v0.24.1
-   Compiling rustc-hash v1.1.0
-   Compiling jiff v0.2.15
-   Compiling byteorder v1.5.0
-   Compiling base64 v0.21.7
-   Compiling tokio-stream v0.1.17
-   Compiling hdrhistogram v7.5.4
    Compiling tracing v0.1.41
-   Compiling clap v4.5.45
-   Compiling dashmap v6.1.0
-   Compiling chrono v0.4.41
-   Compiling env_logger v0.11.8
-   Compiling plotters v0.3.7
-   Compiling rcgen v0.12.1
-   Compiling futures v0.3.31
-   Compiling raw-cpuid v11.5.0
-   Compiling async-trait v0.1.89
-   Compiling num_cpus v1.17.0
-   Compiling socket2 v0.5.10
+   Compiling nalgebra-macros v0.1.0
+   Compiling strum_macros v0.24.3
+   Compiling nalgebra v0.29.0
+   Compiling tquic v1.6.0
    Compiling statrs v0.16.1
-warning: unused import: `Mutex`
-  --> quiccrunch-core/src/connection_pool.rs:10:19
-   |
-10 | use tokio::sync::{Mutex, RwLock};
-   |                   ^^^^^
-   |
-   = note: `#[warn(unused_imports)]` on by default
-
-warning: unused imports: `TlsConfig` and `TransportSettings`
-  --> quiccrunch-core/src/connection_pool.rs:11:51
-   |
-11 | use crate::transport::{QuicTransport, Connection, TlsConfig, TransportSettings, Transport};
-   |                                                   ^^^^^^^^^  ^^^^^^^^^^^^^^^^^
-
-warning: unused import: `AtomicBool`
- --> quiccrunch-core/src/crypto_accel.rs:8:25
-  |
-8 | use std::sync::atomic::{AtomicBool, Ordering};
-  |                         ^^^^^^^^^^
-
-warning: unused import: `std::sync::Arc`
- --> quiccrunch-core/src/congestion.rs:8:5
-  |
-8 | use std::sync::Arc;
-  |     ^^^^^^^^^^^^^^
-
-warning: unused import: `tokio::sync::RwLock`
-  --> quiccrunch-core/src/congestion.rs:10:5
-   |
-10 | use tokio::sync::RwLock;
-   |     ^^^^^^^^^^^^^^^^^^^
-
-warning: unused import: `crate::Result`
-  --> quiccrunch-core/src/congestion.rs:11:5
-   |
-11 | use crate::Result;
-   |     ^^^^^^^^^^^^^
-
-warning: unused import: `std::sync::Arc`
-  --> quiccrunch-core/src/stream.rs:50:17
-   |
-50 |             use std::sync::Arc;
-   |                 ^^^^^^^^^^^^^^
-
-warning: unused doc comment
-  --> quiccrunch-core/src/memory.rs:11:1
-   |
-11 | /// Thread-local buffer pool for reusing Vec<u8> allocations
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
-   |
-   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
-   = note: `#[warn(unused_doc_comments)]` on by default
-
-warning: unused doc comment
-   --> quiccrunch-core/src/memory.rs:362:1
-    |
-362 | /// Thread-local fast buffer pool
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
-    |
-    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
-
-warning: unused import: `MessageBuffer`
-  --> quiccrunch-core/src/io_uring_advanced.rs:18:35
-   |
-18 | use crate::memory::{PooledBuffer, MessageBuffer};
-   |                                   ^^^^^^^^^^^^^
-
-warning: unused import: `std::mem`
-   --> quiccrunch-core/src/io_uring_advanced.rs:791:17
-    |
-791 |             use std::mem;
-    |                 ^^^^^^^^
-
+   Compiling quiccrunch-core v0.1.0 (/home/shift/code/quiccrunch/quiccrunch-core)
 warning: unused import: `tokio::time`
-  --> quiccrunch-core/src/stream_optimized.rs:11:5
-   |
-11 | use tokio::time;
-   |     ^^^^^^^^^^^
-
-warning: unused variable: `total_connections`
-   --> quiccrunch-core/src/connection_pool.rs:133:13
-    |
-133 |         let total_connections = self.total_connections.read().await;
-    |             ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_total_connections`
-    |
-    = note: `#[warn(unused_variables)]` on by default
-
-warning: variable does not need to be mutable
-   --> quiccrunch-core/src/connection_pool.rs:221:61
-    |
-221 |     pub async fn return_connection(&self, endpoint: String, mut connection: Connection) {
-    |                                                             ----^^^^^^^^^^
-    |                                                             |
-    |                                                             help: remove this `mut`
-    |
-    = note: `#[warn(unused_mut)]` on by default
-
-warning: unused variable: `addr`
-   --> quiccrunch-core/src/io_uring_advanced.rs:532:20
-    |
-532 |         for (data, addr) in messages {
-    |                    ^^^^ help: if this is intentional, prefix it with an underscore: `_addr`
-
-warning: unreachable expression
-   --> quiccrunch-core/src/transport.rs:154:9
-    |
-149 |               return Self::new_advanced(tls_config, advanced_settings);
-    |               -------------------------------------------------------- any code following this expression is unreachable
-...
-154 | /         {
-155 | |             // Convert simple settings to advanced settings and delegate to tquic
-156 | |             let advanced_settings = crate::config::QuicTransportSettings {
-157 | |                 backend: crate::config::Backend::Tquic,
-...   |
-170 | |             Self::new_advanced(tls_config, advanced_settings)
-171 | |         }
-    | |_________^ unreachable expression
-    |
-    = note: `#[warn(unreachable_code)]` on by default
-
-warning: unused import: `tokio::io::AsyncWriteExt`
- --> quiccrunch-core/src/stream.rs:3:5
+ --> quiccrunch-core/src/stream.rs:4:5
   |
-3 | use tokio::io::AsyncWriteExt;
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+4 | use tokio::time;
+  |     ^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
 
-warning: unused import: `futures::Future`
-   --> quiccrunch-core/src/rpc.rs:189:5
-    |
-189 | use futures::Future;
-    |     ^^^^^^^^^^^^^^^
+warning: unused import: `crate::memory::PooledBuffer`
+ --> quiccrunch-core/src/adaptive.rs:4:5
+  |
+4 | use crate::memory::PooledBuffer;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-warning: unused variable: `current_condition`
-   --> quiccrunch-core/src/congestion.rs:350:13
-    |
-350 |         let current_condition = self.detect_condition();
-    |             ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_current_condition`
-
-warning: unused variable: `metrics`
-   --> quiccrunch-core/src/congestion.rs:505:36
-    |
-505 |     fn switch_algorithm(&mut self, metrics: &NetworkMetrics) {
-    |                                    ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_metrics`
-
-warning: unused variable: `waker`
-    --> quiccrunch-core/src/rpc.rs:1261:13
-     |
-1261 |         let waker = cx.waker().clone();
-     |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_waker`
-
-warning: unused variable: `ring_fd`
-  --> quiccrunch-core/src/io_uring_optimized.rs:96:13
-   |
-96 |         let ring_fd = self.ring.as_raw_fd();
-   |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_ring_fd`
-
-warning: unused variable: `sq_ring`
-   --> quiccrunch-core/src/io_uring_optimized.rs:100:13
-    |
-100 |         let sq_ring = unsafe { self.ring.submission_shared() };
-    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_sq_ring`
-
-warning: unused variable: `cq_stats`
-   --> quiccrunch-core/src/io_uring_optimized.rs:118:13
-    |
-118 |         let cq_stats = stats.clone();
-    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cq_stats`
-
-warning: unused variable: `cq_ring`
-   --> quiccrunch-core/src/io_uring_optimized.rs:119:13
-    |
-119 |         let cq_ring = unsafe { self.ring.completion_shared() };
-    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cq_ring`
-
-warning: unused variable: `nodemask`
-   --> quiccrunch-core/src/io_uring_advanced.rs:796:21
-    |
-796 |                 let nodemask = 1u64 << numa_node;
-    |                     ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_nodemask`
-
-warning: unnecessary `unsafe` block
-   --> quiccrunch-core/src/io_uring_advanced.rs:794:13
-    |
-794 |             unsafe {
-    |             ^^^^^^ unnecessary `unsafe` block
-    |
-    = note: `#[warn(unused_unsafe)]` on by default
-
-warning: unused variable: `numa_node`
-    --> quiccrunch-core/src/io_uring_advanced.rs:1147:51
-     |
-1147 |     fn allocate_numa_specific_buffer(size: usize, numa_node: usize) -> std::io::Result<Box<[u8]>> {
-     |                                                   ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_numa_node`
-
-warning: unused variable: `bytes`
-   --> quiccrunch-core/src/cpu_optimizations.rs:339:17
-    |
-339 |             let bytes = unsafe {
-    |                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_bytes`
-
-warning: type `tquic::StreamCommand` is more private than the item `ConnHandle::stream_tx`
-  --> quiccrunch-core/src/transport/tquic.rs:26:5
-   |
-26 |     pub stream_tx: mpsc::Sender<StreamCommand>,
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `ConnHandle::stream_tx` is reachable at visibility `pub`
-   |
-note: but type `tquic::StreamCommand` is only usable at visibility `pub(self)`
-  --> quiccrunch-core/src/transport/tquic.rs:46:1
-   |
-46 | enum StreamCommand {
-   | ^^^^^^^^^^^^^^^^^^
-   = note: `#[warn(private_interfaces)]` on by default
-
-warning: type `ClientStats` is more private than the item `IoUringOptimizedClient::get_stats`
-   --> quiccrunch-core/src/io_uring_optimized.rs:209:5
-    |
-209 |     pub fn get_stats(&self) -> ClientStats {
-    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `IoUringOptimizedClient::get_stats` is reachable at visibility `pub`
-    |
-note: but type `ClientStats` is only usable at visibility `pub(self)`
-   --> quiccrunch-core/src/io_uring_optimized.rs:34:1
-    |
-34  | struct ClientStats {
-    | ^^^^^^^^^^^^^^^^^^
-
-warning: field `max_message_size` is never read
-   --> quiccrunch-core/src/transport.rs:628:5
-    |
-626 | pub struct Connection {
-    |            ---------- field in this struct
-627 |     inner: ConnectionInner,
-628 |     max_message_size: usize,
-    |     ^^^^^^^^^^^^^^^^
-    |
-    = note: `Connection` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
-    = note: `#[warn(dead_code)]` on by default
-
-warning: field `fin` is never read
-  --> quiccrunch-core/src/transport/tquic.rs:50:9
-   |
-47 |     Write {
-   |     ----- field in this variant
-...
-50 |         fin: bool,
-   |         ^^^
-   |
-   = note: `StreamCommand` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
-
-warning: field `buffer_size` is never read
-  --> quiccrunch-core/src/transport/tquic.rs:55:9
-   |
-53 |     Read {
-   |     ---- field in this variant
-54 |         stream_id: u64,
-55 |         buffer_size: usize,
-   |         ^^^^^^^^^^^
-   |
-   = note: `StreamCommand` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+warning: unused import: `crate::simd`
+ --> quiccrunch-core/src/adaptive.rs:5:5
+  |
+5 | use crate::simd;
+  |     ^^^^^^^^^^^
 
 warning: field `tls_config` is never read
-  --> quiccrunch-core/src/transport/tquic.rs:68:5
+  --> quiccrunch-core/src/transport/tquic.rs:89:5
    |
-67 | pub struct TquicCtx {
-   |            -------- field in this struct
-68 |     tls_config: TlsConfig,
+88 | pub struct TquicClient {
+   |            ----------- field in this struct
+89 |     tls_config: TlsConfig,
    |     ^^^^^^^^^^
    |
-   = note: `TquicCtx` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `TquicClient` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
 
-warning: struct `MockPacketHandler` is never constructed
-  --> quiccrunch-core/src/transport/tquic.rs:86:8
-   |
-86 | struct MockPacketHandler {
-   |        ^^^^^^^^^^^^^^^^^
-
-warning: associated items `new` and `send_packet` are never used
-  --> quiccrunch-core/src/transport/tquic.rs:91:8
-   |
-90 | impl MockPacketHandler {
-   | ---------------------- associated items in this implementation
-91 |     fn new(local_addr: SocketAddr) -> Self {
-   |        ^^^
-...
-95 |     fn send_packet(&self, _data: &[u8], _target: SocketAddr) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-   |        ^^^^^^^^^^^
-
-warning: field `connection_id` is never read
-   --> quiccrunch-core/src/transport/tquic.rs:275:5
+warning: field `tls_config` is never read
+   --> quiccrunch-core/src/transport/tquic.rs:108:5
     |
-274 | struct TquicStreamBackend {
-    |        ------------------ field in this struct
-275 |     connection_id: u64,
+107 | pub struct TquicServer {
+    |            ----------- field in this struct
+108 |     tls_config: TlsConfig,
+    |     ^^^^^^^^^^
+    |
+    = note: `TquicServer` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: fields `connection_id` and `stream_tx` are never read
+   --> quiccrunch-core/src/transport/tquic.rs:293:5
+    |
+292 | struct TquicStreamBackend {
+    |        ------------------ fields in this struct
+293 |     connection_id: u64,
     |     ^^^^^^^^^^^^^
+294 |     stream_tx: mpsc::Sender<StreamCommand>,
+    |     ^^^^^^^^^
 
 warning: field `batch_buffer` is never read
-  --> quiccrunch-core/src/crypto_accel.rs:78:5
+  --> quiccrunch-core/src/crypto_accel.rs:82:5
    |
-75 | pub struct BatchCryptoProcessor {
+79 | pub struct BatchCryptoProcessor {
    |            -------------------- field in this struct
 ...
-78 |     batch_buffer: Vec<u8>,
+82 |     batch_buffer: Vec<u8>,
    |     ^^^^^^^^^^^^
    |
    = note: `BatchCryptoProcessor` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: constant `READ_TIMEOUT` is never used
+   --> quiccrunch-core/src/stream.rs:242:15
+    |
+242 |         const READ_TIMEOUT: Duration = Duration::from_secs(30);
+    |               ^^^^^^^^^^^^
 
 warning: field `stream_id` is never read
     --> quiccrunch-core/src/rpc.rs:1159:5
@@ -505,164 +95,12 @@ warning: field `stream_id` is never read
 1159 |     stream_id: StreamId,
      |     ^^^^^^^^^
 
-warning: associated function `parse_stream_chunk` is never used
-    --> quiccrunch-core/src/rpc.rs:2191:8
-     |
-1913 | impl RpcServer {
-     | -------------- associated function in this implementation
-...
-2191 |     fn parse_stream_chunk(data: Bytes) -> RpcResult<(Bytes, bool)> {
-     |        ^^^^^^^^^^^^^^^^^^
-
 warning: field `connection_id` is never read
-   --> quiccrunch-core/src/lockfree.rs:335:5
+   --> quiccrunch-core/src/lockfree.rs:330:5
     |
-334 | pub struct StreamProcessor {
+329 | pub struct StreamProcessor {
     |            --------------- field in this struct
-335 |     connection_id: u64,
+330 |     connection_id: u64,
     |     ^^^^^^^^^^^^^
 
-warning: field `group_id` is never read
-  --> quiccrunch-core/src/io_uring_optimized.rs:23:5
-   |
-19 | struct BufferRing {
-   |        ---------- field in this struct
-...
-23 |     group_id: u16,
-   |     ^^^^^^^^
-
-warning: field `len` is never read
-  --> quiccrunch-core/src/io_uring_optimized.rs:30:5
-   |
-27 | struct RegisteredBuffer {
-   |        ---------------- field in this struct
-...
-30 |     len: usize,
-   |     ^^^
-
-warning: fields `tls_config`, `settings`, and `config` are never read
-  --> quiccrunch-core/src/io_uring_advanced.rs:37:5
-   |
-35 | pub struct IoUringTransport {
-   |            ---------------- fields in this struct
-36 |     inner: Arc<IoUringAdvancedTransport>,
-37 |     tls_config: crate::transport::TlsConfig,
-   |     ^^^^^^^^^^
-38 |     settings: crate::config::QuicTransportSettings,
-   |     ^^^^^^^^
-39 |     config: Config,
-   |     ^^^^^^
-   |
-   = note: `IoUringTransport` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
-
-warning: field `group_id` is never read
-   --> quiccrunch-core/src/io_uring_advanced.rs:323:5
-    |
-318 | struct AdvancedBufferPool {
-    |        ------------------ field in this struct
-...
-323 |     group_id: u16,
-    |     ^^^^^^^^
-    |
-    = note: `AdvancedBufferPool` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
-
-warning: fields `buffer_id` and `group_id` are never read
-   --> quiccrunch-core/src/io_uring_advanced.rs:341:5
-    |
-339 | struct RegisteredBuffer {
-    |        ---------------- fields in this struct
-340 |     data: Box<[u8]>,
-341 |     buffer_id: u16,
-    |     ^^^^^^^^^
-342 |     group_id: u16,
-    |     ^^^^^^^^
-    |
-    = note: `RegisteredBuffer` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
-
-warning: fields `send_batch` and `max_batch_size` are never read
-   --> quiccrunch-core/src/io_uring_advanced.rs:349:5
-    |
-348 | struct BatchProcessor {
-    |        -------------- fields in this struct
-349 |     send_batch: Vec<SendOperation>,
-    |     ^^^^^^^^^^
-...
-352 |     max_batch_size: usize,
-    |     ^^^^^^^^^^^^^^
-    |
-    = note: `BatchProcessor` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
-
-warning: fields `data`, `addr`, `buffer_id`, and `priority` are never read
-   --> quiccrunch-core/src/io_uring_advanced.rs:357:5
-    |
-356 | struct SendOperation {
-    |        ------------- fields in this struct
-357 |     data: Bytes,
-    |     ^^^^
-358 |     addr: SockAddr,
-    |     ^^^^
-359 |     buffer_id: Option<u16>,
-    |     ^^^^^^^^^
-360 |     priority: u8,
-    |     ^^^^^^^^
-    |
-    = note: `SendOperation` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
-
-warning: field `expected_size` is never read
-   --> quiccrunch-core/src/io_uring_advanced.rs:366:5
-    |
-364 | struct RecvOperation {
-    |        ------------- field in this struct
-365 |     buffer_id: u16,
-366 |     expected_size: usize,
-    |     ^^^^^^^^^^^^^
-    |
-    = note: `RecvOperation` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
-
-warning: fields `send_buffer` and `recv_buffer` are never read
-  --> quiccrunch-core/src/stream_optimized.rs:89:9
-   |
-87 |     Tquic { 
-   |     ----- fields in this variant
-88 |         handle: StreamHandle,
-89 |         send_buffer: Option<MessageBuffer>,
-   |         ^^^^^^^^^^^
-90 |         recv_buffer: Option<PooledBuffer>,
-   |         ^^^^^^^^^^^
-
-warning: variant `Optimized` is never constructed
-  --> quiccrunch-core/src/stream_optimized.rs:92:5
-   |
-78 | enum StreamInner {
-   |      ----------- variant in this enum
-...
-92 |     Optimized {
-   |     ^^^^^^^^^
-
-warning: creating a shared reference to mutable static
-  --> quiccrunch-core/src/cpu_optimizations.rs:67:33
-   |
-67 |         let features = unsafe { CPU_FEATURES.as_ref().unwrap().clone() };
-   |                                 ^^^^^^^^^^^^^^^^^^^^^ shared reference to mutable static
-   |
-   = note: for more information, see <https://doc.rust-lang.org/nightly/edition-guide/rust-2024/static-mut-references.html>
-   = note: shared references to mutable statics are dangerous; it's undefined behavior if the static is mutated or if a mutable reference is created for it while the shared reference lives
-   = note: `#[warn(static_mut_refs)]` on by default
-
-warning: `quiccrunch-core` (lib) generated 53 warnings (run `cargo fix --lib -p quiccrunch-core` to apply 11 suggestions)
-warning: function `main` is never used
-  --> quiccrunch-core/src/bin/../../examples/cert_utils.rs:55:4
-   |
-55 | fn main() {
-   |    ^^^^
-   |
-   = note: `#[warn(dead_code)]` on by default
-
-warning: `quiccrunch-core` (bin "benchmark") generated 1 warning
-    Finished `release` profile [optimized] target(s) in 5m 24s
-     Running `target/release/benchmark --backend tquic --concurrency 1 --requests 1000 --message-size 1024`
-error: unexpected argument '--backend' found
-
-Usage: benchmark [OPTIONS] <COMMAND>
-
-For more information, try '--help'.
+warning: `quiccrunch-core` (lib) generated 10 warnings (run `cargo fix --lib -p quiccrunch-core` to apply 3 suggestions)

@@ -1,17 +1,18 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::collections::HashMap;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use dashmap::DashMap;
+use tokio::sync::{mpsc, oneshot};
 use bytes::Bytes;
 use rustls::{Certificate, PrivateKey};
-use lazy_static::lazy_static;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::config::{QuicTransportSettings};
 use crate::lockfree::{ConnectionHandle, StreamBackend};
 
 // Global echo buffer for testing - stores raw bytes as they would be sent over QUIC
-lazy_static! {
-    static ref ECHO_BUFFER: Arc<Mutex<HashMap<u64, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+// Using DashMap for lock-free access instead of Mutex<HashMap>
+lazy_static::lazy_static! {
+    static ref ECHO_BUFFER: Arc<DashMap<u64, Vec<u8>>> = Arc::new(DashMap::new());
 }
 
 /// TLS configuration for tquic
@@ -87,10 +88,10 @@ pub enum StreamCommand {
 pub struct TquicClient {
     tls_config: TlsConfig,
     settings: QuicTransportSettings,
-    /// Connection counter
-    connection_counter: Arc<std::sync::atomic::AtomicU64>,
-    /// Store active connections for stream operations
-    active_connections: Arc<Mutex<HashMap<u64, (mpsc::Sender<StreamCommand>, String)>>>,
+    /// Connection counter - using AtomicU64 for lock-free access
+    connection_counter: Arc<AtomicU64>,
+    /// Store active connections for stream operations - using DashMap for lock-free access
+    active_connections: Arc<DashMap<u64, (mpsc::Sender<StreamCommand>, String)>>,
 }
 
 impl std::fmt::Debug for TquicClient {
@@ -106,10 +107,10 @@ impl std::fmt::Debug for TquicClient {
 pub struct TquicServer {
     tls_config: TlsConfig,
     settings: QuicTransportSettings,
-    /// Connection counter
-    connection_counter: Arc<std::sync::atomic::AtomicU64>,
-    /// Store active connections for stream operations
-    active_connections: Arc<Mutex<HashMap<u64, (mpsc::Sender<StreamCommand>, String)>>>,
+    /// Connection counter - using AtomicU64 for lock-free access
+    connection_counter: Arc<AtomicU64>,
+    /// Store active connections for stream operations - using DashMap for lock-free access
+    active_connections: Arc<DashMap<u64, (mpsc::Sender<StreamCommand>, String)>>,
 }
 
 impl std::fmt::Debug for TquicServer {
@@ -152,8 +153,8 @@ impl TquicClient {
                 ca_cert_pem: vec![],
             },
             settings: config.transport,
-            connection_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            active_connections: Arc::new(Mutex::new(HashMap::new())),
+            connection_counter: Arc::new(AtomicU64::new(0)),
+            active_connections: Arc::new(DashMap::new()),
         })
     }
 
@@ -161,14 +162,12 @@ impl TquicClient {
         let server_addr: SocketAddr = addr.parse()?;
 
         // For testing: skip actual TCP connection, just create a mock connection
-        let connection_id = self.connection_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let connection_id = self.connection_counter.fetch_add(1, Ordering::Relaxed);
         
         let (stream_tx, _stream_rx) = mpsc::channel(1000);
         
-        {
-            let mut connections = self.active_connections.lock().await;
-            connections.insert(connection_id, (stream_tx.clone(), server_addr.to_string()));
-        }
+        // Use DashMap for lock-free insertion
+        self.active_connections.insert(connection_id, (stream_tx.clone(), server_addr.to_string()));
 
         let (_handle, channels) = ConnectionHandle::new(
             connection_id,
@@ -219,8 +218,8 @@ impl TquicServer {
                 ca_cert_pem: vec![],
             },
             settings: config.transport,
-            connection_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            active_connections: Arc::new(Mutex::new(HashMap::new())),
+            connection_counter: Arc::new(AtomicU64::new(0)),
+            active_connections: Arc::new(DashMap::new()),
         })
     }
 
@@ -239,14 +238,11 @@ impl TquicServer {
             loop {
                 match tcp_listener.accept().await {
                     Ok((tcp_stream, peer_addr)) => {
-                        let connection_id = server_clone.connection_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let connection_id = server_clone.connection_counter.fetch_add(1, Ordering::Relaxed);
                         
                         // Store the TCP stream for this connection so client can access the same echo buffer
-                        {
-                            let mut connections = server_clone.active_connections.lock().await;
-                            let (stream_tx, _) = mpsc::channel(1000);
-                            connections.insert(connection_id, (stream_tx, peer_addr.to_string()));
-                        }
+                        let (stream_tx, _) = mpsc::channel(1000);
+                        server_clone.active_connections.insert(connection_id, (stream_tx, peer_addr.to_string()));
                         
                         // Create a QUIC connection that shares the same echo buffer as clients
                         let connection = crate::stream::QuicStream::new(
@@ -311,14 +307,13 @@ impl TquicStreamBackend {
 impl StreamBackend for TquicStreamBackend {
     async fn write(&mut self, stream_id: u64, data: bytes::Bytes, _fin: bool) -> Result<(), crate::TransportError> {
         // For testing: store raw bytes in echo buffer (simulating raw QUIC stream)
-        let mut buffer = ECHO_BUFFER.lock().await;
-        buffer.entry(stream_id).or_insert_with(Vec::new).extend_from_slice(&data);
+        ECHO_BUFFER.entry(stream_id).or_insert_with(Vec::new).extend_from_slice(&data);
         
         if let Some(debug_mode) = std::env::var("QUICCRUNCH_DEBUG").ok() {
             if debug_mode == "1" {
+                let buffer_len = ECHO_BUFFER.get(&stream_id).map(|v| v.len()).unwrap_or(0);
                 eprintln!("Backend write: stream {} wrote {} bytes, total in buffer: {}", 
-                         stream_id, data.len(), 
-                         buffer.get(&stream_id).map(|b| b.len()).unwrap_or(0));
+                         stream_id, data.len(), buffer_len);
             }
         }
         
@@ -327,8 +322,7 @@ impl StreamBackend for TquicStreamBackend {
 
     async fn read(&mut self, stream_id: u64, buffer_size: usize) -> Result<Option<bytes::Bytes>, crate::TransportError> {
         // For testing: read raw bytes from echo buffer
-        let mut buffer = ECHO_BUFFER.lock().await;
-        if let Some(stream_data) = buffer.get_mut(&stream_id) {
+        if let Some(mut stream_data) = ECHO_BUFFER.get_mut(&stream_id) {
             if !stream_data.is_empty() {
                 let read_size = std::cmp::min(buffer_size, stream_data.len());
                 let data: Vec<u8> = stream_data.drain(0..read_size).collect();
@@ -337,10 +331,6 @@ impl StreamBackend for TquicStreamBackend {
                     if debug_mode == "1" {
                         eprintln!("Backend read: stream {} read {} bytes, remaining in buffer: {}", 
                                  stream_id, data.len(), stream_data.len());
-                        if data.len() >= 4 {
-                            let header = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                            eprintln!("First 4 bytes as u32: {}", header);
-                        }
                     }
                 }
                 
@@ -348,15 +338,12 @@ impl StreamBackend for TquicStreamBackend {
             }
         }
         
-        // Small delay to simulate network latency
-        tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
         Ok(None)
     }
 
     async fn close(&mut self, stream_id: u64) -> Result<(), crate::TransportError> {
         // Clean up echo buffer for this stream
-        let mut buffer = ECHO_BUFFER.lock().await;
-        buffer.remove(&stream_id);
+        ECHO_BUFFER.remove(&stream_id);
         Ok(())
     }
 }

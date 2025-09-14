@@ -28,82 +28,58 @@ enum StreamInner {
     Quinn { send: QuinnSend, recv: QuinnRecv },
     #[cfg(feature = "lock-free-channels")]
     LockFree { handle: crate::lockfree::StreamHandle },
+    // tQUIC implementation - simplified for now
+    TQuic { stream_id: u64, connection_id: u64 },
 }
 
 impl QuicStream {
     /// Create a new QuicStream with connection and stream IDs (generic constructor)
-    pub fn new(_connection_id: u64, stream_id: u64, max_message_size: usize) -> Self {
-        // Use the tQUIC backend as default
-        #[cfg(feature = "backend-tquic")]
+    pub fn new(connection_id: u64, stream_id: u64, max_message_size: usize) -> Self {
+        // Use the tQUIC backend as default when no lock-free channels
+        #[cfg(all(feature = "backend-tquic", not(feature = "lock-free-channels")))]
         {
-            Self::new_simple_tquic(stream_id, max_message_size)
+            Self::new_simple_tquic(connection_id, stream_id, max_message_size)
         }
-        #[cfg(all(not(feature = "backend-tquic"), feature = "lock-free-channels"))]
+        #[cfg(feature = "lock-free-channels")]
         {
-            // Fallback to lock-free implementation
+            // Use lock-free implementation when available
             use crossbeam_channel::bounded;
-            use tokio::spawn;
-            use std::sync::Arc;
-            use tokio::sync::Mutex;
-            use bytes::Bytes;
-
+            
             let (write_tx, write_rx) = bounded(1000);
             let (read_tx, read_rx) = bounded(1000);
             let (close_tx, close_rx) = bounded(100);
             
-            let stream_buffer: Arc<Mutex<Vec<Bytes>>> = Arc::new(Mutex::new(Vec::new()));
-            let buffer_clone = stream_buffer.clone();
-            
-            spawn(async move {
-                use crate::lockfree::StreamCommand;
-                
-                loop {
-                    if let Ok(cmd) = write_rx.try_recv() {
-                        if let StreamCommand::Write { stream_id: _, data, fin: _, response } = cmd {
-                            let mut buffer = buffer_clone.lock().await;
-                            buffer.push(data);
-                            let _ = response.send(Ok(()));
-                        }
-                    }
-                    
-                    if let Ok(cmd) = read_rx.try_recv() {
-                        if let StreamCommand::Read { stream_id: _, buffer_size: _, response } = cmd {
-                            let mut buffer = buffer_clone.lock().await;
-                            let data = buffer.pop();
-                            let _ = response.send(Ok(data));
-                        }
-                    }
-                    
-                    if let Ok(cmd) = close_rx.try_recv() {
-                        if let StreamCommand::Close { stream_id: _, response } = cmd {
-                            let _ = response.send(Ok(()));
-                            break;
-                        }
-                    }
-                    
-                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-                }
-            });
-            
-            let handle = crate::lockfree::StreamHandle {
-                connection_id: _connection_id,
+            let handle = crate::lockfree::StreamHandle::new(
                 stream_id,
+                connection_id,
                 write_tx,
                 read_tx,
                 close_tx,
-            };
+            );
             
             Self::new_lockfree(handle, max_message_size)
         }
         #[cfg(all(not(feature = "backend-tquic"), not(feature = "lock-free-channels")))]
         {
-            // Minimal fallback implementation
-            Self { 
-                inner: StreamInner::LockFree { 
-                    handle: crate::lockfree::StreamHandle::mock(_connection_id, stream_id) 
-                }, 
-                max_message_size 
-            }
+            // Fallback to tQUIC implementation
+            Self::new_simple_tquic(connection_id, stream_id, max_message_size)
+        }
+    }
+
+    /// Create a new QuicStream (Lock-free)
+    #[cfg(feature = "lock-free-channels")]
+    pub fn new_lockfree(handle: crate::lockfree::StreamHandle, max_message_size: usize) -> Self {
+        Self { inner: StreamInner::LockFree { handle }, max_message_size }
+    }
+    
+    /// Create a simple tQUIC stream
+    pub fn new_simple_tquic(connection_id: u64, stream_id: u64, max_message_size: usize) -> Self {
+        Self { 
+            inner: StreamInner::TQuic { 
+                stream_id, 
+                connection_id 
+            }, 
+            max_message_size 
         }
     }
 
@@ -113,19 +89,25 @@ impl QuicStream {
             #[cfg(feature = "backend-quinn")]
             StreamInner::Quinn { .. } => {
                 // For Quinn, we'd need access to the connection to open new streams
-                // This is a simplified implementation that creates a new stream with a different ID
                 let new_stream_id = rand::random::<u64>();
-                Ok(Self::new(0, new_stream_id, self.max_message_size))
+                Ok(QuicStream::new_simple_tquic(0, new_stream_id, self.max_message_size))
             }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
-                // Create a new stream with a different stream ID for bidirectional communication
+                // Open a new stream through the connection handle
                 let new_stream_id = rand::random::<u64>();
-                Ok(Self::new(handle.connection_id, new_stream_id, self.max_message_size))
+                let new_handle = crate::lockfree::StreamHandle::new(
+                    new_stream_id,
+                    handle.connection_id,
+                    handle.write_tx.clone(),
+                    handle.read_tx.clone(),
+                    handle.close_tx.clone(),
+                );
+                Ok(QuicStream::new_lockfree(new_handle, self.max_message_size))
             }
-            #[allow(unreachable_patterns)]
-            _ => {
-                Err(crate::TransportError::StreamError("Unsupported stream backend for open_bi".into()))
+            StreamInner::TQuic { stream_id: _, connection_id } => {
+                let new_stream_id = rand::random::<u64>();
+                Ok(QuicStream::new_simple_tquic(*connection_id, new_stream_id, self.max_message_size))
             }
         }
     }
@@ -135,128 +117,25 @@ impl QuicStream {
             #[cfg(feature = "backend-quinn")]
             StreamInner::Quinn { .. } => {
                 // For Quinn, we'd need access to the connection to accept new streams
-                // This is a simplified implementation that creates a new stream with a different ID
                 let new_stream_id = rand::random::<u64>();
-                Ok(Self::new(0, new_stream_id, self.max_message_size))
+                Ok(QuicStream::new_simple_tquic(0, new_stream_id, self.max_message_size))
             }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
-                // Create a new stream with a different stream ID for bidirectional communication
+                // Accept a new stream through the connection handle  
                 let new_stream_id = rand::random::<u64>();
-                Ok(Self::new(handle.connection_id, new_stream_id, self.max_message_size))
+                let new_handle = crate::lockfree::StreamHandle::new(
+                    new_stream_id,
+                    handle.connection_id,
+                    handle.write_tx.clone(),
+                    handle.read_tx.clone(),
+                    handle.close_tx.clone(),
+                );
+                Ok(QuicStream::new_lockfree(new_handle, self.max_message_size))
             }
-            #[allow(unreachable_patterns)]
-            _ => {
-                Err(crate::TransportError::StreamError("Unsupported stream backend for accept_bi".into()))
-            }
-        }
-    }
-    
-    /// Create a new QuicStream (Lock-free)
-    #[cfg(feature = "lock-free-channels")]
-    pub fn new_lockfree(handle: crate::lockfree::StreamHandle, max_message_size: usize) -> Self {
-        Self { inner: StreamInner::LockFree { handle }, max_message_size }
-    }
-    
-    /// Create a simple tQUIC stream (fallback implementation)
-    #[cfg(feature = "backend-tquic")]
-    pub fn new_simple_tquic(stream_id: u64, max_message_size: usize) -> Self {
-        // Use lock-free channels for tQUIC backend until real tQUIC integration is complete
-        #[cfg(feature = "lock-free-channels")]
-        {
-            // Create a mock stream handle for compatibility
-            use crossbeam_channel::bounded;
-            use tokio::spawn;
-            use std::sync::Arc;
-            use tokio::sync::Mutex;
-            use bytes::Bytes;
-
-            let (write_tx, write_rx) = bounded(1000);
-            let (read_tx, read_rx) = bounded(1000);
-            let (close_tx, close_rx) = bounded(100);
-            
-            // Create a mock data buffer for this stream - simple echo behavior
-            let stream_buffer: Arc<Mutex<Vec<Bytes>>> = Arc::new(Mutex::new(Vec::new()));
-            let buffer_clone = stream_buffer.clone();
-            
-            // Start a background task to handle stream commands
-            spawn(async move {
-                use crate::lockfree::StreamCommand;
-                use std::time::Duration;
-                
-                loop {
-                    // Process write commands (non-blocking)
-                    if let Ok(cmd) = write_rx.try_recv() {
-                        if let StreamCommand::Write { stream_id: _, data, fin: _, response } = cmd {
-                            // For mock: just acknowledge the write immediately and echo data back
-                            let mut buffer = buffer_clone.lock().await;
-                            buffer.push(data);
-                            let _ = response.send(Ok(()));
-                        }
-                    }
-                    
-                    // Process read commands (non-blocking)
-                    if let Ok(cmd) = read_rx.try_recv() {
-                        if let StreamCommand::Read { stream_id: _, buffer_size: _, response } = cmd {
-                            // Return echoed data from buffer
-                            let mut buffer = buffer_clone.lock().await;
-                            let data = buffer.pop();
-                            let _ = response.send(Ok(data));
-                        }
-                    }
-                    
-                    // Process close commands (non-blocking)
-                    if let Ok(cmd) = close_rx.try_recv() {
-                        if let StreamCommand::Close { stream_id: _, response } = cmd {
-                            let _ = response.send(Ok(()));
-                            break; // Exit the task when stream is closed
-                        }
-                    }
-                    
-                    // Small delay to prevent busy waiting
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                }
-            });
-            
-            let handle = crate::lockfree::StreamHandle::new(
-                stream_id,
-                0, // connection_id (will be set properly when real tQUIC is integrated)
-                write_tx,
-                read_tx, 
-                close_tx,
-            );
-            
-            Self { 
-                inner: StreamInner::LockFree { handle }, 
-                max_message_size 
-            }
-        }
-        
-        #[cfg(not(feature = "lock-free-channels"))]
-        {
-            // Fallback to mock implementation without lock-free channels
-            // This is a temporary solution until real tQUIC integration
-            tracing::warn!("tQUIC stream created without lock-free channels - performance may be degraded");
-            
-            // Create a minimal mock stream that at least doesn't panic
-            // In practice this should be replaced with real tQUIC stream handles
-            use crossbeam_channel::bounded;
-            
-            let (write_tx, _write_rx) = bounded(1000);
-            let (read_tx, _read_rx) = bounded(1000);
-            let (close_tx, _close_rx) = bounded(100);
-            
-            let handle = crate::lockfree::StreamHandle::new(
-                stream_id,
-                0, // connection_id
-                write_tx,
-                read_tx,
-                close_tx,
-            );
-            
-            Self { 
-                inner: StreamInner::LockFree { handle }, 
-                max_message_size 
+            StreamInner::TQuic { stream_id: _, connection_id } => {
+                let new_stream_id = rand::random::<u64>();
+                Ok(QuicStream::new_simple_tquic(*connection_id, new_stream_id, self.max_message_size))
             }
         }
     }
@@ -284,7 +163,7 @@ impl QuicStream {
             StreamInner::Quinn { send, .. } => {
                 // Quinn send implements AsyncWrite; no local import needed
                 send.write_all(&header).await.map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                const CHUNK_SIZE: usize = 262_144; // 256KB chunks for optimal throughput (increased from 32KB)
+                const CHUNK_SIZE: usize = 262_144; // 256KB chunks for optimal throughput
                 let mut remaining = data.as_ref();
                 while !remaining.is_empty() {
                     let chunk_size = remaining.len().min(CHUNK_SIZE);
@@ -301,29 +180,28 @@ impl QuicStream {
             }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
-                // Use zero-copy operations when available
-                #[cfg(feature = "zero-copy")]
-                {
-                    // Zero-copy: Combine header and data into single write to avoid fragmentation
-                    let mut combined = Vec::with_capacity(4 + data.len());
-                    combined.extend_from_slice(&header);
-                    combined.extend_from_slice(&data);
-                    
-                    handle.write(bytes::Bytes::from(combined), false).await?;
-                }
-                #[cfg(not(feature = "zero-copy"))]
-                {
-                    // Fallback: Combine header and data into single write to avoid fragmentation
-                    let mut combined = Vec::with_capacity(4 + data.len());
-                    combined.extend_from_slice(&header);
-                    combined.extend_from_slice(&data);
-                    
-                    handle.write(bytes::Bytes::from(combined), false).await?;
-                }
+                // Combine header and data into single write to avoid fragmentation
+                let mut combined = Vec::with_capacity(4 + data.len());
+                combined.extend_from_slice(&header);
+                combined.extend_from_slice(&data);
+                
+                handle.write(bytes::Bytes::from(combined), false).await?;
             }
-            #[allow(unreachable_patterns)]
-            _ => {
-                return Err(crate::TransportError::StreamError("Unsupported stream backend".into()));
+            StreamInner::TQuic { stream_id, .. } => {
+                // tQUIC implementation: store in global buffer for echo
+                use dashmap::DashMap;
+                use std::sync::Arc;
+                
+                lazy_static::lazy_static! {
+                    static ref TQUIC_BUFFER: Arc<DashMap<u64, Vec<u8>>> = Arc::new(DashMap::new());
+                }
+                
+                // Combine header and data for storage
+                let mut combined = Vec::with_capacity(4 + data.len());
+                combined.extend_from_slice(&header);
+                combined.extend_from_slice(&data);
+                
+                TQUIC_BUFFER.insert(*stream_id, combined);
             }
         }
 
@@ -346,8 +224,8 @@ impl QuicStream {
                 handle.close().await?;
                 Ok(())
             }
-            #[allow(unreachable_patterns)]
-            _ => {
+            StreamInner::TQuic { .. } => {
+                // tQUIC implementation: nothing to close for this simplified version
                 Ok(())
             }
         }
@@ -384,40 +262,38 @@ impl QuicStream {
             }
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
-                // Use zero-copy operations when available
-                #[cfg(feature = "zero-copy")]
-                {
-                    // Zero-copy: Direct buffer access without intermediate copies
-                    let header_result = time::timeout(READ_TIMEOUT, handle.read(4)).await;
-                    match header_result {
-                        Ok(Ok(Some(data))) if data.len() >= 4 => {
-                            // Zero-copy: Direct slice access
-                            header.copy_from_slice(&data[..4]);
-                        },
-                        Ok(Ok(Some(_))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
-                        Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed".into())),
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
-                    }
-                }
-                #[cfg(not(feature = "zero-copy"))]
-                {
-                    // Fallback: Use lock-free read for optimal performance
-                    let header_result = time::timeout(READ_TIMEOUT, handle.read(4)).await;
-                    match header_result {
-                        Ok(Ok(Some(data))) if data.len() >= 4 => {
-                            header.copy_from_slice(&data[..4]);
-                        },
-                        Ok(Ok(Some(_))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
-                        Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed".into())),
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
-                    }
+                // Use lock-free read for optimal performance
+                let header_result = time::timeout(READ_TIMEOUT, handle.read(4)).await;
+                match header_result {
+                    Ok(Ok(Some(data))) if data.len() >= 4 => {
+                        header.copy_from_slice(&data[..4]);
+                    },
+                    Ok(Ok(Some(_))) => return Err(crate::TransportError::StreamError("incomplete header read".into())),
+                    Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed".into())),
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Err(crate::TransportError::StreamError("Header read timeout".into())),
                 }
             }
-            #[allow(unreachable_patterns)]
-            _ => {
-                return Err(crate::TransportError::StreamError("Unsupported stream backend".into()));
+            StreamInner::TQuic { stream_id, .. } => {
+                // tQUIC implementation: Read from the global buffer
+                use dashmap::DashMap;
+                use std::sync::Arc;
+                
+                lazy_static::lazy_static! {
+                    static ref TQUIC_BUFFER: Arc<DashMap<u64, Vec<u8>>> = Arc::new(DashMap::new());
+                }
+                
+                // Try to read header from buffer
+                if let Some(mut buffer_entry) = TQUIC_BUFFER.get_mut(stream_id) {
+                    if buffer_entry.len() >= 4 {
+                        header.copy_from_slice(&buffer_entry[..4]);
+                        buffer_entry.drain(0..4); // Remove header from buffer
+                    } else {
+                        return Err(crate::TransportError::StreamError("No data available in tQUIC stream".into()));
+                    }
+                } else {
+                    return Err(crate::TransportError::StreamError("tQUIC stream not found".into()));
+                }
             }
         }
 
@@ -475,46 +351,48 @@ impl QuicStream {
                 }
                 #[cfg(feature = "lock-free-channels")]
                 StreamInner::LockFree { handle } => {
-                    // Use zero-copy operations when available
-                    #[cfg(feature = "zero-copy")]
-                    {
-                        // Zero-copy: Direct buffer access for chunked reading
-                        let read_res = time::timeout(READ_TIMEOUT, handle.read(chunk_size)).await;
-                        match read_res {
-                            Ok(Ok(Some(data))) => {
-                                if data.len() != chunk_size {
-                                    return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
-                                }
-                                // Zero-copy: Direct slice access without intermediate buffer
-                                buffer.extend_from_slice(&data);
-                                bytes_read += chunk_size;
-                            },
-                            Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed during read".into())),
-                            Ok(Err(e)) => return Err(e),
-                            Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
-                        }
-                    }
-                    #[cfg(not(feature = "zero-copy"))]
-                    {
-                        // Fallback: Use lock-free read for optimal chunk reading performance
-                        let read_res = time::timeout(READ_TIMEOUT, handle.read(chunk_size)).await;
-                        match read_res {
-                            Ok(Ok(Some(data))) => {
-                                if data.len() != chunk_size {
-                                    return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
-                                }
-                                buffer.extend_from_slice(&data);
-                                bytes_read += chunk_size;
-                            },
-                            Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed during read".into())),
-                            Ok(Err(e)) => return Err(e),
-                            Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
-                        }
+                    // Use lock-free read for optimal chunk reading performance
+                    let read_res = time::timeout(READ_TIMEOUT, handle.read(chunk_size)).await;
+                    match read_res {
+                        Ok(Ok(Some(data))) => {
+                            if data.len() != chunk_size {
+                                return Err(crate::TransportError::StreamError(format!("incomplete chunk read: got {} expected {}", data.len(), chunk_size)));
+                            }
+                            buffer.extend_from_slice(&data);
+                            bytes_read += chunk_size;
+                        },
+                        Ok(Ok(None)) => return Err(crate::TransportError::StreamError("lock-free stream closed during read".into())),
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
                     }
                 }
-                #[allow(unreachable_patterns)]
-                _ => {
-                    return Err(crate::TransportError::StreamError("Unsupported stream backend".into()));
+                StreamInner::TQuic { stream_id, .. } => {
+                    // tQUIC implementation: Read chunk from buffer
+                    use dashmap::DashMap;
+                    use std::sync::Arc;
+                    
+                    lazy_static::lazy_static! {
+                        static ref TQUIC_BUFFER: Arc<DashMap<u64, Vec<u8>>> = Arc::new(DashMap::new());
+                    }
+                    
+                    // Try to read chunk from buffer
+                    if let Some(mut buffer_entry) = TQUIC_BUFFER.get_mut(stream_id) {
+                        if buffer_entry.len() >= chunk_size {
+                            let chunk: Vec<u8> = buffer_entry.drain(0..chunk_size).collect();
+                            buffer.extend_from_slice(&chunk);
+                            bytes_read += chunk_size;
+                        } else {
+                            // Read remaining data if less than chunk_size
+                            let remaining_data: Vec<u8> = buffer_entry.drain(..).collect();
+                            if remaining_data.is_empty() {
+                                return Err(crate::TransportError::StreamError("No more data in tQUIC stream".into()));
+                            }
+                            buffer.extend_from_slice(&remaining_data);
+                            bytes_read += remaining_data.len();
+                        }
+                    } else {
+                        return Err(crate::TransportError::StreamError("tQUIC stream buffer not found".into()));
+                    }
                 }
             }
         }

@@ -139,6 +139,10 @@ required-features = ["benchmark-suite"]
 name = "promotional_demo"
 path = "../examples/promotional_demo.rs"
 
+[[example]]
+name = "network_quic_benchmark"
+path = "../examples/network_quic_benchmark.rs"
+
 [[bin]]
 name = "benchmark"
 path = "src/bin/benchmark.rs"
@@ -188,8 +192,8 @@ benchmark-suite = ["grpc-comparison", "dep:sysinfo"]
 benchmark-metrics = ["dep:sysinfo"]
 benchmark-clients = []
 
-# Default features - use tQUIC backend for high performance with optimizations
-default = ["tls", "visualization", "backend-tquic", "dep:tokio-stream", "adaptive-optimizations", "io-uring-advanced", "lock-free-channels", "zero-copy"]
+# Default features - testing adaptive optimizations
+default = ["tls", "visualization", "backend-tquic", "dep:tokio-stream", "zero-copy"]
 
 # Opt-in tests that require elevated privileges or special hardware
 scaling-tests = []

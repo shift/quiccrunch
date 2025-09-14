@@ -180,9 +180,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Unlike marketing demos, this actually measures performance.");
     println!();
 
-    // Configuration
-    let message_size = 1024; // 1KB messages
+    // Configuration - support command line arguments
+    let args: Vec<String> = std::env::args().collect();
+    let message_size = if args.len() > 1 {
+        args[1].parse::<usize>().unwrap_or(1024)
+    } else {
+        1024 // Default 1KB messages
+    };
     let test_duration = Duration::from_secs(5); // 5 second test
+
+    println!("📏 Message size: {} bytes ({:.1} KB)", message_size, message_size as f64 / 1024.0);
 
     // Run QuicCrunch benchmark
     println!("🚀 Running QuicCrunch Benchmark");

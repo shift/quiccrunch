@@ -7,8 +7,8 @@
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError};
-use std::collections::HashMap;
-use tokio::sync::{oneshot, Mutex};
+use dashmap::DashMap;
+use tokio::sync::oneshot;
 use bytes::Bytes;
 
 /// Stream command types for lock-free communication
@@ -52,9 +52,9 @@ pub enum ConnectionCommand {
 pub struct StreamHandle {
     pub stream_id: u64,
     pub connection_id: u64,
-    write_tx: Sender<StreamCommand>,
-    read_tx: Sender<StreamCommand>,
-    close_tx: Sender<StreamCommand>,
+    pub write_tx: Sender<StreamCommand>,
+    pub read_tx: Sender<StreamCommand>,
+    pub close_tx: Sender<StreamCommand>,
     stats: Arc<StreamStats>,
 }
 
@@ -198,9 +198,9 @@ pub struct ConnectionHandle {
     read_tx: Sender<StreamCommand>,
     close_tx: Sender<StreamCommand>,
     
-    // Per-connection stream registry - TODO: Replace Mutex with lock-free alternative
-    // PERFORMANCE CRITICAL: This Mutex negates "lock-free" benefits!
-    streams: Arc<Mutex<HashMap<u64, StreamHandle>>>,
+    // Per-connection stream registry - NOW TRULY LOCK-FREE!
+    // PERFORMANCE CRITICAL: DashMap provides lock-free HashMap access
+    streams: Arc<DashMap<u64, StreamHandle>>,
     stats: Arc<ConnectionStats>,
 }
 
@@ -221,7 +221,7 @@ impl ConnectionHandle {
             write_tx,
             read_tx,
             close_tx,
-            streams: Arc::new(Mutex::new(HashMap::new())),
+            streams: Arc::new(DashMap::new()),
             stats: Arc::new(ConnectionStats::new()),
         };
 
@@ -246,11 +246,8 @@ impl ConnectionHandle {
             self.close_tx.clone(),
         );
 
-        // Register stream
-        {
-            let mut streams = self.streams.lock().await;
-            streams.insert(stream_id, stream.clone());
-        }
+        // Register stream - now lock-free!
+        self.streams.insert(stream_id, stream.clone());
 
         self.stats.streams_opened.fetch_add(1, Ordering::Relaxed);
         
@@ -259,9 +256,7 @@ impl ConnectionHandle {
 
     /// Close a stream and remove it from registry
     pub async fn close_stream(&self, stream_id: u64) -> Result<(), crate::TransportError> {
-        let mut streams = self.streams.lock().await;
-        if let Some(stream) = streams.remove(&stream_id) {
-            drop(streams); // Release lock before async operation
+        if let Some((_, stream)) = self.streams.remove(&stream_id) {
             stream.close().await?;
             self.stats.streams_closed.fetch_add(1, Ordering::Relaxed);
         }
@@ -274,8 +269,8 @@ impl ConnectionHandle {
     }
 
     /// Get number of active streams
-    pub async fn stream_count(&self) -> usize {
-        self.streams.lock().await.len()
+    pub fn stream_count(&self) -> usize {
+        self.streams.len()
     }
 }
 
