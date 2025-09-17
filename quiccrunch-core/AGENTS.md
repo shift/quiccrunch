@@ -171,6 +171,143 @@ When resuming work:
 - Environment setup
 - Tool execution
 
+## General Agent Delegation Protocol
+
+The @general agent acts as a supervisor/orchestrator that ensures specialized agents complete work successfully rather than doing work itself. This section defines mandatory requirements for delegation monitoring and error handling.
+
+### Pre-Delegation Checks
+
+**ALWAYS DELEGATE FIRST**: Before attempting any significant work:
+
+1. **Agent Availability Check**: Query available specialized agents using appropriate tools
+2. **Task-Agent Matching**: Identify which agents match the specific task requirements:
+   - Code analysis/refactoring → Code specialist agents
+   - Performance optimization → Performance specialist agents  
+   - Testing implementation → Testing specialist agents
+   - Architecture design → Architecture specialist agents
+   - Documentation → Documentation specialist agents
+3. **Capability Assessment**: Verify the chosen agent has the required capabilities for the task
+4. **Context Preparation**: Prepare complete context including:
+   - Current task status from `tasks/*.md` files
+   - Relevant codebase information
+   - Previous attempt results (if any)
+   - Specific requirements and constraints
+
+### Delegation Execution
+
+**MANDATORY MONITORING**: During agent execution:
+
+1. **Error Detection**: Monitor for:
+   - Agent failure or timeout messages
+   - Context limit exceeded errors
+   - Incomplete responses or partial results
+   - Tool execution failures
+   - Compilation or test failures
+
+2. **Context Tracking**: Maintain detailed records of:
+   - Which agent was delegated to
+   - What specific task was assigned
+   - Full context provided to the agent
+   - Agent response and completion status
+   - Any errors or issues encountered
+
+3. **Progress Monitoring**: Verify agent is making meaningful progress:
+   - Not stuck in loops or repeated attempts
+   - Actually modifying files when required
+   - Following project conventions and requirements
+   - Addressing all aspects of the delegated task
+
+### Post-Delegation Validation
+
+**COMPLETION VERIFICATION**: After agent delegation:
+
+1. **Result Quality Check**: Verify the agent actually completed the work:
+   - Files were modified as required
+   - Code compiles successfully (run compilation checks)
+   - Tests pass (run relevant test suites)
+   - Requirements from task documentation are met
+
+2. **Integration Testing**: Ensure delegated work integrates properly:
+   - No breaking changes to existing functionality
+   - Follows project coding standards and conventions
+   - Maintains compatibility with existing APIs
+   - Passes linting and formatting checks
+
+3. **Documentation Updates**: Update task files with delegation results:
+   - Mark completed portions as done
+   - Document any changes in approach or requirements
+   - Note any issues discovered during implementation
+   - Update dependencies if other tasks are affected
+
+### Error Escalation Procedures
+
+**SYSTEMATIC ERROR HANDLING**: When delegation fails:
+
+1. **First Failure - Retry with Context**:
+   - Include full error details from previous attempt
+   - Provide additional context or clarification
+   - Try the same specialist agent once more
+   - Set shorter timeout/context limits if appropriate
+
+2. **Second Failure - Alternative Agent**:
+   - Switch to a different specialist agent with similar capabilities
+   - Provide complete context from both previous attempts
+   - Include lessons learned and specific error patterns
+   - Request explicit confirmation of task understanding
+
+3. **Third Failure - Model Escalation**:
+   - Switch to a more capable model for the specialist agent
+   - Provide comprehensive failure analysis
+   - Break down the task into smaller, more specific subtasks
+   - Consider requesting human intervention if critical path
+
+4. **Persistent Failures - Task Decomposition**:
+   - Break the original task into smaller, independent subtasks
+   - Delegate each subtask to appropriate specialists
+   - Sequence the subtasks to build up to the full solution
+   - Document the decomposition approach for future reference
+
+### Documentation Requirements
+
+**MANDATORY UPDATES**: For every delegation:
+
+1. **Task File Updates**: Update relevant `tasks/*.md` files with:
+   - Which agents were used for what portions
+   - Success/failure status of each delegation
+   - Key insights or challenges discovered
+   - Changes to implementation approach or requirements
+
+2. **Delegation History**: Maintain a record including:
+   - Timestamp and agent used
+   - Task assigned and context provided
+   - Result status (success/failure/partial)
+   - Error details if applicable
+   - Resolution approach if errors occurred
+
+3. **Project Status**: Update project-wide status:
+   - Dependencies between tasks if changed
+   - Overall project timeline if affected
+   - Known issues or blockers discovered
+   - Recommendations for future work
+
+### Emergency Procedures
+
+**CRITICAL FAILURES**: If all delegation attempts fail:
+
+1. **Immediate Actions**:
+   - Commit any working code to prevent loss
+   - Document the exact failure sequence and errors
+   - Mark the task as "blocked" with detailed explanation
+   - Identify if this blocks other dependent tasks
+
+2. **Escalation**:
+   - Report to user with complete failure analysis
+   - Recommend specific resources or expertise needed
+   - Suggest alternative approaches or task decomposition
+   - Provide clear next steps for resolution
+
+This protocol ensures the @general agent effectively coordinates specialist agents while maintaining project momentum and code quality.
+
 ### Development Environment Rules
 
 #### NixOS/Flake Requirements
