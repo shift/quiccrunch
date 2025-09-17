@@ -35,6 +35,7 @@ impl PacketSendHandler for AsyncQuicSocket {
         // But tQUIC's PacketSendHandler is sync, so we keep this for compatibility
         let socket = self.socket.clone();
         let pkts = pkts.to_vec();
+        let pkt_count = pkts.len(); // Clone the length before moving pkts
 
         // Spawn a blocking task for sends
         tokio::task::spawn_blocking(move || {
@@ -52,7 +53,7 @@ impl PacketSendHandler for AsyncQuicSocket {
         });
 
         // Return immediately - actual send happens asynchronously
-        Ok(pkts.len())
+        Ok(pkt_count)
     }
 }
 

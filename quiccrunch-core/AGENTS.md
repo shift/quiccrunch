@@ -308,6 +308,187 @@ The @general agent acts as a supervisor/orchestrator that ensures specialized ag
 
 This protocol ensures the @general agent effectively coordinates specialist agents while maintaining project momentum and code quality.
 
+## Context Research and Implementation Protocol
+
+This section establishes the separation of concerns between context research and implementation phases to maximize code quality and agent efficiency.
+
+### Context Researcher Agent
+
+**PRIMARY ROLE**: The Context Researcher Agent is responsible for gathering comprehensive implementation details before any code implementation begins. This agent serves as the foundation for all subsequent implementation work.
+
+**Core Responsibilities**:
+
+1. **Comprehensive Code Analysis**:
+   - Examine all relevant source files and their dependencies
+   - Analyze existing patterns, conventions, and architectural decisions
+   - Map out integration points and API surface areas
+   - Document current implementation approaches and styles
+
+2. **Technical Specification Preparation**:
+   - Research applicable APIs, libraries, and framework documentation
+   - Identify specific interfaces, types, and method signatures required
+   - Document error handling patterns and edge cases
+   - Prepare detailed technical requirements with concrete examples
+
+3. **Context Completeness Verification**:
+   - Ensure 95% of implementation context is gathered upfront
+   - Verify all dependencies, imports, and integration points are documented
+   - Confirm understanding of business logic and requirements
+   - Validate that implementation agents won't need to perform research
+
+4. **Implementation Blueprint Creation**:
+   - Provide specific file modifications with exact locations
+   - Include precise type signatures and interface requirements
+   - Document testing approaches and validation criteria
+   - Prepare comprehensive context packages for implementation agents
+
+**Context Package Requirements**:
+- Complete technical specifications with API details
+- Relevant code snippets and integration examples
+- Clear acceptance criteria and validation methods
+- Specific file paths and modification points
+- Error handling requirements and edge cases
+- Testing strategy and validation approach
+
+### Mandatory Git Workflow
+
+**SACRED REPOSITORY INTEGRITY**: All agents must follow strict git-based experimentation to protect repository state.
+
+#### Pre-Experimentation Requirements
+
+**ALWAYS COMMIT WORKING STATE FIRST**:
+```bash
+# Before ANY code changes or experiments
+git add -A
+git commit -m "Working state before [specific experiment/change description]"
+```
+
+**Verification Steps**:
+1. Confirm current code compiles and tests pass
+2. Verify no uncommitted changes exist
+3. Create descriptive commit message indicating the upcoming experiment
+4. Push to backup branch if working on critical features
+
+#### Experimentation Safety Protocol
+
+**SYSTEMATIC APPROACH**: Every code change follows this pattern:
+
+1. **Safe Experimentation**: 
+   - Make experimental changes with confidence
+   - Try multiple approaches if needed
+   - Iterate rapidly on solutions
+   - Document findings during experimentation
+
+2. **Immediate Validation**:
+   - Test compilation after each significant change
+   - Run relevant test suites continuously
+   - Validate functionality against requirements
+   - Check for integration issues
+
+3. **Decision Point Protocol**:
+   - **SUCCESS**: Commit with descriptive message explaining the solution
+   - **FAILURE**: Immediate rollback using one of these methods:
+     ```bash
+     # Rollback to previous commit (if changes committed)
+     git reset --hard HEAD~1
+     
+     # Discard all working changes (if uncommitted)  
+     git checkout -- .
+     
+     # Rollback specific files
+     git checkout HEAD -- path/to/file.rs
+     ```
+
+#### Code Quality Mandates
+
+**ELIMINATE PLACEHOLDER PATTERNS**: All placeholder naming patterns are forbidden:
+
+❌ **Prohibited Patterns**:
+- `new_<anything>` (new_client, new_stream, new_worker)
+- `testing_<anything>` (testing_handler, testing_endpoint)
+- `temp_<anything>` (temp_connection, temp_buffer)
+- `old_<anything>` (old_implementation, old_method)
+- `_backup`, `_v2`, `_copy`, `_test` suffixes
+- Generic names like `thing`, `stuff`, `data`, `handler`
+
+✅ **Required Approach**:
+- Use descriptive, domain-specific names from the start
+- Follow existing project naming conventions
+- Choose names that clearly indicate purpose and scope
+- Examples: `tquic_worker_pool`, `connection_manager`, `stream_multiplexer`
+
+**NO BROKEN CODE COMMITS**: 
+- Never commit code that doesn't compile
+- Never commit code with failing tests
+- Never commit code with unresolved TODO items in production paths
+- Always verify full compilation before committing
+
+**REPOSITORY STATE PROTECTION**:
+- Repository integrity is sacred - any agent damaging repo state is failing
+- Always prefer rollback over attempting to fix broken experiments
+- Use git branches for risky experiments
+- Maintain clean git history with meaningful commit messages
+
+### Implementation Agent Protocol
+
+**CONTEXT-RICH IMPLEMENTATION**: Implementation agents receive comprehensive context and focus purely on coding excellence.
+
+#### Pre-Implementation Context
+
+**Complete Context Package**:
+- Detailed technical specifications from Context Researcher
+- All relevant code examples and patterns
+- Specific API requirements and interface definitions
+- Error handling approaches and edge cases
+- Testing criteria and validation methods
+- Integration points and dependency requirements
+
+#### Implementation Focus Areas
+
+**PURE CODING EXCELLENCE**:
+1. **No Research During Implementation**:
+   - All context pre-gathered by Context Researcher
+   - No API documentation lookup during coding
+   - No architectural exploration during implementation
+   - Focus purely on translating specifications to code
+
+2. **Quality Implementation Standards**:
+   - Follow exact specifications provided in context
+   - Implement comprehensive error handling
+   - Use meaningful names that match domain terminology
+   - Write self-documenting code with clear intent
+
+3. **Validation Integration**:
+   - Implement testing as specified in context package
+   - Verify all acceptance criteria are met
+   - Ensure integration with existing systems
+   - Confirm no regressions in existing functionality
+
+4. **Git Integration**:
+   - Follow mandatory git workflow for all changes
+   - Commit working states before major modifications
+   - Rollback immediately on compilation failures
+   - Maintain clean, documented git history
+
+#### Success Criteria
+
+**IMPLEMENTATION COMPLETION**:
+- All specifications from context package implemented
+- Code compiles successfully without warnings
+- All tests pass including new and existing test suites
+- Integration tests verify proper system integration
+- Documentation updated if API changes were made
+- No placeholder code or TODO items in production paths
+
+**Quality Gates**:
+- Follows project coding conventions and patterns
+- Implements robust error handling for all edge cases
+- Uses meaningful, descriptive naming throughout
+- Maintains or improves system performance characteristics
+- Preserves existing API compatibility unless explicitly changing
+
+This protocol ensures maximum efficiency by separating context research from implementation, allowing each agent to focus on their specialized area while maintaining the highest code quality standards.
+
 ### Development Environment Rules
 
 #### NixOS/Flake Requirements

@@ -23,6 +23,7 @@ pub struct TquicWorkerPool {
     performance_monitor: PerformanceMonitor,
 }
 
+#[derive(Debug)]
 pub struct TquicWorkerHandle {
     worker_id: usize,
     command_tx: mpsc::Sender<TquicCommand>,
@@ -33,12 +34,14 @@ pub struct TquicWorkerHandle {
 }
 
 /// Intelligent load balancer that considers worker health and load
+#[derive(Debug)]
 struct LoadBalancer {
     worker_loads: Vec<Arc<std::sync::atomic::AtomicUsize>>, // Active connections per worker
     last_selected: AtomicUsize,
 }
 
 /// Performance monitor for tracking worker pool efficiency 
+#[derive(Debug)]
 struct PerformanceMonitor {
     start_time: Instant,
     total_connections: AtomicUsize,

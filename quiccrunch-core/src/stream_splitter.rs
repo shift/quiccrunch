@@ -47,12 +47,12 @@ impl SplitStream {
                 match cmd {
                     StreamCommand::Send { data, response } => {
                         let mut stream = stream_clone.lock().await;
-                        let result = stream.send_message(data).await;
+                        let result = stream.send(&data).await.map_err(|e| e.into());
                         let _ = response.send(result);
                     }
                     StreamCommand::Receive { response } => {
                         let mut stream = stream_clone.lock().await;
-                        let result = stream.receive_message().await;
+                        let result = stream.recv().await.map(|v| Bytes::from(v)).map_err(|e| e.into());
                         let _ = response.send(result);
                     }
                     StreamCommand::Close { response } => {

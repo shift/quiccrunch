@@ -90,13 +90,13 @@ impl Transport for QuicTransport {
         &self,
         addr: &str,
     ) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>> {
-        self.client.connect(addr).await
+        self.client.connect(addr).await.map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)
     }
 
     async fn listen(
         &self,
         addr: &str,
     ) -> Result<Self::Listener, Box<dyn Error + Send + Sync + 'static>> {
-        self.server.listen(addr).await
+        self.server.listen(addr).await.map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)
     }
 }
