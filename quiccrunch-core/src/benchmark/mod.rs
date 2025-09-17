@@ -18,10 +18,6 @@
 //! across all streaming patterns with accurate performance measurement.
 
 pub mod metrics;
-pub mod grpc_client;
-pub mod grpc_server;
-pub mod quiccrunch_client;
-pub mod quiccrunch_server;
 
 use std::time::Duration;
 use serde::{Serialize, Deserialize};

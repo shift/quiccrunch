@@ -40,20 +40,20 @@ pub trait Transport {
     type Listener: Listener<Connection = Self::Connection>;
     type Config;
 
-    async fn new(config: Self::Config) -> Result<Self, Box<dyn Error>>
+    async fn new(config: Self::Config) -> Result<Self, Box<dyn Error + Send + Sync + 'static>>
     where
         Self: Sized;
-    async fn connect(&self, addr: &str) -> Result<Self::Connection, Box<dyn Error>>;
-    async fn listen(&self, addr: &str) -> Result<Self::Listener, Box<dyn Error>>;
+    async fn connect(&self, addr: &str) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>>;
+    async fn listen(&self, addr: &str) -> Result<Self::Listener, Box<dyn Error + Send + Sync + 'static>>;
 }
 
 #[async_trait]
 pub trait Listener {
     type Connection: AsyncRead + AsyncWrite + Unpin + Send;
-    async fn accept(&mut self) -> Result<Self::Connection, Box<dyn Error>>;
+    async fn accept(&mut self) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct QuicTransport {
     pub client: tquic::TquicClient,
     pub server: tquic::TquicServer,
@@ -65,17 +65,19 @@ impl Transport for QuicTransport {
     type Listener = tquic::TquicListener;
     type Config = QuicTransportConfig;
 
-    async fn new(config: Self::Config) -> Result<Self, Box<dyn Error>> {
+    async fn new(config: Self::Config) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
         let client = tquic::TquicClient::new(config.client).await?;
         let server = tquic::TquicServer::new(config.server).await?;
         Ok(QuicTransport { client, server })
     }
 
-    async fn connect(&self, addr: &str) -> Result<Self::Connection, Box<dyn Error>> {
+    async fn connect(&self, addr: &str) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>> {
         self.client.connect(addr).await
     }
 
-    async fn listen(&self, addr: &str) -> Result<Self::Listener, Box<dyn Error>> {
+    async fn listen(&self, addr: &str) -> Result<Self::Listener, Box<dyn Error + Send + Sync + 'static>> {
         self.server.listen(addr).await
     }
 }
+
+

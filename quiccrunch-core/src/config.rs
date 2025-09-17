@@ -37,7 +37,7 @@ pub enum CongestionControl {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Backend {
     Tquic,
-    Quinn,
+    // Quinn, // Removed - using tquic only
     IoUringAdvanced,
 }
 
@@ -218,30 +218,36 @@ impl StandardizedBenchmarkConfig {
 pub struct BenchmarkConfigs;
 
 impl BenchmarkConfigs {
+    /*
     /// Test Case 1: RPC Ping-Pong (Latency) - Quinn Backend
     pub fn latency_quinn() -> StandardizedBenchmarkConfig {
         StandardizedBenchmarkConfig::new_for_backend(Backend::Quinn, TestCaseVariant::Latency)
     }
+    */
     
     /// Test Case 1: RPC Ping-Pong (Latency) - tQUIC Backend  
     pub fn latency_tquic() -> StandardizedBenchmarkConfig {
         StandardizedBenchmarkConfig::new_for_backend(Backend::Tquic, TestCaseVariant::Latency)
     }
     
+    /*
     /// Test Case 2: RPC Flood (Throughput) - Quinn Backend
     pub fn throughput_quinn() -> StandardizedBenchmarkConfig {
         StandardizedBenchmarkConfig::new_for_backend(Backend::Quinn, TestCaseVariant::Throughput)
     }
+    */
     
     /// Test Case 2: RPC Flood (Throughput) - tQUIC Backend
     pub fn throughput_tquic() -> StandardizedBenchmarkConfig {
         StandardizedBenchmarkConfig::new_for_backend(Backend::Tquic, TestCaseVariant::Throughput)
     }
     
+    /*
     /// Test Case 3: Bulk Data Streaming (Bandwidth) - Quinn Backend
     pub fn streaming_quinn() -> StandardizedBenchmarkConfig {
         StandardizedBenchmarkConfig::new_for_backend(Backend::Quinn, TestCaseVariant::Streaming)
     }
+    */
     
     /// Test Case 3: Bulk Data Streaming (Bandwidth) - tQUIC Backend
     pub fn streaming_tquic() -> StandardizedBenchmarkConfig {
@@ -251,11 +257,11 @@ impl BenchmarkConfigs {
     /// Verify all configurations are valid and consistent
     pub fn validate_all() -> Result<(), String> {
         let configs = [
-            Self::latency_quinn(),
+            // Self::latency_quinn(), // Removed - using tquic only
             Self::latency_tquic(),
-            Self::throughput_quinn(),
+            // Self::throughput_quinn(), // Removed - using tquic only
             Self::throughput_tquic(),
-            Self::streaming_quinn(),
+            // Self::streaming_quinn(), // Removed - using tquic only
             Self::streaming_tquic(),
         ];
         
@@ -263,10 +269,10 @@ impl BenchmarkConfigs {
             config.validate()?;
         }
         
-        // Verify cross-backend consistency
-        Self::verify_consistency(&Self::latency_quinn(), &Self::latency_tquic())?;
-        Self::verify_consistency(&Self::throughput_quinn(), &Self::throughput_tquic())?;
-        Self::verify_consistency(&Self::streaming_quinn(), &Self::streaming_tquic())?;
+        // Verify cross-backend consistency (removed since only using tquic)
+        // Self::verify_consistency(&Self::latency_quinn(), &Self::latency_tquic())?;
+        // Self::verify_consistency(&Self::throughput_quinn(), &Self::throughput_tquic())?;
+        // Self::verify_consistency(&Self::streaming_quinn(), &Self::streaming_tquic())?; // Removed - using tquic only
         
         Ok(())
     }
@@ -311,7 +317,7 @@ mod tests {
     
     #[test]
     fn test_standardized_config_validation() {
-        let config = StandardizedBenchmarkConfig::new_for_backend(Backend::Quinn, TestCaseVariant::Latency);
+        let config = StandardizedBenchmarkConfig::new_for_backend(Backend::Tquic, TestCaseVariant::Latency);
         assert!(config.validate().is_ok());
     }
     
@@ -320,6 +326,7 @@ mod tests {
         assert!(BenchmarkConfigs::validate_all().is_ok());
     }
     
+    /*
     #[test]
     fn test_backend_consistency() {
         let quinn_latency = BenchmarkConfigs::latency_quinn();
@@ -331,12 +338,13 @@ mod tests {
         assert_eq!(quinn_latency.transport.congestion_control, tquic_latency.transport.congestion_control);
         assert_eq!(quinn_latency.max_concurrent_bidi_streams, tquic_latency.max_concurrent_bidi_streams);
     }
+    */
     
     #[test]
     fn test_test_case_optimization() {
-        let latency = BenchmarkConfigs::latency_quinn();
-        let throughput = BenchmarkConfigs::throughput_quinn();
-        let streaming = BenchmarkConfigs::streaming_quinn();
+        let latency = BenchmarkConfigs::latency_tquic();
+        let throughput = BenchmarkConfigs::throughput_tquic();
+        let streaming = BenchmarkConfigs::streaming_tquic();
         
         // Latency should have smallest windows
         assert!(latency.transport.initial_max_data < throughput.transport.initial_max_data);

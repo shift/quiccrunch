@@ -24,7 +24,8 @@ pub fn generate_node_cert(node_name: &str) -> TlsConfig {
 
     let ca_cert = Certificate::from_params(ca_params).expect("Failed to generate CA certificate");
     let ca_cert_der = ca_cert.serialize_der().expect("Failed to serialize CA certificate");
-    
+    let ca_cert_pem = ca_cert.serialize_pem().expect("Failed to serialize CA certificate to PEM").into_bytes();
+
     // Now create and sign the node certificate
     let mut params = CertificateParams::new(vec![
         "localhost".to_string(),
@@ -34,7 +35,7 @@ pub fn generate_node_cert(node_name: &str) -> TlsConfig {
     params.distinguished_name = DistinguishedName::new();
     params.distinguished_name.push(DnType::CommonName, node_name);
     params.alg = &PKCS_ECDSA_P256_SHA256;
-    
+
     // Add required certificate usage
     params.key_usages = vec![
         rcgen::KeyUsagePurpose::DigitalSignature,
@@ -42,18 +43,25 @@ pub fn generate_node_cert(node_name: &str) -> TlsConfig {
     ];
     // Allow server auth
     params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
-    
+
     // Sign the certificate with our CA
     let cert = Certificate::from_params(params).expect("Failed to generate node certificate");
-    let signed_cert = cert.serialize_der_with_signer(&ca_cert).expect("Failed to sign certificate");
-    
+    let signed_cert_der = cert.serialize_der_with_signer(&ca_cert).expect("Failed to sign certificate");
+    let cert_pem = cert.serialize_pem_with_signer(&ca_cert).expect("Failed to serialize certificate to PEM").into_bytes();
+
+    // Get the private key
+    let key_pair = cert.get_key_pair();
+    let key_der = key_pair.serialize_der();
+    let key_pem = key_pair.serialize_pem().into_bytes();
+
     TlsConfig {
-        cert: rustls::Certificate(signed_cert.clone()),
-        key: rustls::PrivateKey(cert.serialize_private_key_der()),
-        ca_cert: rustls::Certificate(ca_cert_der.clone()),
-        cert_pem: cert.serialize_pem().unwrap().into_bytes(),
-        key_pem: cert.serialize_private_key_pem().into_bytes(),
-        ca_cert_pem: ca_cert.serialize_pem().unwrap().into_bytes(),
+        cert: rustls::Certificate(signed_cert_der),
+        key: rustls::PrivateKey(key_der),
+        ca_cert: rustls::Certificate(ca_cert_der),
+        cert_pem,
+        key_pem,
+        ca_cert_pem,
+        inner: None,
     }
 }
 

@@ -22,7 +22,7 @@ exclude = [
 ]
 
 [dependencies]
-quinn = { version = "0.10.2", optional = true }
+
 tquic = { version = "1.6.0", optional = true }
 tempfile = "3"
 socket2 = { version = "0.5", features = ["all"] }
@@ -34,6 +34,7 @@ bytes = "1.5.0"
 thiserror = "1.0.56"
 tracing = "0.1.40"
 async-trait = "0.1.77"
+mio = { version = "0.8", features = ["net"] }
 rcgen = "0.12.1"
 rustls = { version = "0.21.10", features = ["dangerous_configuration"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -74,12 +75,14 @@ tracing-opentelemetry = { version = "0.22", optional = true }
 
 # Dependencies for examples
 env_logger = "0.11"
+log = "0.4"
 
 # System monitoring for benchmarks
 sysinfo = { version = "0.30", optional = true }
 
 # Benchmarking dependencies
 statrs = "0.16"                    # Statistical analysis for benchmarking
+itertools = "0.12"                 # Iterator tools for comprehensive benchmarks
 
 [dev-dependencies.opentelemetry]
 version = "0.21"
@@ -151,6 +154,16 @@ path = "../examples/network_benchmark_with_pooling.rs"
 name = "hit_rate_demo"
 path = "../examples/hit_rate_demo.rs"
 
+[[example]]
+name = "quiccrunch_vs_grpc_comprehensive"
+path = "../examples/quiccrunch_vs_grpc_comprehensive.rs"
+required-features = ["grpc-comparison"]
+
+[[example]]
+name = "simple_grpc_vs_quiccrunch"
+path = "../examples/simple_grpc_vs_quiccrunch.rs"
+required-features = ["grpc-comparison"]
+
 [[bin]]
 name = "benchmark"
 path = "src/bin/benchmark.rs"
@@ -158,6 +171,26 @@ path = "src/bin/benchmark.rs"
 [[bin]]
 name = "validate_performance_fixes"
 path = "src/bin/validate_performance_fixes.rs"
+
+[[bin]]
+name = "simple_real_test"
+path = "../simple_real_test.rs"
+
+[[bin]]
+name = "perf_test_server"
+path = "src/bin/perf_test_server.rs"
+
+[[bin]]
+name = "perf_test_client"
+path = "src/bin/perf_test_client.rs"
+
+[[bin]]
+name = "bidirectional_benchmark_server"
+path = "src/bin/bidirectional_benchmark_server.rs"
+
+[[bin]]
+name = "bidirectional_benchmark_client"
+path = "src/bin/bidirectional_benchmark_client.rs"
 
 [[bench]]
 name = "transport"
@@ -185,7 +218,7 @@ harness = false
 
 [features]
 # Backends map to optional deps (mutually exclusive at compile time)
-backend-quinn = ["dep:quinn"]
+# backend-quinn = ["dep:quinn"] # Removed - using tquic only
 backend-tquic = ["dep:tquic"]
 # Keep placeholder for a potential third backend
 backend-alt = []
