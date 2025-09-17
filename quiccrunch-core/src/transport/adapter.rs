@@ -1,6 +1,9 @@
 use std::sync::Arc;
 use std::net::SocketAddr;
 use tokio::sync::oneshot;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::error::TransportError;
 use crate::transport::messages::{TquicCommand, WorkerConfig, ConnectionId};
@@ -144,6 +147,7 @@ impl TquicAdapter {
 }
 
 // Implementations for high-level client and server abstractions
+#[derive(Clone, Debug)]
 pub struct TquicClient {
     adapter: Arc<TquicAdapter>,
 }
@@ -168,6 +172,7 @@ impl TquicClient {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct TquicServer {
     adapter: Arc<TquicAdapter>,
 }
@@ -261,4 +266,52 @@ impl TquicStream {
     pub async fn close(&self) -> Result<(), TransportError> {
         self.adapter.close_stream(self.connection_id, self.stream_id, 0).await
     }
+}
+
+// Implement AsyncRead and AsyncWrite for TquicStream
+impl AsyncRead for TquicStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        // TODO: Implement proper async reading via the adapter
+        // For now, return pending to prevent blocking
+        Poll::Pending
+    }
+}
+
+impl AsyncWrite for TquicStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        // TODO: Implement proper async writing via the adapter
+        // For now, return ready with 0 bytes written
+        Poll::Ready(Ok(0))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        // TODO: Implement proper flush via the adapter
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        // TODO: Implement proper shutdown via the adapter
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl Unpin for TquicStream {}
+
+// Add Clone and Debug implementations for TquicClient and TquicServer
+#[derive(Clone, Debug)]
+pub struct TquicClientWrapper {
+    inner: TquicClient,
+}
+
+#[derive(Clone, Debug)]
+pub struct TquicServerWrapper {
+    inner: TquicServer,
 }

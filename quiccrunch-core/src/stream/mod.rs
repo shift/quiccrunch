@@ -85,15 +85,18 @@ impl QuicStream {
     
     /// Create a simple tQUIC stream
     pub fn new_simple_tquic(_connection_id: u64, stream_id: u64, max_message_size: usize) -> Self {
-Self { 
-    inner: StreamInner::TQuic { 
-        command_tx: tokio::sync::mpsc::Sender::default(),
-        stream_id,
-        pending_read: None,
-        pending_write: None,
-    },
-    max_message_size
-}
+        // Create a placeholder channel that will be replaced when connected
+        let (command_tx, _) = tokio::sync::mpsc::channel(1);
+        
+        Self { 
+            inner: StreamInner::TQuic { 
+                command_tx,
+                stream_id,
+                pending_read: None,
+                pending_write: None,
+            },
+            max_message_size
+        }
     }
 
     /// Create a real tQUIC stream

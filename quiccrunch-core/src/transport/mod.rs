@@ -6,6 +6,7 @@ pub mod messages;
 pub mod worker;
 pub mod worker_pool;
 pub mod adapter;
+pub mod tquic_stream;
 
 use async_trait::async_trait;
 use std::error::Error;
