@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use quiccrunch_core::crypto_accel::{HardwareCrypto, CryptoAccelConfig};
+use quiccrunch_core::crypto_accel::{CryptoAccelConfig, HardwareCrypto};
 
 fn bench_crypto_operations(c: &mut Criterion) {
     let config = CryptoAccelConfig::default();
@@ -54,5 +54,9 @@ fn bench_hardware_capabilities(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_crypto_operations, bench_hardware_capabilities);
+criterion_group!(
+    benches,
+    bench_crypto_operations,
+    bench_hardware_capabilities
+);
 criterion_main!(benches);

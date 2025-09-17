@@ -9,7 +9,7 @@ impl SimpleStreamingDemo {
     pub fn new() -> Self {
         Self
     }
-    
+
     /// Simulate server streaming by returning multiple responses
     pub async fn server_stream_numbers(&self, count: u32) -> Vec<Bytes> {
         let mut results = Vec::new();
@@ -19,7 +19,7 @@ impl SimpleStreamingDemo {
         }
         results
     }
-    
+
     /// Simulate client streaming by aggregating multiple requests  
     pub async fn client_stream_sum(&self, requests: Vec<Bytes>) -> Bytes {
         let mut sum = 0i32;
@@ -31,7 +31,7 @@ impl SimpleStreamingDemo {
         }
         Bytes::from(sum.to_string())
     }
-    
+
     /// Simulate bidirectional streaming with echo functionality
     pub async fn bidirectional_echo(&self, requests: Vec<Bytes>) -> Vec<Bytes> {
         let mut responses = Vec::new();
@@ -47,7 +47,7 @@ impl SimpleStreamingDemo {
 async fn test_server_streaming_concept() {
     let demo = SimpleStreamingDemo::new();
     let results = demo.server_stream_numbers(3).await;
-    
+
     assert_eq!(results.len(), 3);
     assert_eq!(String::from_utf8_lossy(&results[0]), "number_0");
     assert_eq!(String::from_utf8_lossy(&results[1]), "number_1");
@@ -57,12 +57,8 @@ async fn test_server_streaming_concept() {
 #[tokio::test]
 async fn test_client_streaming_concept() {
     let demo = SimpleStreamingDemo::new();
-    let requests = vec![
-        Bytes::from("1"),
-        Bytes::from("2"), 
-        Bytes::from("3"),
-    ];
-    
+    let requests = vec![Bytes::from("1"), Bytes::from("2"), Bytes::from("3")];
+
     let result = demo.client_stream_sum(requests).await;
     assert_eq!(String::from_utf8_lossy(&result), "6");
 }
@@ -70,11 +66,8 @@ async fn test_client_streaming_concept() {
 #[tokio::test]
 async fn test_bidirectional_streaming_concept() {
     let demo = SimpleStreamingDemo::new();
-    let requests = vec![
-        Bytes::from("hello"),
-        Bytes::from("world"),
-    ];
-    
+    let requests = vec![Bytes::from("hello"), Bytes::from("world")];
+
     let responses = demo.bidirectional_echo(requests).await;
     assert_eq!(responses.len(), 2);
     assert_eq!(String::from_utf8_lossy(&responses[0]), "echo_hello");
@@ -84,15 +77,15 @@ async fn test_bidirectional_streaming_concept() {
 #[tokio::test]
 async fn test_empty_requests() {
     let demo = SimpleStreamingDemo::new();
-    
+
     // Test empty server stream
     let results = demo.server_stream_numbers(0).await;
     assert_eq!(results.len(), 0);
-    
+
     // Test empty client stream
     let result = demo.client_stream_sum(vec![]).await;
     assert_eq!(String::from_utf8_lossy(&result), "0");
-    
+
     // Test empty bidirectional stream
     let responses = demo.bidirectional_echo(vec![]).await;
     assert_eq!(responses.len(), 0);
@@ -101,12 +94,12 @@ async fn test_empty_requests() {
 #[tokio::test]
 async fn test_large_stream() {
     let demo = SimpleStreamingDemo::new();
-    
+
     // Test large server stream
     let results = demo.server_stream_numbers(100).await;
     assert_eq!(results.len(), 100);
     assert_eq!(String::from_utf8_lossy(&results[99]), "number_99");
-    
+
     // Test large client stream
     let requests: Vec<Bytes> = (1..=100).map(|i| Bytes::from(i.to_string())).collect();
     let result = demo.client_stream_sum(requests).await;

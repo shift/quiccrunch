@@ -1,11 +1,13 @@
 //! Example: Server→Client Streaming RPC using tQUIC and Cap'n Proto
 
-use quiccrunch_core::transport::tquic::{AsyncTquicClient, AsyncTquicServer};
 use capnp::message::{Builder, ReaderOptions};
-use capnp::serialize::{write_message, read_message};
-use quiccrunch_core::schema::rpc_capnp::{rpc_message, rpc_request, rpc_stream_chunk, streaming_type};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use capnp::serialize::{read_message, write_message};
+use quiccrunch_core::schema::rpc_capnp::{
+    rpc_message, rpc_request, rpc_stream_chunk, streaming_type,
+};
+use quiccrunch_core::transport::tquic::{AsyncTquicClient, AsyncTquicServer};
 use std::error::Error;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -27,7 +29,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let message_reader = read_message(&mut cursor, ReaderOptions::new()).unwrap();
         let rpc_msg = message_reader.get_root::<rpc_message::Reader>().unwrap();
         let req = rpc_msg.get_request().unwrap();
-        println!("[Server] Received request: service={} method={}", req.get_service().unwrap(), req.get_method().unwrap());
+        println!(
+            "[Server] Received request: service={} method={}",
+            req.get_service().unwrap(),
+            req.get_method().unwrap()
+        );
         // Send multiple stream chunks
         for i in 0..3 {
             let mut builder = Builder::new_default();
@@ -79,8 +85,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let message_reader = read_message(&mut cursor, ReaderOptions::new()).unwrap();
         let rpc_msg = message_reader.get_root::<rpc_message::Reader>().unwrap();
         let chunk = rpc_msg.get_stream_chunk().unwrap();
-        println!("[Client] Received chunk {}: {}", chunk.get_sequence_id(), String::from_utf8_lossy(chunk.get_data().unwrap()));
-        if chunk.get_is_last() { break; }
+        println!(
+            "[Client] Received chunk {}: {}",
+            chunk.get_sequence_id(),
+            String::from_utf8_lossy(chunk.get_data().unwrap())
+        );
+        if chunk.get_is_last() {
+            break;
+        }
     }
 
     Ok(())

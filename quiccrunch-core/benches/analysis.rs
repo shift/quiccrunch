@@ -1,11 +1,11 @@
+use criterion::measurement::WallTime;
+use plotters::prelude::*;
+use serde::{Deserialize, Serialize};
+use stats_alloc::{StatsAlloc, INSTRUMENTED_SYSTEM};
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use criterion::measurement::WallTime;
-use serde::{Serialize, Deserialize};
-use stats_alloc::{StatsAlloc, INSTRUMENTED_SYSTEM};
-use plotters::prelude::*;
+use std::time::{Duration, Instant};
 
 #[global_allocator]
 static GLOBAL: &StatsAlloc<std::alloc::System> = &INSTRUMENTED_SYSTEM;
@@ -94,7 +94,7 @@ impl PerformanceCollector {
     pub fn take_memory_snapshot(&mut self) {
         let stats = GLOBAL.stats();
         let mut sizes = BTreeMap::new();
-        
+
         for size in stats.allocation_sizes() {
             sizes.insert(size, stats.allocations_of_size(size));
         }
@@ -110,10 +110,10 @@ impl PerformanceCollector {
     pub fn compute_latency_profile(&self) -> LatencyProfile {
         let mut sorted_latencies = self.latencies.clone();
         sorted_latencies.sort_unstable();
-        
+
         let len = sorted_latencies.len();
         let sum: Duration = sorted_latencies.iter().sum();
-        
+
         LatencyProfile {
             p50: sorted_latencies[len * 50 / 100],
             p90: sorted_latencies[len * 90 / 100],
@@ -130,7 +130,7 @@ impl PerformanceCollector {
     pub fn detect_head_of_line_blocking(&self) -> Vec<(Instant, Duration)> {
         let mut blocking_events = Vec::new();
         let mut last_latency = self.latencies.first().unwrap();
-        
+
         for (idx, &latency) in self.latencies.iter().enumerate().skip(1) {
             // If latency spikes while multiple streams are active, likely HOL blocking
             if latency > *last_latency * 2 && self.active_streams.load(Ordering::SeqCst) > 1 {
@@ -138,7 +138,7 @@ impl PerformanceCollector {
             }
             last_latency = &latency;
         }
-        
+
         blocking_events
     }
 
@@ -157,32 +157,36 @@ impl PerformanceCollector {
 
         // Calculate throughput variation coefficient
         if !self.congestion_data.is_empty() {
-            let throughputs: Vec<f64> = self.congestion_data.iter()
+            let throughputs: Vec<f64> = self
+                .congestion_data
+                .iter()
                 .map(|d| d.window_size as f64)
                 .collect();
-                
+
             let mean = throughputs.iter().sum::<f64>() / throughputs.len() as f64;
-            let variance = throughputs.iter()
-                .map(|&t| (t - mean).powi(2))
-                .sum::<f64>() / throughputs.len() as f64;
-            
+            let variance = throughputs.iter().map(|&t| (t - mean).powi(2)).sum::<f64>()
+                / throughputs.len() as f64;
+
             metrics.throughput_variation = (variance.sqrt() / mean);
         }
 
         metrics
     }
 
-    pub fn generate_report(&self, group: &mut criterion::BenchmarkGroup<WallTime>) -> std::io::Result<()> {
+    pub fn generate_report(
+        &self,
+        group: &mut criterion::BenchmarkGroup<WallTime>,
+    ) -> std::io::Result<()> {
         // Generate plots
         self.plot_latency_distribution()?;
         self.plot_memory_usage()?;
         self.plot_stream_concurrency()?;
-        
+
         // Generate markdown report
         let mut report = std::fs::File::create("target/benchmark/analysis.md")?;
-        
+
         writeln!(report, "# QuicCrunch Performance Analysis\n")?;
-        
+
         // Latency Analysis
         let profile = self.compute_latency_profile();
         writeln!(report, "## Latency Analysis\n")?;
@@ -195,27 +199,38 @@ impl PerformanceCollector {
         writeln!(report, "- max: {:?}", profile.max)?;
         writeln!(report, "- mean: {:?}", profile.mean)?;
         writeln!(report, "- samples: {}", profile.samples)?;
-        
+
         // Connection Profiling
         writeln!(report, "\n## Connection Profiling\n")?;
-        let avg_establishment = self.connection_times.iter()
+        let avg_establishment = self
+            .connection_times
+            .iter()
             .map(|c| c.establishment_time)
-            .sum::<Duration>() / self.connection_times.len() as u32;
-        writeln!(report, "Average connection establishment: {:?}", avg_establishment)?;
-        
+            .sum::<Duration>()
+            / self.connection_times.len() as u32;
+        writeln!(
+            report,
+            "Average connection establishment: {:?}",
+            avg_establishment
+        )?;
+
         // Memory Analysis
         if let Some(last_snapshot) = self.memory_snapshots.last() {
             writeln!(report, "\n## Memory Usage\n")?;
-            writeln!(report, "- Total allocations: {}", last_snapshot.total_allocations)?;
+            writeln!(
+                report,
+                "- Total allocations: {}",
+                last_snapshot.total_allocations
+            )?;
             writeln!(report, "- Peak memory: {} bytes", last_snapshot.peak_memory)?;
             writeln!(report, "- Deallocations: {}", last_snapshot.deallocations)?;
-            
+
             writeln!(report, "\nAllocation size distribution:")?;
             for (size, count) in &last_snapshot.allocation_sizes {
                 writeln!(report, "- {} bytes: {} allocations", size, count)?;
             }
         }
-        
+
         // Head-of-line Blocking
         let blocking_events = self.detect_head_of_line_blocking();
         if !blocking_events.is_empty() {
@@ -224,14 +239,22 @@ impl PerformanceCollector {
                 writeln!(report, "- At {:?}: blocked for {:?}", time, duration)?;
             }
         }
-        
+
         // Congestion Analysis
         let congestion = self.analyze_congestion();
         writeln!(report, "\n## Congestion Analysis\n")?;
         writeln!(report, "- Retransmissions: {}", congestion.retransmissions)?;
-        writeln!(report, "- Backpressure events: {}", congestion.backpressure_events)?;
-        writeln!(report, "- Throughput variation: {:.2}%", congestion.throughput_variation * 100.0)?;
-        
+        writeln!(
+            report,
+            "- Backpressure events: {}",
+            congestion.backpressure_events
+        )?;
+        writeln!(
+            report,
+            "- Throughput variation: {:.2}%",
+            congestion.throughput_variation * 100.0
+        )?;
+
         Ok(())
     }
 
@@ -239,12 +262,14 @@ impl PerformanceCollector {
         let root = BitMapBackend::new("target/benchmark/latency_distribution.png", (800, 600))
             .into_drawing_area();
         root.fill(&WHITE)?;
-        
-        let mut sorted_latencies: Vec<f64> = self.latencies.iter()
+
+        let mut sorted_latencies: Vec<f64> = self
+            .latencies
+            .iter()
             .map(|d| d.as_secs_f64() * 1000.0) // Convert to milliseconds
             .collect();
         sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        
+
         let mut chart = ChartBuilder::on(&root)
             .caption("Latency Distribution", ("sans-serif", 30))
             .margin(10)
@@ -252,33 +277,38 @@ impl PerformanceCollector {
             .y_label_area_size(50)
             .build_cartesian_2d(
                 0f64..100f64,
-                sorted_latencies[0]..sorted_latencies[sorted_latencies.len()-1]
+                sorted_latencies[0]..sorted_latencies[sorted_latencies.len() - 1],
             )?;
-            
+
         chart.configure_mesh().draw()?;
-        
-        let percentiles: Vec<(f64, f64)> = (0..100).map(|i| {
-            let idx = (i as f64 / 100.0 * (sorted_latencies.len() - 1) as f64) as usize;
-            (i as f64, sorted_latencies[idx])
-        }).collect();
-        
-        chart.draw_series(LineSeries::new(percentiles, &RED))?
+
+        let percentiles: Vec<(f64, f64)> = (0..100)
+            .map(|i| {
+                let idx = (i as f64 / 100.0 * (sorted_latencies.len() - 1) as f64) as usize;
+                (i as f64, sorted_latencies[idx])
+            })
+            .collect();
+
+        chart
+            .draw_series(LineSeries::new(percentiles, &RED))?
             .label("Latency (ms)")
             .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RED));
-            
+
         Ok(())
     }
 
     fn plot_memory_usage(&self) -> std::io::Result<()> {
-        let root = BitMapBackend::new("target/benchmark/memory_usage.png", (800, 600))
-            .into_drawing_area();
+        let root =
+            BitMapBackend::new("target/benchmark/memory_usage.png", (800, 600)).into_drawing_area();
         root.fill(&WHITE)?;
-        
-        let snapshots: Vec<(usize, usize)> = self.memory_snapshots.iter()
+
+        let snapshots: Vec<(usize, usize)> = self
+            .memory_snapshots
+            .iter()
             .enumerate()
             .map(|(i, s)| (i, s.peak_memory))
             .collect();
-            
+
         let mut chart = ChartBuilder::on(&root)
             .caption("Memory Usage Over Time", ("sans-serif", 30))
             .margin(10)
@@ -286,15 +316,16 @@ impl PerformanceCollector {
             .y_label_area_size(50)
             .build_cartesian_2d(
                 0..snapshots.len(),
-                0..snapshots.iter().map(|(_, m)| *m).max().unwrap_or(1)
+                0..snapshots.iter().map(|(_, m)| *m).max().unwrap_or(1),
             )?;
-            
+
         chart.configure_mesh().draw()?;
-        
-        chart.draw_series(LineSeries::new(snapshots, &BLUE))?
+
+        chart
+            .draw_series(LineSeries::new(snapshots, &BLUE))?
             .label("Peak Memory (bytes)")
             .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &BLUE));
-            
+
         Ok(())
     }
 
@@ -302,12 +333,14 @@ impl PerformanceCollector {
         let root = BitMapBackend::new("target/benchmark/stream_concurrency.png", (800, 600))
             .into_drawing_area();
         root.fill(&WHITE)?;
-        
-        let data: Vec<(usize, usize)> = self.multiplexing_data.iter()
+
+        let data: Vec<(usize, usize)> = self
+            .multiplexing_data
+            .iter()
             .enumerate()
             .map(|(i, m)| (i, m.concurrent_streams))
             .collect();
-            
+
         let mut chart = ChartBuilder::on(&root)
             .caption("Stream Concurrency", ("sans-serif", 30))
             .margin(10)
@@ -315,15 +348,16 @@ impl PerformanceCollector {
             .y_label_area_size(50)
             .build_cartesian_2d(
                 0..data.len(),
-                0..data.iter().map(|(_, s)| *s).max().unwrap_or(1)
+                0..data.iter().map(|(_, s)| *s).max().unwrap_or(1),
             )?;
-            
+
         chart.configure_mesh().draw()?;
-        
-        chart.draw_series(LineSeries::new(data, &GREEN))?
+
+        chart
+            .draw_series(LineSeries::new(data, &GREEN))?
             .label("Active Streams")
             .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &GREEN));
-            
+
         Ok(())
     }
 }

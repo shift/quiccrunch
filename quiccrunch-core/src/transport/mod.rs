@@ -1,12 +1,14 @@
-
-pub mod tquic;
+pub mod adapter;
 pub mod async_bridge;
 pub mod async_mio;
 pub mod messages;
+pub mod tquic;
+pub mod tquic_stream;
 pub mod worker;
 pub mod worker_pool;
-pub mod adapter;
-pub mod tquic_stream;
+
+#[cfg(test)]
+mod test_worker_pool;
 
 use async_trait::async_trait;
 use std::error::Error;
@@ -27,7 +29,7 @@ impl From<TlsConfig> for QuicTransportConfig {
         // Create a basic config using the TLS configuration
         let client_config = ClientConfig::default();
         let server_config = ServerConfig::default();
-        
+
         QuicTransportConfig {
             client: client_config,
             server: server_config,
@@ -50,8 +52,14 @@ pub trait Transport {
     async fn new(config: Self::Config) -> Result<Self, Box<dyn Error + Send + Sync + 'static>>
     where
         Self: Sized;
-    async fn connect(&self, addr: &str) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>>;
-    async fn listen(&self, addr: &str) -> Result<Self::Listener, Box<dyn Error + Send + Sync + 'static>>;
+    async fn connect(
+        &self,
+        addr: &str,
+    ) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>>;
+    async fn listen(
+        &self,
+        addr: &str,
+    ) -> Result<Self::Listener, Box<dyn Error + Send + Sync + 'static>>;
 }
 
 #[async_trait]
@@ -78,13 +86,17 @@ impl Transport for QuicTransport {
         Ok(QuicTransport { client, server })
     }
 
-    async fn connect(&self, addr: &str) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>> {
+    async fn connect(
+        &self,
+        addr: &str,
+    ) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>> {
         self.client.connect(addr).await
     }
 
-    async fn listen(&self, addr: &str) -> Result<Self::Listener, Box<dyn Error + Send + Sync + 'static>> {
+    async fn listen(
+        &self,
+        addr: &str,
+    ) -> Result<Self::Listener, Box<dyn Error + Send + Sync + 'static>> {
         self.server.listen(addr).await
     }
 }
-
-

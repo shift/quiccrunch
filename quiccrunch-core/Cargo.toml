@@ -191,6 +191,14 @@ harness = false
 name = "connection_pool"
 harness = false
 
+[[bench]]
+name = "worker_pool_performance"
+harness = false
+
+[[bench]]
+name = "socket_optimization"
+harness = false
+
 [features]
 # Backends map to optional deps (mutually exclusive at compile time)
 # backend-quinn = ["dep:quinn"] # Removed - using tquic only

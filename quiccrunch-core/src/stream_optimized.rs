@@ -1,17 +1,16 @@
+use bytes::Bytes;
 /// High-performance stream implementation with all optimizations integrated
-/// 
+///
 /// This module combines all performance optimizations:
 /// - Memory pools for zero allocation
 /// - SIMD operations for fast data copying
 /// - Lock-free channels for multi-stream concurrency
 /// - Zero-copy operations where possible
-
 use std::time::Duration;
-use bytes::Bytes;
 
-use crate::memory::{PooledBuffer, MessageBuffer};
+use crate::memory::{MessageBuffer, PooledBuffer};
 // use crate::simd;
-use crate::lockfree::{StreamHandle, ConnectionHandle};
+use crate::lockfree::{ConnectionHandle, StreamHandle};
 
 /// Optimized QUIC stream with performance enhancements
 pub struct OptimizedQuicStream {
@@ -36,11 +35,11 @@ pub struct StreamConfig {
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {
-            chunk_size: 262_144,        // 256KB chunks for optimal throughput
-            use_simd: true,             // Enable SIMD operations
-            use_zero_copy: true,        // Enable zero-copy where possible
-            enable_batching: true,      // Enable operation batching
-            batch_size: 16,             // Operations per batch
+            chunk_size: 262_144,   // 256KB chunks for optimal throughput
+            use_simd: true,        // Enable SIMD operations
+            use_zero_copy: true,   // Enable zero-copy where possible
+            enable_batching: true, // Enable operation batching
+            batch_size: 16,        // Operations per batch
             read_timeout: Duration::from_secs(30),
             write_timeout: Duration::from_secs(10),
         }
@@ -51,11 +50,11 @@ impl StreamConfig {
     /// Configuration optimized for maximum throughput
     pub fn high_throughput() -> Self {
         Self {
-            chunk_size: 1_048_576,      // 1MB chunks
+            chunk_size: 1_048_576, // 1MB chunks
             use_simd: true,
             use_zero_copy: true,
             enable_batching: true,
-            batch_size: 64,             // Large batches
+            batch_size: 64, // Large batches
             read_timeout: Duration::from_secs(60),
             write_timeout: Duration::from_secs(30),
         }
@@ -64,10 +63,10 @@ impl StreamConfig {
     /// Configuration optimized for low latency
     pub fn low_latency() -> Self {
         Self {
-            chunk_size: 32_768,         // 32KB chunks
+            chunk_size: 32_768, // 32KB chunks
             use_simd: true,
-            use_zero_copy: false,       // Zero-copy adds latency overhead
-            enable_batching: false,     // No batching for immediate response
+            use_zero_copy: false,   // Zero-copy adds latency overhead
+            enable_batching: false, // No batching for immediate response
             batch_size: 1,
             read_timeout: Duration::from_millis(100),
             write_timeout: Duration::from_millis(50),
@@ -77,7 +76,7 @@ impl StreamConfig {
 
 enum StreamInner {
     #[cfg(feature = "backend-tquic")]
-    Tquic { 
+    Tquic {
         handle: StreamHandle,
         _send_buffer: Option<MessageBuffer>,
         _recv_buffer: Option<PooledBuffer>,
@@ -150,7 +149,7 @@ impl OptimizedQuicStream {
     #[cfg(feature = "backend-tquic")]
     pub fn new_tquic(handle: StreamHandle, max_message_size: usize) -> Self {
         Self {
-            inner: StreamInner::Tquic { 
+            inner: StreamInner::Tquic {
                 handle,
                 _send_buffer: None,
                 _recv_buffer: None,
@@ -189,7 +188,9 @@ impl OptimizedQuicStream {
         // Validate message size
         if data.len() > self.max_message_size {
             return Err(crate::TransportError::StreamError(format!(
-                "Message size {} exceeds limit {}", data.len(), self.max_message_size
+                "Message size {} exceeds limit {}",
+                data.len(),
+                self.max_message_size
             )));
         }
 
@@ -264,10 +265,11 @@ impl OptimizedQuicStream {
             #[cfg(feature = "backend-quinn")]
             StreamInner::Quinn { send, .. } => {
                 use tokio::io::AsyncWriteExt;
-                
+
                 // Write length header
                 let header = (data.len() as u32).to_le_bytes();
-                send.write_all(&header).await
+                send.write_all(&header)
+                    .await
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
 
                 // Send data in optimized chunks
@@ -276,11 +278,13 @@ impl OptimizedQuicStream {
                     let chunk_size = remaining.len().min(self.config.chunk_size);
                     let (chunk, rest) = remaining.split_at(chunk_size);
 
-                    send.write_all(chunk).await
+                    send.write_all(chunk)
+                        .await
                         .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                    send.flush().await
+                    send.flush()
+                        .await
                         .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                    
+
                     remaining = rest;
                 }
             }
@@ -300,30 +304,40 @@ impl OptimizedQuicStream {
     async fn receive_zero_copy(&mut self) -> crate::Result<Bytes> {
         match &mut self.inner {
             #[cfg(feature = "backend-quinn")]
-            StreamInner::Quinn { recv, recv_buffer, .. } => {
+            StreamInner::Quinn {
+                recv, recv_buffer, ..
+            } => {
                 use tokio::io::AsyncReadExt;
-                
+
                 // Read message length
                 let mut header = [0u8; 4];
-                time::timeout(self.config.read_timeout, recv.read_exact(&mut header)).await
+                time::timeout(self.config.read_timeout, recv.read_exact(&mut header))
+                    .await
                     .map_err(|_| crate::TransportError::StreamError("Header read timeout".into()))?
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
 
                 let msg_len = u32::from_le_bytes(header) as usize;
                 if msg_len > self.max_message_size {
                     return Err(crate::TransportError::StreamError(format!(
-                        "Message size {} exceeds limit {}", msg_len, self.max_message_size
+                        "Message size {} exceeds limit {}",
+                        msg_len, self.max_message_size
                     )));
                 }
 
                 // Use pooled buffer for large messages
                 if msg_len >= self.config.chunk_size {
-                    let mut buffer = recv_buffer.take().unwrap_or_else(|| PooledBuffer::get(msg_len));
+                    let mut buffer = recv_buffer
+                        .take()
+                        .unwrap_or_else(|| PooledBuffer::get(msg_len));
                     buffer.resize(msg_len, 0);
 
-                    time::timeout(self.config.read_timeout, recv.read_exact(buffer.as_mut_slice())).await
-                        .map_err(|_| crate::TransportError::StreamError("Data read timeout".into()))?
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
+                    time::timeout(
+                        self.config.read_timeout,
+                        recv.read_exact(buffer.as_mut_slice()),
+                    )
+                    .await
+                    .map_err(|_| crate::TransportError::StreamError("Data read timeout".into()))?
+                    .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
 
                     let result = Bytes::from(buffer.into_vec());
                     *recv_buffer = Some(PooledBuffer::get(self.config.chunk_size)); // Prepare for next read
@@ -331,8 +345,11 @@ impl OptimizedQuicStream {
                 } else {
                     // For small messages, use regular allocation
                     let mut data = vec![0u8; msg_len];
-                    time::timeout(self.config.read_timeout, recv.read_exact(&mut data)).await
-                        .map_err(|_| crate::TransportError::StreamError("Data read timeout".into()))?
+                    time::timeout(self.config.read_timeout, recv.read_exact(&mut data))
+                        .await
+                        .map_err(|_| {
+                            crate::TransportError::StreamError("Data read timeout".into())
+                        })?
                         .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
                     Ok(Bytes::from(data))
                 }
@@ -340,7 +357,9 @@ impl OptimizedQuicStream {
             #[cfg(feature = "backend-tquic")]
             StreamInner::Tquic { handle, .. } => {
                 // For tQUIC, read with the configured buffer size
-                handle.read(self.config.chunk_size).await?
+                handle
+                    .read(self.config.chunk_size)
+                    .await?
                     .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into()))
             }
             StreamInner::_Optimized { .. } => {
@@ -355,17 +374,19 @@ impl OptimizedQuicStream {
             #[cfg(feature = "backend-quinn")]
             StreamInner::Quinn { recv, .. } => {
                 use tokio::io::AsyncReadExt;
-                
+
                 // Read header
                 let mut header = [0u8; 4];
-                time::timeout(self.config.read_timeout, recv.read_exact(&mut header)).await
+                time::timeout(self.config.read_timeout, recv.read_exact(&mut header))
+                    .await
                     .map_err(|_| crate::TransportError::StreamError("Header read timeout".into()))?
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
 
                 let msg_len = u32::from_le_bytes(header) as usize;
                 if msg_len > self.max_message_size {
                     return Err(crate::TransportError::StreamError(format!(
-                        "Message size {} exceeds limit {}", msg_len, self.max_message_size
+                        "Message size {} exceeds limit {}",
+                        msg_len, self.max_message_size
                     )));
                 }
 
@@ -377,12 +398,15 @@ impl OptimizedQuicStream {
                 while bytes_read < msg_len {
                     let remaining = msg_len - bytes_read;
                     let chunk_size = remaining.min(self.config.chunk_size);
-                    
+
                     let slice = &mut buffer.as_mut_slice()[bytes_read..bytes_read + chunk_size];
-                    time::timeout(self.config.read_timeout, recv.read_exact(slice)).await
-                        .map_err(|_| crate::TransportError::StreamError("Data read timeout".into()))?
+                    time::timeout(self.config.read_timeout, recv.read_exact(slice))
+                        .await
+                        .map_err(|_| {
+                            crate::TransportError::StreamError("Data read timeout".into())
+                        })?
                         .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                    
+
                     bytes_read += chunk_size;
 
                     // Use SIMD for memory operations if enabled and data is large enough
@@ -394,10 +418,10 @@ impl OptimizedQuicStream {
                 Ok(Bytes::from(buffer.into_vec()))
             }
             #[cfg(feature = "backend-tquic")]
-            StreamInner::Tquic { handle, .. } => {
-                handle.read(self.config.chunk_size).await?
-                    .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into()))
-            }
+            StreamInner::Tquic { handle, .. } => handle
+                .read(self.config.chunk_size)
+                .await?
+                .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into())),
             StreamInner::_Optimized { .. } => {
                 unimplemented!("Optimized backend not yet implemented");
             }
@@ -409,7 +433,8 @@ impl OptimizedQuicStream {
         match &mut self.inner {
             #[cfg(feature = "backend-quinn")]
             StreamInner::Quinn { send, .. } => {
-                send.finish().await
+                send.finish()
+                    .await
                     .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
             }
             #[cfg(feature = "backend-tquic")]
@@ -439,7 +464,11 @@ impl OptimizedQuicStream {
     }
 
     /// Benchmark stream performance
-    pub async fn benchmark(&mut self, message_count: usize, message_size: usize) -> crate::Result<BenchmarkResults> {
+    pub async fn benchmark(
+        &mut self,
+        message_count: usize,
+        message_size: usize,
+    ) -> crate::Result<BenchmarkResults> {
         let test_data = Bytes::from(vec![0x42u8; message_size]);
         let start_time = std::time::Instant::now();
 
@@ -492,8 +521,14 @@ impl BenchmarkResults {
     pub fn print_summary(&self) {
         println!("\n🚀 Stream Benchmark Results");
         println!("===========================");
-        println!("Messages: {} @ {} bytes each", self.message_count, self.message_size);
-        println!("Total Data: {:.2} MB", self.total_bytes as f64 / 1_000_000.0);
+        println!(
+            "Messages: {} @ {} bytes each",
+            self.message_count, self.message_size
+        );
+        println!(
+            "Total Data: {:.2} MB",
+            self.total_bytes as f64 / 1_000_000.0
+        );
         println!("Send Throughput: {:.2} MB/s", self.send_throughput_mbps);
         println!("Recv Throughput: {:.2} MB/s", self.recv_throughput_mbps);
         println!("Average Latency: {:.2} μs", self.avg_latency_us);

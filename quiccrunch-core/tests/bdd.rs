@@ -1,9 +1,9 @@
 use bytes::Bytes;
-use cucumber::{given, when, then, World};
+use cucumber::{given, then, when, World};
+use quiccrunch_core::transport::{CongestionController, TransportSettings};
+use quiccrunch_core::{QuicTransport, Transport};
 use std::time::Duration;
 use tokio::time::timeout;
-use quiccrunch_core::{QuicTransport, Transport};
-use quiccrunch_core::transport::{TransportSettings, CongestionController};
 
 mod certs;
 use certs::generate_node_cert;
@@ -16,7 +16,12 @@ pub struct TestWorld {
 }
 
 impl TestWorld {
-    async fn init() -> Self { Self { transport: None, addr: None } }
+    async fn init() -> Self {
+        Self {
+            transport: None,
+            addr: None,
+        }
+    }
 }
 
 impl core::fmt::Debug for TestWorld {
@@ -30,7 +35,16 @@ impl core::fmt::Debug for TestWorld {
 
 #[given("a running QUIC server")]
 async fn given_running_server(world: &mut TestWorld) {
-    let settings = TransportSettings { max_idle_timeout_ms: Some(30000), keep_alive_interval_ms: Some(5000), max_concurrent_uni_streams: 100, max_concurrent_bidi_streams: 100, stream_receive_window: 10 * 1024 * 1024, connection_receive_window: 20 * 1024 * 1024, initial_rtt_ms: 100, congestion_controller: CongestionController::NewReno };
+    let settings = TransportSettings {
+        max_idle_timeout_ms: Some(30000),
+        keep_alive_interval_ms: Some(5000),
+        max_concurrent_uni_streams: 100,
+        max_concurrent_bidi_streams: 100,
+        stream_receive_window: 10 * 1024 * 1024,
+        connection_receive_window: 20 * 1024 * 1024,
+        initial_rtt_ms: 100,
+        congestion_controller: CongestionController::NewReno,
+    };
     let tls_config = generate_node_cert("test-node");
     let transport = QuicTransport::with_settings(tls_config, settings).unwrap();
     let port = portpicker::pick_unused_port().expect("No ports free");
@@ -87,7 +101,9 @@ async fn when_concurrent(world: &mut TestWorld) {
             assert_eq!(r, msg);
         }));
     }
-    for h in handles { h.await.unwrap(); }
+    for h in handles {
+        h.await.unwrap();
+    }
 }
 
 #[when(regex = "a client sends a (\\d+)-byte message on a stream")]
@@ -125,7 +141,5 @@ async fn then_connect_fails(_world: &mut TestWorld) {
 #[tokio::main]
 async fn main() {
     let feature = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/transport_swap.feature");
-    TestWorld::cucumber()
-        .run_and_exit(feature)
-        .await;
+    TestWorld::cucumber().run_and_exit(feature).await;
 }

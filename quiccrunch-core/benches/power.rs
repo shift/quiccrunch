@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Read;
-use std::time::{Duration, Instant};
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// Power consumption metrics collector using RAPL with baseline calibration
 pub struct PowerMetrics {
@@ -17,14 +17,14 @@ pub struct PowerBaseline {
     pub idle_package_power: f64,
     pub idle_dram_power: f64,
     pub measurement_duration: Duration,
-    pub variation_coefficient: f64,  // Measure of baseline stability
+    pub variation_coefficient: f64, // Measure of baseline stability
 }
 
 impl PowerMetrics {
     pub fn new() -> std::io::Result<Self> {
         let rapl_paths = Self::discover_rapl_paths()?;
         let baseline = Self::establish_baseline(&rapl_paths)?;
-        
+
         let mut last_readings = Vec::new();
         for path in &rapl_paths {
             let mut file = File::open(path)?;
@@ -44,12 +44,12 @@ impl PowerMetrics {
     /// Discover available RAPL domains
     fn discover_rapl_paths() -> std::io::Result<Vec<String>> {
         let mut paths = Vec::new();
-        
+
         // Check if RAPL is available
         if !std::path::Path::new("/sys/class/powercap/intel-rapl").exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "RAPL interface not available. Ensure running on Intel CPU with RAPL support."
+                "RAPL interface not available. Ensure running on Intel CPU with RAPL support.",
             ));
         }
 
@@ -84,7 +84,7 @@ impl PowerMetrics {
         if paths.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "No readable RAPL domains found"
+                "No readable RAPL domains found",
             ));
         }
 
@@ -95,18 +95,18 @@ impl PowerMetrics {
     fn establish_baseline(rapl_paths: &[String]) -> std::io::Result<PowerBaseline> {
         println!("Establishing power baseline...");
         println!("Please ensure system is idle (no heavy processes running)");
-        thread::sleep(Duration::from_secs(5));  // Wait for system to settle
+        thread::sleep(Duration::from_secs(5)); // Wait for system to settle
 
         const SAMPLES: usize = 10;
         const SAMPLE_DURATION: Duration = Duration::from_secs(2);
-        
+
         let mut package_samples = Vec::new();
         let mut dram_samples = Vec::new();
 
         // Take multiple samples to ensure stable baseline
         for i in 0..SAMPLES {
-            println!("Taking baseline sample {}/{}", i+1, SAMPLES);
-            
+            println!("Taking baseline sample {}/{}", i + 1, SAMPLES);
+
             let mut initial_readings = Vec::new();
             for path in rapl_paths {
                 let mut file = File::open(path)?;
@@ -135,18 +135,21 @@ impl PowerMetrics {
                 };
 
                 let power_w = energy_uj as f64 / 1_000_000.0 / SAMPLE_DURATION.as_secs_f64();
-                
-                if i == 0 {  // Package domain
+
+                if i == 0 {
+                    // Package domain
                     package_samples.push(power_w);
-                } else {     // DRAM domain
+                } else {
+                    // DRAM domain
                     dram_samples.push(power_w);
                 }
             }
 
             // Check for system stability
             if i > 0 {
-                let pkg_diff = (package_samples[i] - package_samples[i-1]).abs();
-                if pkg_diff > 1.0 {  // More than 1W difference between samples
+                let pkg_diff = (package_samples[i] - package_samples[i - 1]).abs();
+                if pkg_diff > 1.0 {
+                    // More than 1W difference between samples
                     println!("Warning: System power fluctuating ({}W difference). Results may be inaccurate.", pkg_diff);
                 }
             }
@@ -157,9 +160,11 @@ impl PowerMetrics {
         let avg_dram = dram_samples.iter().sum::<f64>() / SAMPLES as f64;
 
         // Calculate coefficient of variation to measure baseline stability
-        let pkg_variance = package_samples.iter()
+        let pkg_variance = package_samples
+            .iter()
             .map(|x| (x - avg_package).powi(2))
-            .sum::<f64>() / SAMPLES as f64;
+            .sum::<f64>()
+            / SAMPLES as f64;
         let variation_coefficient = (pkg_variance.sqrt() / avg_package) * 100.0;
 
         let baseline = PowerBaseline {
@@ -172,8 +177,11 @@ impl PowerMetrics {
         println!("Baseline established:");
         println!("  Package idle power: {:.2}W", baseline.idle_package_power);
         println!("  DRAM idle power: {:.2}W", baseline.idle_dram_power);
-        println!("  Variation coefficient: {:.1}%", baseline.variation_coefficient);
-        
+        println!(
+            "  Variation coefficient: {:.1}%",
+            baseline.variation_coefficient
+        );
+
         if baseline.variation_coefficient > 10.0 {
             println!("\nWARNING: High power variation detected (>10%). Consider:");
             println!("- Closing unnecessary applications");
@@ -203,7 +211,7 @@ impl PowerMetrics {
             } else {
                 u64::MAX - last + current
             };
-            
+
             // Convert to watts and subtract baseline
             let total_power_w = energy_uj as f64 / 1_000_000.0 / elapsed.as_secs_f64();
             let baseline_power = if i == 0 {
@@ -211,9 +219,9 @@ impl PowerMetrics {
             } else {
                 self.baseline.idle_dram_power
             };
-            
+
             let active_power_w = (total_power_w - baseline_power).max(0.0);
-            
+
             power_data.push(PowerDomain {
                 domain: if i == 0 { "package" } else { "dram" }.to_string(),
                 total_power_w: total_power_w,
@@ -237,10 +245,10 @@ impl PowerMetrics {
 #[derive(Debug, Clone)]
 pub struct PowerDomain {
     pub domain: String,
-    pub total_power_w: f64,      // Total power including baseline
-    pub active_power_w: f64,     // Power above baseline
+    pub total_power_w: f64,  // Total power including baseline
+    pub active_power_w: f64, // Power above baseline
     pub energy_uj: u64,
-    pub baseline_power_w: f64,   // Baseline power for this domain
+    pub baseline_power_w: f64, // Baseline power for this domain
 }
 
 #[derive(Debug, Clone)]
@@ -252,12 +260,12 @@ pub struct PowerSnapshot {
 
 #[derive(Debug, Clone)]
 pub struct PowerProfile {
-    pub avg_package_power: f64,      // Average active CPU power
-    pub avg_dram_power: f64,         // Average active DRAM power
-    pub total_energy_j: f64,         // Total energy above baseline
-    pub energy_per_message: f64,     // Active energy per message
-    pub energy_per_byte: f64,        // Active energy per byte
-    pub baseline: PowerBaseline,     // Reference baseline measurements
+    pub avg_package_power: f64,  // Average active CPU power
+    pub avg_dram_power: f64,     // Average active DRAM power
+    pub total_energy_j: f64,     // Total energy above baseline
+    pub energy_per_message: f64, // Active energy per message
+    pub energy_per_byte: f64,    // Active energy per byte
+    pub baseline: PowerBaseline, // Reference baseline measurements
 }
 
 impl PowerProfile {
@@ -294,8 +302,8 @@ impl PowerProfile {
         PowerEfficiencyMetrics {
             total_active_power: self.avg_package_power + self.avg_dram_power,
             total_baseline_power: self.baseline.idle_package_power + self.baseline.idle_dram_power,
-            power_increase_ratio: (self.avg_package_power + self.avg_dram_power) /
-                                (self.baseline.idle_package_power + self.baseline.idle_dram_power),
+            power_increase_ratio: (self.avg_package_power + self.avg_dram_power)
+                / (self.baseline.idle_package_power + self.baseline.idle_dram_power),
             baseline_stability: self.baseline.variation_coefficient,
         }
     }
@@ -303,8 +311,8 @@ impl PowerProfile {
 
 #[derive(Debug)]
 pub struct PowerEfficiencyMetrics {
-    pub total_active_power: f64,     // Total power above baseline
-    pub total_baseline_power: f64,   // Total baseline power
-    pub power_increase_ratio: f64,   // Ratio of active to baseline power
-    pub baseline_stability: f64,     // Coefficient of variation in baseline
+    pub total_active_power: f64,   // Total power above baseline
+    pub total_baseline_power: f64, // Total baseline power
+    pub power_increase_ratio: f64, // Ratio of active to baseline power
+    pub baseline_stability: f64,   // Coefficient of variation in baseline
 }

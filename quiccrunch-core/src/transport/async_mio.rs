@@ -1,9 +1,9 @@
+use mio::{Interest, Registry, Token};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
-use mio::{Interest, Registry, Token};
 use tquic::{PacketInfo, PacketSendHandler, Result};
 
 /// Async UDP socket wrapper that implements PacketSendHandler for tQUIC
@@ -67,7 +67,12 @@ impl AsyncRegistry {
         AsyncRegistry {}
     }
 
-    pub fn register(&self, _socket: &mut AsyncQuicSocket, _token: Token, _interest: Interest) -> io::Result<()> {
+    pub fn register(
+        &self,
+        _socket: &mut AsyncQuicSocket,
+        _token: Token,
+        _interest: Interest,
+    ) -> io::Result<()> {
         // No-op since we're using tokio's reactor
         Ok(())
     }
@@ -89,7 +94,11 @@ impl AsyncPoll {
         &self.registry
     }
 
-    pub async fn poll(&self, _events: &mut mio::Events, timeout: Option<std::time::Duration>) -> io::Result<()> {
+    pub async fn poll(
+        &self,
+        _events: &mut mio::Events,
+        timeout: Option<std::time::Duration>,
+    ) -> io::Result<()> {
         // In async context, we don't need to poll manually
         // Events are handled by tokio's reactor
         if let Some(timeout) = timeout {

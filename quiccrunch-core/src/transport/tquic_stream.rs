@@ -1,7 +1,7 @@
+use bytes::Bytes;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use bytes::Bytes;
 
 /// A simple wrapper around tQUIC stream functionality that implements async traits
 #[derive(Debug)]
@@ -22,11 +22,11 @@ impl TquicStream {
             write_buffer: Vec::new(),
         }
     }
-    
+
     pub fn connection_id(&self) -> u64 {
         self.connection_id
     }
-    
+
     pub fn stream_id(&self) -> u64 {
         self.stream_id
     }

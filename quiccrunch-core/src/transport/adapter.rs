@@ -1,15 +1,16 @@
-use std::sync::Arc;
 use std::net::SocketAddr;
-use tokio::sync::oneshot;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::sync::oneshot;
 
 use crate::error::TransportError;
-use crate::transport::messages::{TquicCommand, WorkerConfig, ConnectionId};
+use crate::transport::messages::{ConnectionId, TquicCommand, WorkerConfig};
 use crate::transport::worker_pool::TquicWorkerPool;
 
 /// Async adapter that provides tokio-compatible APIs on top of the tQUIC worker pool
+#[derive(Debug)]
 pub struct TquicAdapter {
     worker_pool: Arc<TquicWorkerPool>,
 }
@@ -22,15 +23,16 @@ impl TquicAdapter {
 
     pub async fn connect(&self, remote_addr: SocketAddr) -> Result<ConnectionId, TransportError> {
         let (response_tx, response_rx) = oneshot::channel();
-        
+
         let cmd = TquicCommand::Connect {
             remote_addr,
             response: response_tx,
         };
 
         self.worker_pool.submit_command(cmd).await?;
-        
-        response_rx.await
+
+        response_rx
+            .await
             .map_err(|_| TransportError::ConnectionFailed("Response channel closed".into()))?
     }
 
@@ -42,7 +44,7 @@ impl TquicAdapter {
         fin: bool,
     ) -> Result<(), TransportError> {
         let (response_tx, response_rx) = oneshot::channel();
-        
+
         let cmd = TquicCommand::Send {
             connection_id,
             stream_id,
@@ -52,8 +54,9 @@ impl TquicAdapter {
         };
 
         self.worker_pool.submit_command(cmd).await?;
-        
-        response_rx.await
+
+        response_rx
+            .await
             .map_err(|_| TransportError::ConnectionFailed("Response channel closed".into()))?
     }
 
@@ -64,7 +67,7 @@ impl TquicAdapter {
         max_length: usize,
     ) -> Result<Vec<u8>, TransportError> {
         let (response_tx, response_rx) = oneshot::channel();
-        
+
         let cmd = TquicCommand::Receive {
             connection_id,
             stream_id,
@@ -73,35 +76,38 @@ impl TquicAdapter {
         };
 
         self.worker_pool.submit_command(cmd).await?;
-        
-        response_rx.await
+
+        response_rx
+            .await
             .map_err(|_| TransportError::ConnectionFailed("Response channel closed".into()))?
     }
 
     pub async fn accept(&self) -> Result<(ConnectionId, SocketAddr), TransportError> {
         let (response_tx, response_rx) = oneshot::channel();
-        
+
         let cmd = TquicCommand::Accept {
             response: response_tx,
         };
 
         self.worker_pool.submit_command(cmd).await?;
-        
-        response_rx.await
+
+        response_rx
+            .await
             .map_err(|_| TransportError::ConnectionFailed("Response channel closed".into()))?
     }
 
     pub async fn open_stream(&self, connection_id: ConnectionId) -> Result<u64, TransportError> {
         let (response_tx, response_rx) = oneshot::channel();
-        
+
         let cmd = TquicCommand::OpenStream {
             connection_id,
             response: response_tx,
         };
 
         self.worker_pool.submit_command(cmd).await?;
-        
-        response_rx.await
+
+        response_rx
+            .await
             .map_err(|_| TransportError::ConnectionFailed("Response channel closed".into()))?
     }
 
@@ -138,7 +144,9 @@ impl TquicAdapter {
     }
 
     pub async fn shutdown(&self) -> Result<(), TransportError> {
-        self.worker_pool.shutdown(std::time::Duration::from_secs(30)).await
+        self.worker_pool
+            .shutdown(std::time::Duration::from_secs(30))
+            .await
     }
 
     pub fn worker_status(&self) -> Vec<crate::transport::messages::WorkerStatus> {
@@ -160,15 +168,14 @@ impl TquicClient {
         Ok(TquicClient { adapter })
     }
 
-    pub async fn connect(&self, addr: &str) -> Result<TquicConnection, TransportError> {
-        let remote_addr: SocketAddr = addr.parse()
+    pub async fn connect(&self, addr: &str) -> Result<crate::QuicStream, TransportError> {
+        let remote_addr: SocketAddr = addr
+            .parse()
             .map_err(|e| TransportError::ConfigError(format!("Invalid address: {}", e)))?;
-        
+
         let connection_id = self.adapter.connect(remote_addr).await?;
-        Ok(TquicConnection {
-            adapter: self.adapter.clone(),
-            connection_id,
-        })
+        // Create a QuicStream with the tQUIC backend
+        Ok(crate::QuicStream::new_simple_tquic(connection_id, 0, 65536))
     }
 }
 
@@ -182,15 +189,16 @@ impl TquicServer {
         let worker_count = worker_count.unwrap_or_else(|| num_cpus::get());
         let mut config = WorkerConfig::default();
         config.is_server = true;
-        
+
         let adapter = Arc::new(TquicAdapter::new(worker_count, config)?);
         Ok(TquicServer { adapter })
     }
 
     pub async fn listen(&self, addr: &str) -> Result<TquicListener, TransportError> {
-        let bind_addr: SocketAddr = addr.parse()
+        let bind_addr: SocketAddr = addr
+            .parse()
             .map_err(|e| TransportError::ConfigError(format!("Invalid address: {}", e)))?;
-        
+
         // For now, we just create a listener that will accept on any worker
         Ok(TquicListener {
             adapter: self.adapter.clone(),
@@ -217,14 +225,18 @@ impl TquicListener {
 // Implement the Listener trait for TquicListener
 #[async_trait::async_trait]
 impl crate::transport::Listener for TquicListener {
-    type Connection = TquicStream;
-    
-    async fn accept(&mut self) -> Result<Self::Connection, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let connection = self.accept().await
+    type Connection = crate::QuicStream;
+
+    async fn accept(
+        &mut self,
+    ) -> Result<Self::Connection, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let (connection_id, _remote_addr) = self
+            .adapter
+            .accept()
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync + 'static>)?;
-        let stream = connection.open_stream().await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync + 'static>)?;
-        Ok(stream)
+        // Create a QuicStream with the tQUIC backend
+        Ok(crate::QuicStream::new_simple_tquic(connection_id, 0, 65536))
     }
 }
 
@@ -244,7 +256,9 @@ impl TquicConnection {
     }
 
     pub async fn close(&self) -> Result<(), TransportError> {
-        self.adapter.close_connection(self.connection_id, 0, Vec::new()).await
+        self.adapter
+            .close_connection(self.connection_id, 0, Vec::new())
+            .await
     }
 }
 
@@ -256,15 +270,21 @@ pub struct TquicStream {
 
 impl TquicStream {
     pub async fn send(&mut self, data: &[u8], fin: bool) -> Result<(), TransportError> {
-        self.adapter.send(self.connection_id, self.stream_id, data.to_vec(), fin).await
+        self.adapter
+            .send(self.connection_id, self.stream_id, data.to_vec(), fin)
+            .await
     }
 
     pub async fn receive(&mut self, max_length: usize) -> Result<Vec<u8>, TransportError> {
-        self.adapter.receive(self.connection_id, self.stream_id, max_length).await
+        self.adapter
+            .receive(self.connection_id, self.stream_id, max_length)
+            .await
     }
 
     pub async fn close(&self) -> Result<(), TransportError> {
-        self.adapter.close_stream(self.connection_id, self.stream_id, 0).await
+        self.adapter
+            .close_stream(self.connection_id, self.stream_id, 0)
+            .await
     }
 }
 

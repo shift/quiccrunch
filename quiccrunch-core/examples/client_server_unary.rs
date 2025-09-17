@@ -1,11 +1,11 @@
 //! Example: Client→Server Unary RPC using tQUIC and Cap'n Proto
 
-use quiccrunch_core::transport::tquic::{AsyncTquicClient, AsyncTquicServer};
 use capnp::message::{Builder, ReaderOptions};
-use capnp::serialize::{write_message, read_message};
+use capnp::serialize::{read_message, write_message};
 use quiccrunch_core::schema::rpc_capnp::{rpc_message, rpc_request, streaming_type};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use quiccrunch_core::transport::tquic::{AsyncTquicClient, AsyncTquicServer};
 use std::error::Error;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -27,7 +27,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let message_reader = read_message(&mut cursor, ReaderOptions::new()).unwrap();
         let rpc_msg = message_reader.get_root::<rpc_message::Reader>().unwrap();
         let req = rpc_msg.get_request().unwrap();
-        println!("[Server] Received request: service={} method={}", req.get_service().unwrap(), req.get_method().unwrap());
+        println!(
+            "[Server] Received request: service={} method={}",
+            req.get_service().unwrap(),
+            req.get_method().unwrap()
+        );
         // Build response
         let mut builder = Builder::new_default();
         {
@@ -73,7 +77,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let message_reader = read_message(&mut cursor, ReaderOptions::new()).unwrap();
     let rpc_msg = message_reader.get_root::<rpc_message::Reader>().unwrap();
     let resp = rpc_msg.get_response().unwrap();
-    println!("[Client] Received response: {}", String::from_utf8_lossy(resp.get_result().unwrap()));
+    println!(
+        "[Client] Received response: {}",
+        String::from_utf8_lossy(resp.get_result().unwrap())
+    );
 
     Ok(())
 }

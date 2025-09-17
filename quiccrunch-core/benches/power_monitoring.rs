@@ -32,7 +32,7 @@ fn power_monitoring_benchmark(c: &mut Criterion) {
 
     // Collect power profiles under different load conditions
     let mut profiles = HashMap::new();
-    
+
     // Idle profile
     let idle_profile = collect_power_profile(Duration::from_secs(10));
     viz.plot_time_series(&idle_profile, "Idle System").unwrap();
@@ -51,7 +51,8 @@ fn power_monitoring_benchmark(c: &mut Criterion) {
         handle.join().unwrap();
         profile
     };
-    viz.plot_time_series(&cpu_stress_profile, "CPU Stress").unwrap();
+    viz.plot_time_series(&cpu_stress_profile, "CPU Stress")
+        .unwrap();
     profiles.insert("CPU Stress".to_string(), cpu_stress_profile);
 
     // Memory stress profile
@@ -69,23 +70,25 @@ fn power_monitoring_benchmark(c: &mut Criterion) {
         handle.join().unwrap();
         profile
     };
-    viz.plot_time_series(&memory_stress_profile, "Memory Stress").unwrap();
+    viz.plot_time_series(&memory_stress_profile, "Memory Stress")
+        .unwrap();
     profiles.insert("Memory Stress".to_string(), memory_stress_profile);
 
     // Test different CPU governors
     let governors = vec!["powersave", "performance", "schedutil"];
-    
+
     for governor in governors {
         // Set governor (requires root)
         Command::new("sudo")
             .args(&["cpupower", "frequency-set", "-g", governor])
             .output()
             .expect("Failed to set CPU governor");
-        
+
         thread::sleep(Duration::from_secs(1)); // Let system stabilize
-        
+
         let governor_profile = collect_power_profile(Duration::from_secs(10));
-        viz.plot_time_series(&governor_profile, &format!("Governor: {}", governor)).unwrap();
+        viz.plot_time_series(&governor_profile, &format!("Governor: {}", governor))
+            .unwrap();
         profiles.insert(format!("Governor: {}", governor), governor_profile);
     }
 
@@ -95,20 +98,39 @@ fn power_monitoring_benchmark(c: &mut Criterion) {
     // Validate power efficiency metrics
     let validate_efficiency = |profile: &PowerTimeSeries, name: &str| {
         let efficiency = profile.calculate_efficiency();
-        
+
         // Basic validation
-        assert!(!efficiency.is_empty(), "Efficiency vector should not be empty for {}", name);
-        
+        assert!(
+            !efficiency.is_empty(),
+            "Efficiency vector should not be empty for {}",
+            name
+        );
+
         // Check for invalid values
         for (i, eff) in efficiency.iter().enumerate() {
-            assert!(*eff >= 0.0, "Negative efficiency at index {} for {}: {}", i, name, eff);
-            assert!(*eff < 1000.0, "Unreasonably high efficiency at index {} for {}: {}", i, name, eff);
+            assert!(
+                *eff >= 0.0,
+                "Negative efficiency at index {} for {}: {}",
+                i,
+                name,
+                eff
+            );
+            assert!(
+                *eff < 1000.0,
+                "Unreasonably high efficiency at index {} for {}: {}",
+                i,
+                name,
+                eff
+            );
         }
 
         // Validate efficiency trends
         let avg_efficiency: f64 = efficiency.iter().sum::<f64>() / efficiency.len() as f64;
-        println!("Average efficiency for {}: {:.2} watts/GHz", name, avg_efficiency);
-        
+        println!(
+            "Average efficiency for {}: {:.2} watts/GHz",
+            name, avg_efficiency
+        );
+
         // Return for comparison
         (avg_efficiency, efficiency)
     };
@@ -124,10 +146,14 @@ fn power_monitoring_benchmark(c: &mut Criterion) {
     let (mem_stress_eff, _) = validate_efficiency(&profiles["Memory Stress"], "Memory Stress");
 
     // Basic sanity checks
-    assert!(cpu_stress_eff > idle_eff, 
-        "CPU stress should show higher power/frequency ratio than idle");
-    assert!(mem_stress_eff > idle_eff, 
-        "Memory stress should show higher power/frequency ratio than idle");
+    assert!(
+        cpu_stress_eff > idle_eff,
+        "CPU stress should show higher power/frequency ratio than idle"
+    );
+    assert!(
+        mem_stress_eff > idle_eff,
+        "Memory stress should show higher power/frequency ratio than idle"
+    );
 
     // Benchmark the monitoring itself
     let mut monitor = PowerMonitor::new().unwrap();

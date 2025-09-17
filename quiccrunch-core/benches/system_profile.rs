@@ -1,9 +1,9 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::process::Command;
-use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SystemProfile {
@@ -12,7 +12,7 @@ pub struct SystemProfile {
     pub memory: MemoryInfo,
     pub motherboard: MotherboardInfo,
     pub os_info: OsInfo,
-    
+
     // Runtime metrics
     pub temperatures: TempMetrics,
     pub cooling: CoolingMetrics,
@@ -30,7 +30,7 @@ pub struct CpuInfo {
     pub cache_info: CacheInfo,
     pub flags: Vec<String>,
     pub stepping: String,
-    pub bugs: Vec<String>,          // Known CPU bugs/vulnerabilities
+    pub bugs: Vec<String>, // Known CPU bugs/vulnerabilities
     pub microcode_version: String,
 }
 
@@ -46,10 +46,10 @@ pub struct CacheInfo {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MemoryInfo {
     pub total_memory_mb: u64,
-    pub memory_type: String,        // DDR4, DDR5, etc.
+    pub memory_type: String, // DDR4, DDR5, etc.
     pub channels: u32,
     pub speed_mhz: u32,
-    pub timings: String,            // e.g., "16-18-18-36"
+    pub timings: String, // e.g., "16-18-18-36"
     pub ecc: bool,
     pub max_bandwidth: Option<f64>, // GB/s
 }
@@ -83,15 +83,15 @@ pub struct TempMetrics {
 pub struct CoolingMetrics {
     pub cpu_fan_rpm: Vec<SensorReading>,
     pub case_fans_rpm: Vec<Vec<SensorReading>>,
-    pub pump_rpm: Option<Vec<SensorReading>>,  // For liquid cooling
+    pub pump_rpm: Option<Vec<SensorReading>>, // For liquid cooling
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PowerLimits {
-    pub package_tdp: f64,           // Watts
-    pub current_pl1: f64,           // Short term power limit
-    pub current_pl2: f64,           // Long term power limit
-    pub tau: f64,                   // Power limit time window
+    pub package_tdp: f64, // Watts
+    pub current_pl1: f64, // Short term power limit
+    pub current_pl2: f64, // Long term power limit
+    pub tau: f64,         // Power limit time window
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -106,7 +106,7 @@ impl SystemProfile {
         let memory = Self::gather_memory_info()?;
         let motherboard = Self::gather_motherboard_info()?;
         let os_info = Self::gather_os_info()?;
-        
+
         Ok(Self {
             cpu,
             memory,
@@ -133,17 +133,35 @@ impl SystemProfile {
             if line.starts_with("model name") {
                 model_name = line.split(":").nth(1).unwrap_or("").trim().to_string();
             } else if line.starts_with("cpu cores") {
-                physical_cores = line.split(":").nth(1).unwrap_or("0").trim().parse().unwrap_or(0);
+                physical_cores = line
+                    .split(":")
+                    .nth(1)
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()
+                    .unwrap_or(0);
             } else if line.starts_with("siblings") {
-                logical_cores = line.split(":").nth(1).unwrap_or("0").trim().parse().unwrap_or(0);
+                logical_cores = line
+                    .split(":")
+                    .nth(1)
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()
+                    .unwrap_or(0);
             } else if line.starts_with("flags") {
-                flags = line.split(":").nth(1).unwrap_or("")
+                flags = line
+                    .split(":")
+                    .nth(1)
+                    .unwrap_or("")
                     .trim()
                     .split_whitespace()
                     .map(String::from)
                     .collect();
             } else if line.starts_with("bugs") {
-                bugs = line.split(":").nth(1).unwrap_or("")
+                bugs = line
+                    .split(":")
+                    .nth(1)
+                    .unwrap_or("")
                     .trim()
                     .split_whitespace()
                     .map(String::from)
@@ -155,7 +173,8 @@ impl SystemProfile {
 
         // Get CPU frequencies
         let base_freq = Self::read_cpu_freq("/sys/devices/system/cpu/cpu0/cpufreq/base_frequency")?;
-        let max_freq = Self::read_cpu_freq("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")?;
+        let max_freq =
+            Self::read_cpu_freq("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")?;
 
         // Get cache information
         let cache_info = Self::gather_cache_info()?;
@@ -186,7 +205,7 @@ impl SystemProfile {
             .output()?;
 
         let output_str = String::from_utf8_lossy(&output.stdout);
-        
+
         let mut total_memory_mb = 0;
         let mut memory_type = String::new();
         let mut speed_mhz = 0;
@@ -240,7 +259,7 @@ impl SystemProfile {
             .output()?;
 
         let output_str = String::from_utf8_lossy(&output.stdout);
-        
+
         let mut manufacturer = String::new();
         let mut model = String::new();
         let mut bios_version = String::new();
@@ -261,7 +280,7 @@ impl SystemProfile {
             .output()?;
 
         let bios_str = String::from_utf8_lossy(&bios_output.stdout);
-        
+
         for line in bios_str.lines() {
             if line.contains("Version:") {
                 bios_version = line.split(':').nth(1).unwrap_or("").trim().to_string();
@@ -287,17 +306,24 @@ impl SystemProfile {
 
         for line in os_release.lines() {
             if line.starts_with("NAME=") {
-                name = line.split('=').nth(1).unwrap_or("").trim_matches('"').to_string();
+                name = line
+                    .split('=')
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim_matches('"')
+                    .to_string();
             } else if line.starts_with("VERSION=") {
-                version = line.split('=').nth(1).unwrap_or("").trim_matches('"').to_string();
+                version = line
+                    .split('=')
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim_matches('"')
+                    .to_string();
             }
         }
 
         // Get kernel version
-        let kernel = Command::new("uname")
-            .arg("-r")
-            .output()?
-            .stdout;
+        let kernel = Command::new("uname").arg("-r").output()?.stdout;
         let kernel = String::from_utf8_lossy(&kernel).trim().to_string();
 
         // Get scheduler
@@ -306,9 +332,10 @@ impl SystemProfile {
             .to_string();
 
         // Get CPU governor
-        let governor = std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")?
-            .trim()
-            .to_string();
+        let governor =
+            std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")?
+                .trim()
+                .to_string();
 
         Ok(OsInfo {
             name,
@@ -377,7 +404,7 @@ impl SystemProfile {
         for entry in std::fs::read_dir("/sys/class/thermal")? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.to_string_lossy().contains("thermal_zone") {
                 if let Ok(temp) = std::fs::read_to_string(path.join("temp")) {
                     if let Ok(t) = temp.trim().parse::<f64>() {
@@ -406,18 +433,18 @@ impl SystemProfile {
         for entry in std::fs::read_dir("/sys/class/hwmon")? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if let Ok(name) = std::fs::read_to_string(path.join("name")) {
                 let name = name.trim();
-                
+
                 // Check for different fan controllers
                 match name {
                     "it8620" | "nct6775" | "nct6776" => {
                         // Common fan controllers
                         for i in 1..6 {
-                            if let Ok(speed) = std::fs::read_to_string(
-                                path.join(format!("fan{}_input", i))
-                            ) {
+                            if let Ok(speed) =
+                                std::fs::read_to_string(path.join(format!("fan{}_input", i)))
+                            {
                                 if let Ok(s) = speed.trim().parse::<f64>() {
                                     let reading = SensorReading {
                                         timestamp: std::time::SystemTime::now()
@@ -426,19 +453,19 @@ impl SystemProfile {
                                             .as_secs_f64(),
                                         value: s,
                                     };
-                                    
+
                                     if i == 1 {
                                         cpu_fan.push(reading);
                                     } else {
                                         while case_fans.len() < i - 1 {
                                             case_fans.push(Vec::new());
                                         }
-                                        case_fans[i-2].push(reading);
+                                        case_fans[i - 2].push(reading);
                                     }
                                 }
                             }
                         }
-                    },
+                    }
                     _ => continue,
                 }
             }
@@ -492,19 +519,19 @@ impl SystemProfile {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.to_string_lossy().contains("0:0") {
-                    if let Ok(constraint_0) = std::fs::read_to_string(
-                        path.join("constraint_0_power_limit_uw")
-                    ) {
+                    if let Ok(constraint_0) =
+                        std::fs::read_to_string(path.join("constraint_0_power_limit_uw"))
+                    {
                         pl1 = constraint_0.trim().parse::<f64>().unwrap_or(0.0) / 1_000_000.0;
                     }
-                    if let Ok(constraint_1) = std::fs::read_to_string(
-                        path.join("constraint_1_power_limit_uw")
-                    ) {
+                    if let Ok(constraint_1) =
+                        std::fs::read_to_string(path.join("constraint_1_power_limit_uw"))
+                    {
                         pl2 = constraint_1.trim().parse::<f64>().unwrap_or(0.0) / 1_000_000.0;
                     }
-                    if let Ok(time_window) = std::fs::read_to_string(
-                        path.join("constraint_0_time_window_us")
-                    ) {
+                    if let Ok(time_window) =
+                        std::fs::read_to_string(path.join("constraint_0_time_window_us"))
+                    {
                         tau = time_window.trim().parse::<f64>().unwrap_or(0.0) / 1_000_000.0;
                     }
                 }
@@ -513,7 +540,7 @@ impl SystemProfile {
 
         // Try reading TDP from cpuinfo or sysfs
         let tdp = if let Ok(max_power) = std::fs::read_to_string(
-            "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_max_power_uw"
+            "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_max_power_uw",
         ) {
             max_power.trim().parse::<f64>().unwrap_or(0.0) / 1_000_000.0
         } else {

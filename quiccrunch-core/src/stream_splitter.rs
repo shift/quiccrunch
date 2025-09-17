@@ -1,12 +1,12 @@
 //! Stream splitting for concurrent read/write access in streaming RPC
-//! 
+//!
 //! Provides a safe way to split QuicStream into separate read/write handles
 //! that can be used concurrently in different tasks.
 
-use std::sync::Arc;
-use bytes::Bytes;
-use tokio::sync::{Mutex, mpsc, oneshot};
 use crate::{QuicStream, Result, TransportError};
+use bytes::Bytes;
+use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 /// Split stream handle that allows concurrent read/write operations
 #[derive(Clone)]
@@ -40,7 +40,7 @@ impl SplitStream {
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<StreamCommand>();
         let stream = Arc::new(Mutex::new(stream));
         let stream_clone = Arc::clone(&stream);
-        
+
         // Background task to handle stream operations
         let task_handle = tokio::spawn(async move {
             while let Some(cmd) = cmd_rx.recv().await {
@@ -65,7 +65,7 @@ impl SplitStream {
                 }
             }
         });
-        
+
         Self {
             inner: Arc::new(StreamSplitterInner {
                 cmd_tx,
@@ -73,39 +73,44 @@ impl SplitStream {
             }),
         }
     }
-    
+
     /// Send a message over the stream
     pub async fn send_message(&self, data: Bytes) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        
-        self.inner.cmd_tx.send(StreamCommand::Send {
-            data,
-            response: tx,
-        }).map_err(|_| TransportError::StreamError("Stream splitter closed".into()))?;
-        
-        rx.await.map_err(|_| TransportError::StreamError("Send operation canceled".into()))?
+
+        self.inner
+            .cmd_tx
+            .send(StreamCommand::Send { data, response: tx })
+            .map_err(|_| TransportError::StreamError("Stream splitter closed".into()))?;
+
+        rx.await
+            .map_err(|_| TransportError::StreamError("Send operation canceled".into()))?
     }
-    
+
     /// Receive a message from the stream
     pub async fn receive_message(&self) -> Result<Bytes> {
         let (tx, rx) = oneshot::channel();
-        
-        self.inner.cmd_tx.send(StreamCommand::Receive {
-            response: tx,
-        }).map_err(|_| TransportError::StreamError("Stream splitter closed".into()))?;
-        
-        rx.await.map_err(|_| TransportError::StreamError("Receive operation canceled".into()))?
+
+        self.inner
+            .cmd_tx
+            .send(StreamCommand::Receive { response: tx })
+            .map_err(|_| TransportError::StreamError("Stream splitter closed".into()))?;
+
+        rx.await
+            .map_err(|_| TransportError::StreamError("Receive operation canceled".into()))?
     }
-    
+
     /// Close the stream
     pub async fn close(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        
-        self.inner.cmd_tx.send(StreamCommand::Close {
-            response: tx,
-        }).map_err(|_| TransportError::StreamError("Stream splitter closed".into()))?;
-        
-        rx.await.map_err(|_| TransportError::StreamError("Close operation canceled".into()))?
+
+        self.inner
+            .cmd_tx
+            .send(StreamCommand::Close { response: tx })
+            .map_err(|_| TransportError::StreamError("Stream splitter closed".into()))?;
+
+        rx.await
+            .map_err(|_| TransportError::StreamError("Close operation canceled".into()))?
     }
 }
 
@@ -120,7 +125,7 @@ impl StreamReader {
     pub fn new(splitter: SplitStream) -> Self {
         Self { splitter }
     }
-    
+
     /// Receive a message from the stream
     pub async fn receive_message(&self) -> Result<Bytes> {
         self.splitter.receive_message().await
@@ -138,12 +143,12 @@ impl StreamWriter {
     pub fn new(splitter: SplitStream) -> Self {
         Self { splitter }
     }
-    
+
     /// Send a message over the stream
     pub async fn send_message(&self, data: Bytes) -> Result<()> {
         self.splitter.send_message(data).await
     }
-    
+
     /// Close the stream
     pub async fn close(&self) -> Result<()> {
         self.splitter.close().await
@@ -156,9 +161,7 @@ impl SplitStream {
         let reader = StreamReader {
             splitter: self.clone(),
         };
-        let writer = StreamWriter {
-            splitter: self,
-        };
+        let writer = StreamWriter { splitter: self };
         (reader, writer)
     }
 }
@@ -178,16 +181,16 @@ impl Splittable for QuicStream {
 mod tests {
     use super::*;
     use crate::QuicStream;
-    
+
     // Mock stream for testing
     struct MockStream;
-    
+
     #[tokio::test]
     async fn test_split_stream_basic() {
         // This test would need a real QuicStream implementation
         // For now, it demonstrates the API
     }
-    
+
     #[tokio::test]
     async fn test_concurrent_access() {
         // Test that we can use reader and writer concurrently

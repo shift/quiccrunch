@@ -1,15 +1,14 @@
+use bytes::Bytes;
+use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
+use dashmap::DashMap;
 /// Lock-free channel implementation for high-performance QUIC streams
-/// 
+///
 /// This module provides lock-free, multi-producer, single-consumer channels
 /// optimized for the QUIC use case where multiple streams need to communicate
 /// with the underlying transport without contention.
-
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError};
-use dashmap::DashMap;
 use tokio::sync::oneshot;
-use bytes::Bytes;
 
 /// Stream command types for lock-free communication
 #[derive(Debug)]
@@ -60,7 +59,7 @@ pub struct StreamHandle {
 
 impl StreamHandle {
     pub fn new(
-        stream_id: u64, 
+        stream_id: u64,
         connection_id: u64,
         write_tx: Sender<StreamCommand>,
         read_tx: Sender<StreamCommand>,
@@ -78,8 +77,11 @@ impl StreamHandle {
 
     /// Send data on this stream (non-blocking)
     pub async fn write(&self, data: Bytes, fin: bool) -> Result<(), crate::TransportError> {
-        let (tx, rx): (oneshot::Sender<Result<(), crate::TransportError>>, oneshot::Receiver<Result<(), crate::TransportError>>) = oneshot::channel();
-        
+        let (tx, rx): (
+            oneshot::Sender<Result<(), crate::TransportError>>,
+            oneshot::Receiver<Result<(), crate::TransportError>>,
+        ) = oneshot::channel();
+
         let cmd = StreamCommand::Write {
             stream_id: self.stream_id,
             data: data.clone(),
@@ -88,11 +90,14 @@ impl StreamHandle {
         };
 
         // Use dedicated write channel to avoid contention
-        self.write_tx.send(cmd)
+        self.write_tx
+            .send(cmd)
             .map_err(|_| crate::TransportError::StreamError("Write channel closed".into()))?;
 
         self.stats.writes_sent.fetch_add(1, Ordering::Relaxed);
-        self.stats.bytes_written.fetch_add(data.len() as u64, Ordering::Relaxed);
+        self.stats
+            .bytes_written
+            .fetch_add(data.len() as u64, Ordering::Relaxed);
 
         rx.await
             .map_err(|_| crate::TransportError::StreamError("Write response canceled".into()))?
@@ -100,24 +105,31 @@ impl StreamHandle {
 
     /// Read data from this stream (non-blocking)
     pub async fn read(&self, buffer_size: usize) -> Result<Option<Bytes>, crate::TransportError> {
-        let (tx, rx): (oneshot::Sender<Result<Option<Bytes>, crate::TransportError>>, oneshot::Receiver<Result<Option<Bytes>, crate::TransportError>>) = oneshot::channel();
-        
+        let (tx, rx): (
+            oneshot::Sender<Result<Option<Bytes>, crate::TransportError>>,
+            oneshot::Receiver<Result<Option<Bytes>, crate::TransportError>>,
+        ) = oneshot::channel();
+
         let cmd = StreamCommand::Read {
             stream_id: self.stream_id,
             buffer_size,
             response: tx,
         };
 
-        self.read_tx.send(cmd)
+        self.read_tx
+            .send(cmd)
             .map_err(|_| crate::TransportError::StreamError("Read channel closed".into()))?;
 
         self.stats.reads_sent.fetch_add(1, Ordering::Relaxed);
 
-        let result = rx.await
+        let result = rx
+            .await
             .map_err(|_| crate::TransportError::StreamError("Read response canceled".into()))?;
 
         if let Ok(Some(ref data)) = result {
-            self.stats.bytes_read.fetch_add(data.len() as u64, Ordering::Relaxed);
+            self.stats
+                .bytes_read
+                .fetch_add(data.len() as u64, Ordering::Relaxed);
         }
 
         result
@@ -125,14 +137,18 @@ impl StreamHandle {
 
     /// Close this stream
     pub async fn close(&self) -> Result<(), crate::TransportError> {
-        let (tx, rx): (oneshot::Sender<Result<(), crate::TransportError>>, oneshot::Receiver<Result<(), crate::TransportError>>) = oneshot::channel();
-        
+        let (tx, rx): (
+            oneshot::Sender<Result<(), crate::TransportError>>,
+            oneshot::Receiver<Result<(), crate::TransportError>>,
+        ) = oneshot::channel();
+
         let cmd = StreamCommand::Close {
             stream_id: self.stream_id,
             response: tx,
         };
 
-        self.close_tx.send(cmd)
+        self.close_tx
+            .send(cmd)
             .map_err(|_| crate::TransportError::StreamError("Close channel closed".into()))?;
 
         rx.await
@@ -187,17 +203,16 @@ pub struct StreamStatsSnapshot {
 }
 
 /// Connection handle managing multiple streams
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ConnectionHandle {
     pub connection_id: u64,
     stream_counter: Arc<AtomicU64>,
-    
+
     // Separate channels for different operations to minimize contention
     write_tx: Sender<StreamCommand>,
     read_tx: Sender<StreamCommand>,
     close_tx: Sender<StreamCommand>,
-    
+
     // Per-connection stream registry - NOW TRULY LOCK-FREE!
     // PERFORMANCE CRITICAL: DashMap provides lock-free HashMap access
     streams: Arc<DashMap<u64, StreamHandle>>,
@@ -237,7 +252,7 @@ impl ConnectionHandle {
     /// Create a new stream on this connection
     pub async fn open_stream(&self) -> Result<StreamHandle, crate::TransportError> {
         let stream_id = self.stream_counter.fetch_add(1, Ordering::Relaxed);
-        
+
         let stream = StreamHandle::new(
             stream_id,
             self.connection_id,
@@ -250,7 +265,7 @@ impl ConnectionHandle {
         self.streams.insert(stream_id, stream.clone());
 
         self.stats.streams_opened.fetch_add(1, Ordering::Relaxed);
-        
+
         Ok(stream)
     }
 
@@ -309,8 +324,8 @@ impl ConnectionStats {
             total_bytes_written: self.total_bytes_written.load(Ordering::Relaxed),
             total_bytes_read: self.total_bytes_read.load(Ordering::Relaxed),
             command_queue_depth: self.command_queue_depth.load(Ordering::Relaxed),
-            active_streams: self.streams_opened.load(Ordering::Relaxed) 
-                          - self.streams_closed.load(Ordering::Relaxed),
+            active_streams: self.streams_opened.load(Ordering::Relaxed)
+                - self.streams_closed.load(Ordering::Relaxed),
         }
     }
 }
@@ -354,10 +369,10 @@ impl StreamProcessor {
         loop {
             // Batch process write commands
             self.process_write_batch(&mut write_batch).await?;
-            
+
             // Batch process read commands
             self.process_read_batch(&mut read_batch).await?;
-            
+
             // Process close commands
             self.process_close_batch(&mut close_batch).await?;
 
@@ -366,7 +381,10 @@ impl StreamProcessor {
         }
     }
 
-    async fn process_write_batch(&mut self, batch: &mut Vec<StreamCommand>) -> Result<(), crate::TransportError> {
+    async fn process_write_batch(
+        &mut self,
+        batch: &mut Vec<StreamCommand>,
+    ) -> Result<(), crate::TransportError> {
         // Collect up to batch size
         while batch.len() < batch.capacity() {
             match self.channels.write_rx.try_recv() {
@@ -378,7 +396,13 @@ impl StreamProcessor {
 
         // Process batch
         for cmd in batch.drain(..) {
-            if let StreamCommand::Write { stream_id, data, fin, response } = cmd {
+            if let StreamCommand::Write {
+                stream_id,
+                data,
+                fin,
+                response,
+            } = cmd
+            {
                 let result = self.backend.write(stream_id, data, fin).await;
                 let _ = response.send(result);
             }
@@ -387,7 +411,10 @@ impl StreamProcessor {
         Ok(())
     }
 
-    async fn process_read_batch(&mut self, batch: &mut Vec<StreamCommand>) -> Result<(), crate::TransportError> {
+    async fn process_read_batch(
+        &mut self,
+        batch: &mut Vec<StreamCommand>,
+    ) -> Result<(), crate::TransportError> {
         // Similar batching for reads
         while batch.len() < batch.capacity() {
             match self.channels.read_rx.try_recv() {
@@ -398,7 +425,12 @@ impl StreamProcessor {
         }
 
         for cmd in batch.drain(..) {
-            if let StreamCommand::Read { stream_id, buffer_size, response } = cmd {
+            if let StreamCommand::Read {
+                stream_id,
+                buffer_size,
+                response,
+            } = cmd
+            {
                 let result = self.backend.read(stream_id, buffer_size).await;
                 let _ = response.send(result);
             }
@@ -407,7 +439,10 @@ impl StreamProcessor {
         Ok(())
     }
 
-    async fn process_close_batch(&mut self, batch: &mut Vec<StreamCommand>) -> Result<(), crate::TransportError> {
+    async fn process_close_batch(
+        &mut self,
+        batch: &mut Vec<StreamCommand>,
+    ) -> Result<(), crate::TransportError> {
         while batch.len() < batch.capacity() {
             match self.channels.close_rx.try_recv() {
                 Ok(cmd) => batch.push(cmd),
@@ -417,7 +452,11 @@ impl StreamProcessor {
         }
 
         for cmd in batch.drain(..) {
-            if let StreamCommand::Close { stream_id, response } = cmd {
+            if let StreamCommand::Close {
+                stream_id,
+                response,
+            } = cmd
+            {
                 let result = self.backend.close(stream_id).await;
                 let _ = response.send(result);
             }
@@ -430,8 +469,17 @@ impl StreamProcessor {
 /// Backend trait for actual QUIC implementation
 #[async_trait::async_trait]
 pub trait StreamBackend {
-    async fn write(&mut self, stream_id: u64, data: Bytes, fin: bool) -> Result<(), crate::TransportError>;
-    async fn read(&mut self, stream_id: u64, buffer_size: usize) -> Result<Option<Bytes>, crate::TransportError>;
+    async fn write(
+        &mut self,
+        stream_id: u64,
+        data: Bytes,
+        fin: bool,
+    ) -> Result<(), crate::TransportError>;
+    async fn read(
+        &mut self,
+        stream_id: u64,
+        buffer_size: usize,
+    ) -> Result<Option<Bytes>, crate::TransportError>;
     async fn close(&mut self, stream_id: u64) -> Result<(), crate::TransportError>;
 }
 
@@ -445,9 +493,9 @@ pub struct ChannelConfig {
 impl Default for ChannelConfig {
     fn default() -> Self {
         Self {
-            write_capacity: 1024,  // High capacity for writes
-            read_capacity: 512,    // Medium capacity for reads
-            close_capacity: 64,    // Low capacity for closes
+            write_capacity: 1024, // High capacity for writes
+            read_capacity: 512,   // Medium capacity for reads
+            close_capacity: 64,   // Low capacity for closes
         }
     }
 }
@@ -505,9 +553,9 @@ mod tests {
         let mut handles = Vec::new();
         for _ in 0..10 {
             let conn = conn.clone();
-            handles.push(tokio::spawn(async move {
-                conn.open_stream().await.unwrap()
-            }));
+            handles.push(tokio::spawn(
+                async move { conn.open_stream().await.unwrap() },
+            ));
         }
 
         // Wait for all streams to be created
@@ -515,9 +563,7 @@ mod tests {
         assert_eq!(streams.len(), 10);
 
         // Verify unique stream IDs
-        let mut stream_ids: Vec<_> = streams.into_iter()
-            .map(|s| s.unwrap().stream_id)
-            .collect();
+        let mut stream_ids: Vec<_> = streams.into_iter().map(|s| s.unwrap().stream_id).collect();
         stream_ids.sort();
         stream_ids.dedup();
         assert_eq!(stream_ids.len(), 10);

@@ -1,4 +1,3 @@
-
 use thiserror::Error;
 
 /// Zero-allocation error codes for hot paths
@@ -43,7 +42,10 @@ pub struct FastError {
 impl FastError {
     #[inline(always)]
     pub const fn new(code: ErrorCode) -> Self {
-        Self { code, line: line!() }
+        Self {
+            code,
+            line: line!(),
+        }
     }
 
     #[inline(always)]

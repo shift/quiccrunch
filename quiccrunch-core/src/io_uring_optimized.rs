@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use std::os::unix::io::AsRawFd;
-use io_uring::{IoUring, opcode, types, Probe};
-use socket2::{Socket, Domain, Type, Protocol};
 use bytes::Bytes;
+use io_uring::{opcode, types, IoUring, Probe};
+use socket2::{Domain, Protocol, Socket, Type};
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Advanced io_uring client with optimized buffer management and polling
 pub struct IoUringOptimizedClient {
@@ -68,13 +68,14 @@ impl IoUringOptimizedClient {
         // Check for required features
         let mut probe = Probe::new();
         ring.submitter().register_probe(&mut probe)?;
-        
-        if !probe.is_supported(opcode::SendMsg::CODE) ||
-           !probe.is_supported(opcode::RecvMsg::CODE) ||
-           !probe.is_supported(opcode::ProvideBuffers::CODE) {
+
+        if !probe.is_supported(opcode::SendMsg::CODE)
+            || !probe.is_supported(opcode::RecvMsg::CODE)
+            || !probe.is_supported(opcode::ProvideBuffers::CODE)
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "Required io_uring operations not supported"
+                "Required io_uring operations not supported",
             ));
         }
 
@@ -117,7 +118,9 @@ impl IoUringOptimizedClient {
                 // This is a placeholder for optimized polling
 
                 if !sqe_batch.is_empty() {
-                    sq_stats.submissions.fetch_add(sqe_batch.len(), Ordering::Relaxed);
+                    sq_stats
+                        .submissions
+                        .fetch_add(sqe_batch.len(), Ordering::Relaxed);
                     sqe_batch.clear();
                 }
 
@@ -161,20 +164,17 @@ impl IoUringOptimizedClient {
         };
 
         // Prepare send submission
-        let sqe = opcode::SendMsg::new(
-            types::Fd(self.socket.as_raw_fd()),
-            &msghdr as *const _
-        )
-        .build()
-        .user_data(buf.bid as u64);
+        let sqe = opcode::SendMsg::new(types::Fd(self.socket.as_raw_fd()), &msghdr as *const _)
+            .build()
+            .user_data(buf.bid as u64);
 
         unsafe {
-            self.ring.submission()
-                .push(&sqe)
-                .map_err(|_| std::io::Error::new(
+            self.ring.submission().push(&sqe).map_err(|_| {
+                std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    "Failed to push to submission queue"
-                ))?;
+                    "Failed to push to submission queue",
+                )
+            })?;
         }
 
         self.ring.submit_and_wait(1)?;
@@ -186,27 +186,23 @@ impl IoUringOptimizedClient {
         let buf = self.buffer_ring.acquire()?;
 
         // Setup receive operation
-        let sqe = opcode::RecvMsg::new(
-            types::Fd(self.socket.as_raw_fd()),
-            std::ptr::null_mut(),
-        )
-        .build()
-        .user_data(buf.bid as u64);
+        let sqe = opcode::RecvMsg::new(types::Fd(self.socket.as_raw_fd()), std::ptr::null_mut())
+            .build()
+            .user_data(buf.bid as u64);
 
         unsafe {
-            self.ring.submission()
-                .push(&sqe)
-                .map_err(|_| std::io::Error::new(
+            self.ring.submission().push(&sqe).map_err(|_| {
+                std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    "Failed to push to submission queue"
-                ))?;
+                    "Failed to push to submission queue",
+                )
+            })?;
         }
 
-        let cqe = self.ring.completion().next()
-            .ok_or_else(|| std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No completion entry"
-            ))?;
+        let cqe =
+            self.ring.completion().next().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "No completion entry")
+            })?;
 
         if cqe.result() < 0 {
             return Err(std::io::Error::from_raw_os_error(-cqe.result()));
@@ -235,23 +231,20 @@ impl BufferRing {
         // Register buffers with io_uring
         for bid in 0..count as u16 {
             let mut data = vec![0u8; buffer_size].into_boxed_slice();
-            
+
             // Provide buffer to io_uring
             let provide_op = opcode::ProvideBuffers::new(
                 data.as_mut_ptr(),
                 buffer_size as i32,
                 1,
-            group_id,
-                bid
+                group_id,
+                bid,
             );
 
             unsafe {
-                ring.submission()
-                    .push(&provide_op.build())
-                    .map_err(|_| std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Failed to provide buffer"
-                    ))?;
+                ring.submission().push(&provide_op.build()).map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "Failed to provide buffer")
+                })?;
             }
 
             buffers.push(Arc::new(RegisteredBuffer {
@@ -274,11 +267,11 @@ impl BufferRing {
     fn acquire(&self) -> std::io::Result<Arc<RegisteredBuffer>> {
         let current = self.consumed.fetch_add(1, Ordering::Relaxed);
         let idx = current % self.buffers.len();
-        
+
         if current >= self.provided.load(Ordering::Relaxed) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "No buffers available"
+                "No buffers available",
             ));
         }
 

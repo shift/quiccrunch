@@ -1,38 +1,58 @@
 /// Performance optimization validation and testing module
-/// 
+///
 /// This module provides functions to validate that performance optimizations
 /// are working correctly and measure their effectiveness.
-
 use std::time::Instant;
 
 /// Quick performance test to validate basic functionality
 pub fn quick_performance_test() -> bool {
     println!("🚀 Running quick performance validation...");
-    
+
     // Test memory pools
     let pool_test = test_memory_pools_basic();
-    println!("   Memory pools: {}", if pool_test { "✅ Working" } else { "❌ Issues" });
-    
+    println!(
+        "   Memory pools: {}",
+        if pool_test {
+            "✅ Working"
+        } else {
+            "❌ Issues"
+        }
+    );
+
     // Test SIMD operations
     let simd_test = test_simd_basic();
-    println!("   SIMD operations: {}", if simd_test { "✅ Working" } else { "❌ Issues" });
-    
+    println!(
+        "   SIMD operations: {}",
+        if simd_test {
+            "✅ Working"
+        } else {
+            "❌ Issues"
+        }
+    );
+
     // Test adaptive strategies
     let adaptive_test = test_adaptive_strategies_basic();
-    println!("   Adaptive strategies: {}", if adaptive_test { "✅ Working" } else { "❌ Issues" });
-    
+    println!(
+        "   Adaptive strategies: {}",
+        if adaptive_test {
+            "✅ Working"
+        } else {
+            "❌ Issues"
+        }
+    );
+
     pool_test && simd_test && adaptive_test
 }
 
 /// Comprehensive performance validation with detailed metrics
 pub fn validate_optimizations() -> OptimizationResults {
     println!("🔬 Running comprehensive optimization validation...");
-    
+
     let memory_pool_hit_rate = test_memory_pool_hit_rate();
     let allocation_performance = test_allocation_performance();
     let copy_performance = test_copy_performance();
     let adaptive_strategy_validation = test_adaptive_strategy_selection();
-    
+
     OptimizationResults {
         memory_pool_hit_rate,
         allocation_performance,
@@ -88,7 +108,7 @@ fn test_memory_pools_basic() -> bool {
     {
         // Test that memory pools can be created and used
         use crate::memory::PooledBuffer;
-        
+
         let buffer = PooledBuffer::get(1024);
         if buffer.capacity() >= 1024 {
             drop(buffer); // Return to pool automatically
@@ -109,10 +129,10 @@ fn test_simd_basic() -> bool {
     {
         // Test basic SIMD functionality
         use crate::simd::fast_copy;
-        
+
         let src = vec![1u8; 1024];
         let mut dst = vec![0u8; 1024];
-        
+
         fast_copy(&src, &mut dst);
         dst == src
     }
@@ -129,7 +149,7 @@ fn test_adaptive_strategies_basic() -> bool {
         // Test adaptive strategy selection
         let strategy_small = crate::adaptive::OptimizationStrategy::for_size(1024);
         let strategy_large = crate::adaptive::OptimizationStrategy::for_size(256 * 1024);
-        
+
         // Basic sanity check - strategies should be different for different sizes
         strategy_small != strategy_large
     }
@@ -145,29 +165,29 @@ fn test_adaptive_strategies_basic() -> bool {
 fn test_memory_pool_hit_rate() -> f64 {
     #[cfg(feature = "memory-pools")]
     {
-        use crate::memory::{PooledBuffer, get_pool_stats, reset_pool_stats};
-        
+        use crate::memory::{get_pool_stats, reset_pool_stats, PooledBuffer};
+
         // Reset stats to start fresh
         reset_pool_stats();
-        
+
         // Perform some allocations and returns
         let mut buffers = Vec::new();
         for _ in 0..100 {
             buffers.push(PooledBuffer::get(1024));
         }
-        
+
         // Drop buffers to return them to pool
         drop(buffers);
-        
+
         // Now allocate again to test hit rate
         let mut test_buffers = Vec::new();
         for _ in 0..50 {
             test_buffers.push(PooledBuffer::get(1024));
         }
-        
+
         let stats = get_pool_stats();
         drop(test_buffers);
-        
+
         // Calculate hit rate using correct field names
         stats.hit_rate()
     }
@@ -181,11 +201,11 @@ fn test_allocation_performance() -> AllocationPerformance {
     let small_buffer_speed = benchmark_allocations(1024, 10000);
     let medium_buffer_speed = benchmark_allocations(32 * 1024, 1000);
     let large_buffer_speed = benchmark_allocations(256 * 1024, 100);
-    
+
     // Simple approximation of pool improvement
     // In a real scenario, this would compare pooled vs non-pooled
     let pool_improvement = 5.0; // Placeholder
-    
+
     AllocationPerformance {
         small_buffer_speed,
         medium_buffer_speed,
@@ -198,11 +218,11 @@ fn test_copy_performance() -> CopyPerformance {
     let small_copy_speed = benchmark_copies(1024, 1000);
     let medium_copy_speed = benchmark_copies(32 * 1024, 100);
     let large_copy_speed = benchmark_copies(256 * 1024, 10);
-    
+
     // Simple approximation of SIMD improvement
     // In a real scenario, this would compare SIMD vs standard memcpy
     let simd_improvement = -5.0; // Placeholder showing current overhead
-    
+
     CopyPerformance {
         small_copy_speed,
         medium_copy_speed,
@@ -214,15 +234,17 @@ fn test_copy_performance() -> CopyPerformance {
 fn test_adaptive_strategy_selection() -> AdaptiveStrategyValidation {
     #[cfg(feature = "adaptive-optimizations")]
     {
-        let strategy_1kb = map_adaptive_strategy(crate::adaptive::OptimizationStrategy::for_size(1024));
-        let strategy_32kb = map_adaptive_strategy(crate::adaptive::OptimizationStrategy::for_size(32 * 1024));
-        let strategy_256kb = map_adaptive_strategy(crate::adaptive::OptimizationStrategy::for_size(256 * 1024));
-        
-        let correct_selection = 
-            strategy_1kb == OptimizationStrategy::Standard &&
-            strategy_32kb == OptimizationStrategy::PoolOnly &&
-            strategy_256kb == OptimizationStrategy::Full;
-        
+        let strategy_1kb =
+            map_adaptive_strategy(crate::adaptive::OptimizationStrategy::for_size(1024));
+        let strategy_32kb =
+            map_adaptive_strategy(crate::adaptive::OptimizationStrategy::for_size(32 * 1024));
+        let strategy_256kb =
+            map_adaptive_strategy(crate::adaptive::OptimizationStrategy::for_size(256 * 1024));
+
+        let correct_selection = strategy_1kb == OptimizationStrategy::Standard
+            && strategy_32kb == OptimizationStrategy::PoolOnly
+            && strategy_256kb == OptimizationStrategy::Full;
+
         AdaptiveStrategyValidation {
             strategy_1kb,
             strategy_32kb,
@@ -245,7 +267,7 @@ fn test_adaptive_strategy_selection() -> AdaptiveStrategyValidation {
 
 fn benchmark_allocations(size: usize, iterations: usize) -> f64 {
     let start = Instant::now();
-    
+
     for _ in 0..iterations {
         #[cfg(feature = "memory-pools")]
         {
@@ -257,7 +279,7 @@ fn benchmark_allocations(size: usize, iterations: usize) -> f64 {
             let _buffer = vec![0u8; size];
         }
     }
-    
+
     let duration = start.elapsed();
     iterations as f64 / duration.as_secs_f64()
 }
@@ -265,9 +287,9 @@ fn benchmark_allocations(size: usize, iterations: usize) -> f64 {
 fn benchmark_copies(size: usize, iterations: usize) -> f64 {
     let src = vec![1u8; size];
     let mut dst = vec![0u8; size];
-    
+
     let start = Instant::now();
-    
+
     for _ in 0..iterations {
         #[cfg(feature = "simd-optimizations")]
         {
@@ -278,7 +300,7 @@ fn benchmark_copies(size: usize, iterations: usize) -> f64 {
             dst.copy_from_slice(&src);
         }
     }
-    
+
     let duration = start.elapsed();
     let total_bytes = (size * iterations) as f64;
     (total_bytes / duration.as_secs_f64()) / (1024.0 * 1024.0) // MB/s

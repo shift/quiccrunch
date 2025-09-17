@@ -1,12 +1,11 @@
+use bytes::{Bytes, BytesMut};
 /// High-performance memory management for QuicCrunch
-/// 
+///
 /// This module provides thread-local buffer pools and zero-copy operations
 /// to eliminate allocation overhead in hot paths.
-
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
-use bytes::{Bytes, BytesMut};
 
 thread_local! {
     static BUFFER_POOL: RefCell<BufferPool> = RefCell::new(BufferPool::new());
@@ -15,17 +14,17 @@ thread_local! {
 
 /// Size-based buffer pools to minimize allocation overhead
 struct BufferPool {
-    small_buffers: VecDeque<Vec<u8>>,    // < 4KB
-    medium_buffers: VecDeque<Vec<u8>>,   // 4KB - 64KB
-    large_buffers: VecDeque<Vec<u8>>,    // 64KB - 1MB
-    huge_buffers: VecDeque<Vec<u8>>,     // > 1MB
+    small_buffers: VecDeque<Vec<u8>>,  // < 4KB
+    medium_buffers: VecDeque<Vec<u8>>, // 4KB - 64KB
+    large_buffers: VecDeque<Vec<u8>>,  // 64KB - 1MB
+    huge_buffers: VecDeque<Vec<u8>>,   // > 1MB
 }
 
 impl BufferPool {
-    const SMALL_THRESHOLD: usize = 8 * 1024;        // 8KB (was 4KB)
-    const MEDIUM_THRESHOLD: usize = 64 * 1024;      // 64KB (unchanged)
-    const LARGE_THRESHOLD: usize = 1024 * 1024;     // 1MB (unchanged)
-    const MAX_POOL_SIZE: usize = 32;                // Max buffers per pool (increased from 16)
+    const SMALL_THRESHOLD: usize = 8 * 1024; // 8KB (was 4KB)
+    const MEDIUM_THRESHOLD: usize = 64 * 1024; // 64KB (unchanged)
+    const LARGE_THRESHOLD: usize = 1024 * 1024; // 1MB (unchanged)
+    const MAX_POOL_SIZE: usize = 32; // Max buffers per pool (increased from 16)
 
     fn new() -> Self {
         Self {
@@ -52,7 +51,7 @@ impl BufferPool {
                     let mut reused_buffer = pool.remove(i).unwrap();
                     reused_buffer.clear();
                     reused_buffer.resize(size, 0);
-                    
+
                     POOL_STATS.with(|stats| {
                         stats.borrow_mut().pool_hits += 1;
                     });
@@ -67,7 +66,7 @@ impl BufferPool {
             s.pool_misses += 1;
             s.allocations += 1;
         });
-        
+
         // Allocate with appropriate capacity for the size category
         let capacity = match size {
             s if s <= Self::SMALL_THRESHOLD => Self::SMALL_THRESHOLD,
@@ -75,7 +74,7 @@ impl BufferPool {
             s if s <= Self::LARGE_THRESHOLD => Self::LARGE_THRESHOLD,
             _ => size.max(Self::LARGE_THRESHOLD),
         };
-        
+
         let mut buffer = Vec::with_capacity(capacity);
         buffer.resize(size, 0);
         buffer
@@ -113,9 +112,7 @@ pub struct PooledBuffer {
 impl PooledBuffer {
     /// Get a buffer from the thread-local pool
     pub fn get(size: usize) -> Self {
-        let buffer = BUFFER_POOL.with(|pool| {
-            pool.borrow_mut().get_buffer(size)
-        });
+        let buffer = BUFFER_POOL.with(|pool| pool.borrow_mut().get_buffer(size));
         Self { buffer }
     }
 
@@ -261,7 +258,7 @@ mod tests {
 
         let buffer2 = PooledBuffer::get(1024);
         let ptr2 = buffer2.as_slice().as_ptr();
-        
+
         // Should reuse the same buffer
         assert_eq!(ptr1, ptr2);
     }
@@ -271,9 +268,9 @@ mod tests {
         let mut msg = MessageBuffer::with_capacity(1024);
         msg.write_header(100);
         msg.write_data(b"Hello, World!");
-        
+
         assert_eq!(msg.data_len(), 13);
-        
+
         let bytes = msg.into_bytes();
         assert_eq!(bytes.len(), 17); // 4 bytes header + 13 bytes data
     }
@@ -379,7 +376,8 @@ pub fn get_fast_buffer() -> FastBuffer {
 #[inline(always)]
 pub fn return_fast_buffer(buffer: FastBuffer) {
     FAST_BUFFER_POOL.with(|pool| {
-        if pool.borrow().len() < 32 { // Limit pool size
+        if pool.borrow().len() < 32 {
+            // Limit pool size
             pool.borrow_mut().push(buffer);
         }
         // Drop buffer if pool is full
@@ -400,7 +398,10 @@ impl FastHeaderParser {
     }
 
     #[inline(always)]
-    pub fn parse_length_prefix(&mut self, data: &[u8]) -> Result<(usize, usize), crate::error::FastError> {
+    pub fn parse_length_prefix(
+        &mut self,
+        data: &[u8],
+    ) -> Result<(usize, usize), crate::error::FastError> {
         if data.len() < 4 {
             return Err(crate::error::FastError::invalid_message());
         }
@@ -408,7 +409,8 @@ impl FastHeaderParser {
         // Parse 32-bit big-endian length prefix
         let length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
 
-        if length > 1024 * 1024 { // 1MB limit
+        if length > 1024 * 1024 {
+            // 1MB limit
             return Err(crate::error::FastError::buffer_overflow());
         }
 
@@ -425,7 +427,8 @@ impl FastHeaderParser {
         let mut bytes_consumed = 0;
 
         for (i, &byte) in data.iter().enumerate() {
-            if i >= 10 { // Varint max 10 bytes
+            if i >= 10 {
+                // Varint max 10 bytes
                 return Err(crate::error::FastError::invalid_message());
             }
 
@@ -477,7 +480,8 @@ impl FastMetrics {
     #[inline(always)]
     pub fn record_message_received(&self, size: usize) {
         self.messages_received.fetch_add(1, Ordering::Relaxed);
-        self.bytes_received.fetch_add(size as u64, Ordering::Relaxed);
+        self.bytes_received
+            .fetch_add(size as u64, Ordering::Relaxed);
     }
 
     #[inline(always)]

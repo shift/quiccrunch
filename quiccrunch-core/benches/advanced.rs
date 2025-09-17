@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use quiccrunch_core::{QuicTransport, Transport, TlsConfig};
 use bytes::Bytes;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use quiccrunch_core::{QuicTransport, TlsConfig, Transport};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio::sync::Barrier;
-use std::time::{Duration, Instant};
 
 /// Tests bi-directional bandwidth scenarios to find optimal window sizes
 /// and identify throughput cliffs
@@ -17,21 +17,21 @@ async fn bandwidth_test(
     let client = transport.connect(&addr).await?;
     let mut stream = client.open_bi().await?;
     let data = Bytes::from(&vec![0u8; message_size][..]);
-    
+
     let total_data = window_size * message_size;
     let start = Instant::now();
     let mut bytes_sent = 0;
-    
+
     while bytes_sent < total_data {
         stream.send_message(data.clone()).await?;
         bytes_sent += message_size;
-        
+
         // Record instantaneous throughput
         if bytes_sent % (total_data / 10) == 0 {
             collector.record_throughput(bytes_sent as f64 / start.elapsed().as_secs_f64());
         }
     }
-    
+
     collector.record_total_transfer(ThroughputMetrics {
         bytes: bytes_sent,
         duration: start.elapsed(),
@@ -52,14 +52,14 @@ async fn latency_under_load(
     let client = transport.connect(&addr).await?;
     let background_data = Bytes::from(&vec![0u8; message_size][..]);
     let probe_data = Bytes::from(&vec![0u8; 64][..]); // Small probe messages
-    
+
     // Start background load
     let mut handles = Vec::new();
     for _ in 0..background_streams {
         let data = background_data.clone();
         let transport = transport.clone();
         let addr = addr.clone();
-        
+
         handles.push(tokio::spawn(async move {
             let client = transport.connect(&addr).await?;
             let mut stream = client.open_bi().await?;
@@ -70,7 +70,7 @@ async fn latency_under_load(
             Ok::<_, Box<dyn std::error::Error>>(())
         }));
     }
-    
+
     // Measure latency with probe messages
     let mut probe_stream = client.open_bi().await?;
     for _ in 0..100 {
@@ -79,12 +79,12 @@ async fn latency_under_load(
         let response = probe_stream.receive_message().await?;
         collector.record_probe_latency(start.elapsed());
     }
-    
+
     // Cleanup background load
     for handle in handles {
         handle.abort();
     }
-    
+
     Ok(())
 }
 
@@ -97,12 +97,12 @@ async fn stream_reuse_test(
     let (transport, addr) = setup_transport().await;
     let client = transport.connect(&addr).await?;
     let data = Bytes::from(&vec![0u8; 1024][..]);
-    
+
     let mut streams = Vec::with_capacity(pool_size);
     for _ in 0..pool_size {
         streams.push(client.open_bi().await?);
     }
-    
+
     let start = Instant::now();
     for i in 0..operations {
         let stream_idx = i % pool_size;
@@ -111,13 +111,13 @@ async fn stream_reuse_test(
         let response = streams[stream_idx].receive_message().await?;
         collector.record_operation_latency(start_op.elapsed());
     }
-    
+
     collector.record_pool_metrics(PoolMetrics {
         pool_size,
         operations,
         total_time: start.elapsed(),
     });
-    
+
     Ok(())
 }
 
@@ -128,23 +128,23 @@ async fn resilience_test(
     let (transport, addr) = setup_transport().await;
     let client = transport.connect(&addr).await?;
     let data = Bytes::from(&vec![0u8; 1024][..]);
-    
+
     // Test connection drop recovery
     for _ in 0..10 {
         let start = Instant::now();
         let mut stream = client.open_bi().await?;
-        
+
         // Force stream reset
         drop(stream);
-        
+
         // Measure recovery
         let new_stream = client.open_bi().await?;
         collector.record_recovery_time(start.elapsed());
-        
+
         // Test with new stream
         new_stream.send_message(data.clone()).await?;
     }
-    
+
     Ok(())
 }
 
@@ -156,14 +156,14 @@ async fn stream_churn_test(
     let (transport, addr) = setup_transport().await;
     let client = transport.connect(&addr).await?;
     let data = Bytes::from(&vec![0u8; 64][..]);
-    
+
     let start = Instant::now();
     let mut handles = Vec::new();
-    
+
     for _ in 0..concurrent_ops {
         let data = data.clone();
         let client = client.clone();
-        
+
         handles.push(tokio::spawn(async move {
             let start_op = Instant::now();
             let mut stream = client.open_bi().await?;
@@ -172,24 +172,24 @@ async fn stream_churn_test(
             Ok::<_, Box<dyn std::error::Error>>(start_op.elapsed())
         }));
     }
-    
+
     for handle in handles {
         let duration = handle.await??;
         collector.record_churn_operation(duration);
     }
-    
+
     collector.record_churn_test(ChurnMetrics {
         operations: concurrent_ops,
         total_time: start.elapsed(),
     });
-    
+
     Ok(())
 }
 
 fn bench_advanced_patterns(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let mut collector = PerformanceCollector::new();
-    
+
     // Bandwidth tests
     let mut group = c.benchmark_group("bandwidth");
     for &(size, name) in SIZES {
@@ -197,55 +197,42 @@ fn bench_advanced_patterns(c: &mut Criterion) {
             group.throughput(Throughput::Bytes((size * window) as u64));
             group.bench_function(
                 BenchmarkId::new(format!("{}_{}", name, window), window),
-                |b| {
-                    b.iter(|| {
-                        rt.block_on(bandwidth_test(&mut collector, size, window))
-                    })
-                },
+                |b| b.iter(|| rt.block_on(bandwidth_test(&mut collector, size, window))),
             );
         }
     }
     group.finish();
-    
+
     // Latency under load
     let mut group = c.benchmark_group("latency_under_load");
     for &(size, name) in SIZES {
         for load in [0, 1, 10, 50] {
-            group.bench_function(
-                BenchmarkId::new(format!("{}_{}", name, load), load),
-                |b| {
-                    b.iter(|| {
-                        rt.block_on(latency_under_load(&mut collector, load, size))
-                    })
-                },
-            );
+            group.bench_function(BenchmarkId::new(format!("{}_{}", name, load), load), |b| {
+                b.iter(|| rt.block_on(latency_under_load(&mut collector, load, size)))
+            });
         }
     }
     group.finish();
-    
+
     // Stream reuse patterns
     let mut group = c.benchmark_group("stream_reuse");
     for pool_size in [1, 5, 10, 50] {
         for ops in [100, 1000, 10000] {
             group.bench_function(
                 BenchmarkId::new(format!("pool_{}_ops_{}", pool_size, ops), pool_size),
-                |b| {
-                    b.iter(|| {
-                        rt.block_on(stream_reuse_test(&mut collector, pool_size, ops))
-                    })
-                },
+                |b| b.iter(|| rt.block_on(stream_reuse_test(&mut collector, pool_size, ops))),
             );
         }
     }
     group.finish();
-    
+
     // Resilience tests
     let mut group = c.benchmark_group("resilience");
     group.bench_function("recovery", |b| {
         b.iter(|| rt.block_on(resilience_test(&mut collector)))
     });
     group.finish();
-    
+
     // Stream churn tests
     let mut group = c.benchmark_group("stream_churn");
     for ops in [10, 100, 1000] {
@@ -254,9 +241,11 @@ fn bench_advanced_patterns(c: &mut Criterion) {
         });
     }
     group.finish();
-    
+
     // Generate final report with all metrics
-    collector.generate_report(c.benchmark_group("advanced_analysis")).unwrap();
+    collector
+        .generate_report(c.benchmark_group("advanced_analysis"))
+        .unwrap();
 }
 
 criterion_group! {

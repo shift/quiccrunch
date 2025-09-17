@@ -33,7 +33,7 @@
 //! ### Basic benchmarking:
 //! ```rust,no_run
 //! use quiccrunch_core::{QuicClient, QuicServer};
-//! 
+//!
 //! // Start with optimized defaults
 //! let client = QuicClient::new()?;
 //! let server = QuicServer::new()?;
@@ -42,7 +42,7 @@
 //! ### High-performance configuration:
 //! ```rust,no_run
 //! use quiccrunch_core::optimizations::{CpuOptimizations, enable_high_performance};
-//! 
+//!
 //! // Initialize all optimizations
 //! let cpu_opts = CpuOptimizations::detect();
 //! enable_high_performance(&cpu_opts)?;
@@ -56,9 +56,9 @@ pub mod transport;
 //mod stream;
 mod stream;
 mod stream_splitter; // Stream splitting for concurrent RPC operations
-//pub mod test_utils;
-//pub mod metrics;
-//pub mod power;
+                     //pub mod test_utils;
+                     //pub mod metrics;
+                     //pub mod power;
 pub mod config;
 //pub mod client;
 //pub mod server;
@@ -69,38 +69,49 @@ pub mod config;
 pub mod benchmark;
 
 // Performance optimization modules
-pub mod memory;
-pub mod simd;
-pub mod lockfree;
 pub mod adaptive; // New adaptive optimization module
-#[cfg(feature = "io-uring-advanced")]
-pub mod io_uring_optimized;
+pub mod cpu_optimizations;
 #[cfg(feature = "io-uring-advanced")]
 pub mod io_uring_advanced;
-pub mod stream_optimized;
-pub mod cpu_optimizations;
+#[cfg(feature = "io-uring-advanced")]
+pub mod io_uring_optimized;
+pub mod lockfree;
+pub mod memory;
 pub mod optimization_validation;
+pub mod simd;
+pub mod stream_optimized;
 
 // Zero-allocation components
-pub use memory::{FastBuffer, FastHeaderParser, FastMetrics, FastMetricsSnapshot, get_fast_buffer, return_fast_buffer};
+pub use memory::{
+    get_fast_buffer, return_fast_buffer, FastBuffer, FastHeaderParser, FastMetrics,
+    FastMetricsSnapshot,
+};
 
 // Convenience module for all optimizations
 pub mod optimizations {
-    pub use crate::memory::{PooledBuffer, MessageBuffer, PoolStats, get_pool_stats};
-    pub use crate::simd::{CpuFeatures, fast_copy, fast_zero, decode_u32_array};
-    pub use crate::lockfree::{StreamHandle, ConnectionHandle, StreamStatsSnapshot, ConnectionStatsSnapshot};
+    pub use crate::adaptive::{
+        allocate_optimized, copy_optimized, OptimizationStrategy, OptimizedBuffer, WorkloadConfig,
+    };
+    pub use crate::cpu_optimizations::{
+        initialize_optimizations, CpuBenchmarkResults, CpuOptimizations,
+    };
     #[cfg(feature = "io-uring-advanced")]
-    pub use crate::io_uring_advanced::{IoUringAdvancedTransport, TransportConfig, TransportStatsSnapshot};
-    pub use crate::stream_optimized::{OptimizedQuicStream, StreamConfig, BenchmarkResults};
-    pub use crate::cpu_optimizations::{CpuOptimizations, CpuBenchmarkResults, initialize_optimizations};
-    pub use crate::adaptive::{OptimizationStrategy, OptimizedBuffer, WorkloadConfig, allocate_optimized, copy_optimized};
-    
+    pub use crate::io_uring_advanced::{
+        IoUringAdvancedTransport, TransportConfig, TransportStatsSnapshot,
+    };
+    pub use crate::lockfree::{
+        ConnectionHandle, ConnectionStatsSnapshot, StreamHandle, StreamStatsSnapshot,
+    };
+    pub use crate::memory::{get_pool_stats, MessageBuffer, PoolStats, PooledBuffer};
+    pub use crate::simd::{decode_u32_array, fast_copy, fast_zero, CpuFeatures};
+    pub use crate::stream_optimized::{BenchmarkResults, OptimizedQuicStream, StreamConfig};
+
     // Re-export optimization validation functions
     pub use crate::optimization_validation::{
-        validate_optimizations, quick_performance_test, 
-        OptimizationResults, AllocationPerformance, CopyPerformance, AdaptiveStrategyValidation
+        quick_performance_test, validate_optimizations, AdaptiveStrategyValidation,
+        AllocationPerformance, CopyPerformance, OptimizationResults,
     };
-    
+
     /// Enable all high-performance optimizations
     pub fn enable_high_performance(cpu_opts: &CpuOptimizations) -> std::io::Result<()> {
         cpu_opts.enable_huge_pages()?;
@@ -109,17 +120,19 @@ pub mod optimizations {
         println!("🚀 High-performance mode enabled!");
         Ok(())
     }
-    
+
     /// Quick setup for maximum performance (combines optimization detection and enablement)
     pub fn enable_maximum_performance() -> std::io::Result<CpuOptimizations> {
         let cpu_opts = CpuOptimizations::detect();
         enable_high_performance(&cpu_opts)?;
-        println!("💪 Maximum performance mode: SIMD={}, Memory pools={}, CPU optimizations=enabled", 
-                cfg!(feature = "simd-optimizations"), 
-                cfg!(feature = "memory-pools"));
+        println!(
+            "💪 Maximum performance mode: SIMD={}, Memory pools={}, CPU optimizations=enabled",
+            cfg!(feature = "simd-optimizations"),
+            cfg!(feature = "memory-pools")
+        );
         Ok(cpu_opts)
     }
-    
+
     /// Quick benchmark of system capabilities
     pub fn benchmark_system() -> CpuBenchmarkResults {
         let cpu_opts = CpuOptimizations::detect();
@@ -129,73 +142,46 @@ pub mod optimizations {
     }
 }
 
-pub use error::{Result, TransportError, FastError};
-pub use config::{ClientConfig, ServerConfig, QuicTransportSettings, CongestionControl, Backend};
+pub use config::{Backend, ClientConfig, CongestionControl, QuicTransportSettings, ServerConfig};
+pub use error::{FastError, Result, TransportError};
 pub use transport::{QuicTransport, Transport};
 //pub use connection_pool::{ConnectionPool, ConnectionPoolConfig, ConnectionPoolStats, EndpointStats, ConnectionHealth};
 //pub use crypto_accel::{HardwareCrypto, CryptoAccelConfig, HardwareCapabilities, CryptoStats, CryptoStatsSnapshot, BatchCryptoProcessor, CipherSuiteOptimizer};
 //pub use congestion::{AdaptiveCongestionControl, CongestionControlConfig, NetworkMetrics, CongestionAlgorithm, NetworkCondition, CongestionControlStats};
 //pub use stream::QuicStream;
 pub use stream::QuicStream;
-pub use stream_splitter::{SplitStream, StreamReader, StreamWriter, Splittable}; // Stream splitting support
-//pub use metrics::{Metrics, Operation};
-//pub use client::{QuicClient, QuicConnection};
-//pub use server::{QuicServer, QuicListener, MessageHandler, EchoHandler, run_echo_server, run_server_with_handler};
-//pub use rpc::{RpcService, RpcServer, RpcClient, PooledRpcClient, RpcConnectionPool, RpcError, RpcResult};
+pub use stream_splitter::{SplitStream, Splittable, StreamReader, StreamWriter}; // Stream splitting support
+                                                                                //pub use metrics::{Metrics, Operation};
+                                                                                //pub use client::{QuicClient, QuicConnection};
+                                                                                //pub use server::{QuicServer, QuicListener, MessageHandler, EchoHandler, run_echo_server, run_server_with_handler};
+                                                                                //pub use rpc::{RpcService, RpcServer, RpcClient, PooledRpcClient, RpcConnectionPool, RpcError, RpcResult};
 
 // Re-export optimized components for high-performance use cases
+pub use optimizations::{benchmark_system, enable_high_performance, enable_maximum_performance};
 pub use stream_optimized::OptimizedQuicStream;
-pub use optimizations::{enable_high_performance, enable_maximum_performance, benchmark_system};
 
 pub mod schema {
     pub mod frame_capnp {
         include!(concat!(env!("OUT_DIR"), "/schema/frame_capnp.rs"));
     }
-    
+
     pub mod rpc_capnp {
         include!(concat!(env!("OUT_DIR"), "/schema/rpc_capnp.rs"));
     }
 
     // Re-export types
-    pub use frame_capnp::{
-        message_header,
-        trace_context,
-    };
-    
+    pub use frame_capnp::{message_header, trace_context};
+
     pub use rpc_capnp::{
-        rpc_message,
-        rpc_request,
-        rpc_response,
-        rpc_error,
-        service_info,
-        endpoint,
-        method_info,
-        MessageType,
-        ErrorCode,
-        HealthStatus,
-        StreamingType,
-        LoadBalancingStrategy,
+        endpoint, method_info, rpc_error, rpc_message, rpc_request, rpc_response, service_info,
+        ErrorCode, HealthStatus, LoadBalancingStrategy, MessageType, StreamingType,
     };
 }
 
 // Convenience re-exports for generated code
-pub use schema::frame_capnp::{
-    message_header,
-    trace_context,
-    frame,
-};
+pub use schema::frame_capnp::{frame, message_header, trace_context};
 
 pub use schema::rpc_capnp::{
-    rpc_message,
-    rpc_request,
-    rpc_response,
-    rpc_error,
-    service_info,
-    endpoint,
-    method_info,
-    MessageType,
-    ErrorCode,
-    HealthStatus,
-    StreamingType,
-    LoadBalancingStrategy,
+    endpoint, method_info, rpc_error, rpc_message, rpc_request, rpc_response, service_info,
+    ErrorCode, HealthStatus, LoadBalancingStrategy, MessageType, StreamingType,
 };

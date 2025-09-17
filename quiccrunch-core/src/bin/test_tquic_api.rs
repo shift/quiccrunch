@@ -14,16 +14,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("✗ Config::new() failed: {:?}", e),
     }
 
-    // Test 2: TlsConfig creation 
+    // Test 2: TlsConfig creation
     println!("\n2. Testing TlsConfig creation:");
-    
+
     // Try different constructors
     println!("  - TlsConfig::default():");
     match std::panic::catch_unwind(|| {
         let _tls = tquic::TlsConfig::default();
         println!("    ✓ TlsConfig::default() works");
     }) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(_) => println!("    ✗ TlsConfig::default() doesn't exist"),
     }
 
@@ -36,13 +36,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 4: Try to understand Endpoint constructor
     println!("\n4. Testing Endpoint creation patterns:");
-    
+
     // Let's see what methods are available on tquic::Endpoint
     // This will help us understand the API structure
-    
+
     println!("Available tQUIC types and constructors:");
     println!("- tquic::Config");
-    println!("- tquic::TlsConfig"); 
+    println!("- tquic::TlsConfig");
     println!("- tquic::Endpoint");
     println!("- tquic::Connection");
     println!("- tquic::ConnectionId");
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("- tquic::PacketSendHandler");
     println!("- tquic::PacketInfo");
     println!("- tquic::Error");
-    
+
     println!("\nNext step: Check actual tQUIC v1.6.0 documentation or source code");
     println!("to understand the correct constructor parameters.");
 

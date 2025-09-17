@@ -1,23 +1,22 @@
+use crate::memory::PooledBuffer;
+use crate::simd;
+use crate::transport::tquic::TlsConfig;
+use bytes::Bytes;
+use io_uring::{opcode, types, IoUring, Probe};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use std::collections::VecDeque;
+use std::net::SocketAddr;
+use std::os::unix::io::AsRawFd;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 /// Enhanced io_uring transport with advanced optimizations
-/// 
+///
 /// This module extends the existing io_uring implementation with:
 /// - Vectorized I/O operations
 /// - Zero-copy buffer management  
 /// - SIMD-optimized memory operations
 /// - CPU affinity and NUMA awareness
 /// - Advanced batching and prefetching
-
 use std::sync::Arc;
-use std::os::unix::io::AsRawFd;
-use io_uring::{IoUring, opcode, types, Probe};
-use socket2::{Socket, Domain, Type, Protocol, SockAddr};
-use bytes::Bytes;
-use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
-use std::collections::VecDeque;
-use std::net::SocketAddr;
-use crate::memory::PooledBuffer;
-use crate::simd;
-use crate::transport::tquic::TlsConfig;
 
 /// Configuration for io_uring transport optimizations
 #[derive(Clone, Debug)]
@@ -75,8 +74,16 @@ impl IoUringTransport {
         config: Config,
     ) -> crate::Result<Self> {
         let transport_config = TransportConfig {
-            ring_size: if config.max_concurrent_ops <= 512 { 1024 } else { 4096 },
-            buffer_size: if config.buffer_pool_size > 512 * 1024 { 256 * 1024 } else { 64 * 1024 },
+            ring_size: if config.max_concurrent_ops <= 512 {
+                1024
+            } else {
+                4096
+            },
+            buffer_size: if config.buffer_pool_size > 512 * 1024 {
+                256 * 1024
+            } else {
+                64 * 1024
+            },
             buffer_count: config.max_concurrent_ops,
             batch_size: if config.coalesce_operations { 128 } else { 16 },
             use_sqpoll: true,
@@ -86,17 +93,22 @@ impl IoUringTransport {
             numa_node: if config.numa_awareness { Some(0) } else { None },
             prefetch_depth: if config.enable_vectorized_io { 32 } else { 8 },
         };
-        
+
         let inner = Arc::new(IoUringAdvancedTransport::new_transport(transport_config)?);
-        Ok(Self { inner, tls_config, settings, config })
+        Ok(Self {
+            inner,
+            tls_config,
+            settings,
+            config,
+        })
     }
-    
+
     pub async fn connect(&self, addr: &str) -> crate::Result<Connection> {
         // Delegate to inner transport and wrap result
         let conn = self.inner.connect(addr).await?;
         Ok(Connection { inner: conn })
     }
-    
+
     pub async fn listen(&self, addr: &str) -> crate::Result<Incoming> {
         // Delegate to inner transport and wrap result
         let incoming = self.inner.listen(addr).await?;
@@ -186,18 +198,21 @@ pub struct IoUringAdvancedIncoming {
 impl IoUringAdvancedTransport {
     pub fn new_transport(config: TransportConfig) -> crate::Result<Self> {
         // Create io_uring instance
-        let ring = IoUring::new(config.ring_size)
-            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to create io_uring: {}", e)))?;
-        
+        let ring = IoUring::new(config.ring_size).map_err(|e| {
+            crate::TransportError::ConnectionFailed(format!("Failed to create io_uring: {}", e))
+        })?;
+
         // Create UDP socket
-        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
-            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to create socket: {}", e)))?;
-        
-        let buffer_pool = AdvancedBufferPool::new(&ring, &config)
-            .map_err(|e| crate::TransportError::ConnectionFailed(format!("Failed to create buffer pool: {}", e)))?;
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).map_err(|e| {
+            crate::TransportError::ConnectionFailed(format!("Failed to create socket: {}", e))
+        })?;
+
+        let buffer_pool = AdvancedBufferPool::new(&ring, &config).map_err(|e| {
+            crate::TransportError::ConnectionFailed(format!("Failed to create buffer pool: {}", e))
+        })?;
         let batch_processor = BatchProcessor::new(config.batch_size);
         let stats = Arc::new(TransportStats::default());
-        
+
         Ok(Self {
             ring,
             socket,
@@ -207,7 +222,7 @@ impl IoUringAdvancedTransport {
             config,
         })
     }
-    
+
     pub async fn connect(&self, _addr: &str) -> crate::Result<IoUringAdvancedConnection> {
         // Placeholder implementation - connect to server
         Ok(IoUringAdvancedConnection {
@@ -215,7 +230,7 @@ impl IoUringAdvancedTransport {
             stream_id: 1,
         })
     }
-    
+
     pub async fn listen(&self, addr: &str) -> crate::Result<IoUringAdvancedIncoming> {
         // Placeholder implementation - bind to address
         Ok(IoUringAdvancedIncoming {
@@ -253,12 +268,16 @@ impl Clone for IoUringAdvancedConnection {
 impl IoUringAdvancedConnection {
     pub async fn accept_bi(&self) -> crate::Result<crate::QuicStream> {
         // Placeholder implementation
-        Err(crate::TransportError::StreamError("accept_bi not yet implemented for io_uring_advanced".into()))
+        Err(crate::TransportError::StreamError(
+            "accept_bi not yet implemented for io_uring_advanced".into(),
+        ))
     }
-    
+
     pub async fn open_bi(&self) -> crate::Result<crate::QuicStream> {
         // Placeholder implementation
-        Err(crate::TransportError::StreamError("open_bi not yet implemented for io_uring_advanced".into()))
+        Err(crate::TransportError::StreamError(
+            "open_bi not yet implemented for io_uring_advanced".into(),
+        ))
     }
 }
 
@@ -266,7 +285,7 @@ impl IoUringAdvancedIncoming {
     pub fn local_addr(&self) -> crate::Result<String> {
         Ok(self.local_addr.clone())
     }
-    
+
     pub async fn accept(&mut self) -> crate::Result<IoUringAdvancedConnection> {
         // Placeholder implementation
         Ok(IoUringAdvancedConnection {
@@ -441,9 +460,9 @@ impl IoUringAdvancedTransport {
         // Apply conditional features
         // Enable all performance features and build
         let ring = ring_builder
-            .setup_coop_taskrun()    // Cooperative task running
-            .setup_taskrun_flag()    // Task run notifications
-            .setup_single_issuer()   // Single issuer optimization
+            .setup_coop_taskrun() // Cooperative task running
+            .setup_taskrun_flag() // Task run notifications
+            .setup_single_issuer() // Single issuer optimization
             .build(config.ring_size)?;
 
         // Verify all required operations are supported
@@ -453,13 +472,13 @@ impl IoUringAdvancedTransport {
 
         // Create optimized socket with advanced settings
         let socket = Self::create_ultra_optimized_socket()?;
-        
+
         // Initialize advanced buffer pool
         let buffer_pool = AdvancedBufferPool::new(&ring, &config)?;
-        
+
         // Create advanced batch processor
         let batch_processor = BatchProcessor::new(config.batch_size);
-        
+
         let stats = Arc::new(TransportStats::default());
 
         Ok(Self {
@@ -473,7 +492,10 @@ impl IoUringAdvancedTransport {
     }
 
     /// Send messages with maximum vectorization
-    pub async fn send_ultra_vectorized(&mut self, messages: &[(&[u8], SocketAddr)]) -> std::io::Result<()> {
+    pub async fn send_ultra_vectorized(
+        &mut self,
+        messages: &[(&[u8], SocketAddr)],
+    ) -> std::io::Result<()> {
         if messages.is_empty() {
             return Ok(());
         }
@@ -505,12 +527,16 @@ impl IoUringAdvancedTransport {
     }
 
     /// Receive messages with prefetching and prediction
-    pub async fn receive_with_prefetch(&mut self, max_messages: usize) -> std::io::Result<Vec<(Bytes, SocketAddr)>> {
+    pub async fn receive_with_prefetch(
+        &mut self,
+        max_messages: usize,
+    ) -> std::io::Result<Vec<(Bytes, SocketAddr)>> {
         // Prefetch buffers based on predicted traffic
-        self.buffer_pool.prefetch_buffers(self.config.prefetch_depth);
+        self.buffer_pool
+            .prefetch_buffers(self.config.prefetch_depth);
 
         let mut results = Vec::with_capacity(max_messages);
-        
+
         // Prepare optimized receive operations
         for _ in 0..max_messages {
             if let Some(buffer_id) = self.buffer_pool.acquire_buffer() {
@@ -528,12 +554,15 @@ impl IoUringAdvancedTransport {
             let received = self.process_advanced_recv_batch().await?;
             results.extend(received);
         }
-        
+
         Ok(results)
     }
 
     /// Send small messages with operation coalescing
-    async fn send_coalesced_small(&mut self, messages: &[(&[u8], SocketAddr)]) -> std::io::Result<()> {
+    async fn send_coalesced_small(
+        &mut self,
+        messages: &[(&[u8], SocketAddr)],
+    ) -> std::io::Result<()> {
         // Coalesce small messages into fewer syscalls
         let mut coalesced = CoalescedSend {
             destinations: Vec::new(),
@@ -549,20 +578,25 @@ impl IoUringAdvancedTransport {
 
         self.batch_processor.coalesced_sends.push(coalesced);
         self.process_coalesced_batch().await?;
-        
-        self.stats.coalesced_operations.fetch_add(1, Ordering::Relaxed);
+
+        self.stats
+            .coalesced_operations
+            .fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
     /// Send large messages with zero-copy optimization
-    async fn send_zero_copy_large(&mut self, messages: &[(&[u8], SocketAddr)]) -> std::io::Result<()> {
+    async fn send_zero_copy_large(
+        &mut self,
+        messages: &[(&[u8], SocketAddr)],
+    ) -> std::io::Result<()> {
         let mut submission = self.ring.submission();
         let mut submitted = 0;
 
         for (data, _addr) in messages {
             if let Some(buffer_id) = self.buffer_pool.acquire_buffer() {
                 let buffer = &mut self.buffer_pool.registered_buffers[buffer_id as usize];
-                
+
                 // Use SIMD for ultra-fast memory copy
                 let copy_len = data.len().min(buffer.data.len());
                 simd::fast_copy(&data[..copy_len], &mut buffer.data[..copy_len]);
@@ -580,11 +614,11 @@ impl IoUringAdvancedTransport {
                     if let Err(e) = submission.push(&send_op) {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::Other,
-                            format!("Failed to push send operation: {:?}", e)
+                            format!("Failed to push send operation: {:?}", e),
                         ));
                     }
                 }
-                
+
                 submitted += 1;
                 self.stats.zero_copy_ops.fetch_add(1, Ordering::Relaxed);
                 self.stats.simd_operations.fetch_add(1, Ordering::Relaxed);
@@ -592,7 +626,7 @@ impl IoUringAdvancedTransport {
         }
 
         drop(submission);
-        
+
         if submitted > 0 {
             self.ring.submit_and_wait(submitted)?;
             self.process_completions(submitted).await?;
@@ -613,7 +647,9 @@ impl IoUringAdvancedTransport {
 
         for coalesced in coalesced_batch.drain(..) {
             // Create vectorized I/O structure
-            let mut iovecs: Vec<libc::iovec> = coalesced.data_chunks.iter()
+            let mut iovecs: Vec<libc::iovec> = coalesced
+                .data_chunks
+                .iter()
                 .map(|chunk| libc::iovec {
                     iov_base: chunk.as_ptr() as *mut libc::c_void,
                     iov_len: chunk.len(),
@@ -635,14 +671,15 @@ impl IoUringAdvancedTransport {
                 let send_op = opcode::SendMsg::new(
                     types::Fd(self.socket.as_raw_fd()),
                     &msghdr as *const libc::msghdr,
-                ).build()
+                )
+                .build()
                 .user_data(i as u64);
 
                 unsafe {
                     if let Err(e) = submission.push(&send_op) {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::Other,
-                            format!("Failed to push sendmsg operation: {:?}", e)
+                            format!("Failed to push sendmsg operation: {:?}", e),
                         ));
                     }
                 }
@@ -651,7 +688,7 @@ impl IoUringAdvancedTransport {
         }
 
         drop(submission);
-        
+
         if submitted > 0 {
             self.ring.submit_and_wait(submitted)?;
             self.process_completions(submitted).await?;
@@ -672,18 +709,16 @@ impl IoUringAdvancedTransport {
 
         // Submit all receive operations with advanced flags
         for operation in batch.iter() {
-            let recv_op = opcode::RecvMsg::new(
-                types::Fd(self.socket.as_raw_fd()),
-                std::ptr::null_mut(),
-            )
-            .build()
-            .user_data(operation.buffer_id as u64);
+            let recv_op =
+                opcode::RecvMsg::new(types::Fd(self.socket.as_raw_fd()), std::ptr::null_mut())
+                    .build()
+                    .user_data(operation.buffer_id as u64);
 
             unsafe {
                 if let Err(e) = submission.push(&recv_op) {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
-                        format!("Failed to push recvmsg operation: {:?}", e)
+                        format!("Failed to push recvmsg operation: {:?}", e),
                     ));
                 }
             }
@@ -695,30 +730,32 @@ impl IoUringAdvancedTransport {
         // Collect results with SIMD optimization
         let mut results = Vec::with_capacity(batch_size);
         let mut completion = self.ring.completion();
-        
+
         for _ in 0..batch_size {
             if let Some(cqe) = completion.next() {
                 if cqe.result() > 0 {
                     let buffer_id = cqe.user_data() as u16;
                     let len = cqe.result() as usize;
                     let buffer = &self.buffer_pool.registered_buffers[buffer_id as usize];
-                    
+
                     // Allocate optimally-sized result buffer
                     let mut data = PooledBuffer::get(len);
-                    
+
                     // Use SIMD for ultra-fast memory copy
                     simd::fast_copy(&buffer.data[..len], data.as_mut_slice());
-                    
+
                     // Create dummy address (real implementation would extract from recvfrom)
                     let addr = "127.0.0.1:0".parse().unwrap();
-                    
+
                     results.push((Bytes::from(data.into_vec()), addr));
-                    
+
                     // Update statistics
                     self.stats.messages_received.fetch_add(1, Ordering::Relaxed);
-                    self.stats.bytes_received.fetch_add(len as u64, Ordering::Relaxed);
+                    self.stats
+                        .bytes_received
+                        .fetch_add(len as u64, Ordering::Relaxed);
                     self.stats.simd_operations.fetch_add(1, Ordering::Relaxed);
-                    
+
                     // Return buffer to pool
                     self.buffer_pool.release_with_prefetch(buffer_id);
                 }
@@ -733,20 +770,24 @@ impl IoUringAdvancedTransport {
     async fn process_completions(&mut self, expected: usize) -> std::io::Result<()> {
         let start_cycles = Self::read_cpu_cycles();
         let mut completion = self.ring.completion();
-        
+
         for _ in 0..expected {
             if let Some(cqe) = completion.next() {
                 if cqe.result() >= 0 {
                     self.stats.messages_sent.fetch_add(1, Ordering::Relaxed);
-                    self.stats.bytes_sent.fetch_add(cqe.result() as u64, Ordering::Relaxed);
+                    self.stats
+                        .bytes_sent
+                        .fetch_add(cqe.result() as u64, Ordering::Relaxed);
                 }
                 self.stats.cqe_completions.fetch_add(1, Ordering::Relaxed);
             }
         }
 
         let end_cycles = Self::read_cpu_cycles();
-        self.stats.cpu_cycles.fetch_add(end_cycles - start_cycles, Ordering::Relaxed);
-        
+        self.stats
+            .cpu_cycles
+            .fetch_add(end_cycles - start_cycles, Ordering::Relaxed);
+
         Ok(())
     }
 
@@ -755,7 +796,7 @@ impl IoUringAdvancedTransport {
         // Simple prediction based on recent averages
         let recent_bytes = self.stats.bytes_received.load(Ordering::Relaxed);
         let recent_messages = self.stats.messages_received.load(Ordering::Relaxed);
-        
+
         if recent_messages > 0 {
             (recent_bytes / recent_messages) as usize
         } else {
@@ -766,19 +807,19 @@ impl IoUringAdvancedTransport {
     /// Create ultra-optimized socket with all performance features
     fn create_ultra_optimized_socket() -> std::io::Result<Socket> {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-        
+
         // Enable all socket optimizations
         socket.set_nonblocking(true)?;
         socket.set_reuse_address(true)?;
         socket.set_reuse_port(true)?;
         socket.set_send_buffer_size(2 * 1024 * 1024)?; // 2MB send buffer
         socket.set_recv_buffer_size(2 * 1024 * 1024)?; // 2MB recv buffer
-        
+
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::io::AsRawFd;
             let fd = socket.as_raw_fd();
-            
+
             // Enable high-resolution timestamps
             let enable = 1i32;
             unsafe {
@@ -789,7 +830,7 @@ impl IoUringAdvancedTransport {
                     &enable as *const _ as *const libc::c_void,
                     std::mem::size_of::<i32>() as u32,
                 );
-                
+
                 // Enable zero-copy send (if available)
                 libc::setsockopt(
                     fd,
@@ -798,7 +839,7 @@ impl IoUringAdvancedTransport {
                     &enable as *const _ as *const libc::c_void,
                     std::mem::size_of::<i32>() as u32,
                 );
-                
+
                 // Optimize for throughput
                 let quickack = 1i32;
                 libc::setsockopt(
@@ -861,7 +902,11 @@ impl IoUringAdvancedTransport {
                 }
             }
 
-            tracing::debug!("Set CPU affinity to CPUs {:?} for NUMA node {}", cpu_list, numa_node);
+            tracing::debug!(
+                "Set CPU affinity to CPUs {:?} for NUMA node {}",
+                cpu_list,
+                numa_node
+            );
         }
         Ok(())
     }
@@ -874,9 +919,7 @@ impl IoUringAdvancedTransport {
 
             let path = format!("/sys/devices/system/node/node{}/cpulist", numa_node);
             match fs::read_to_string(&path) {
-                Ok(content) => {
-                    Self::parse_cpu_list(&content)
-                }
+                Ok(content) => Self::parse_cpu_list(&content),
                 Err(_) => {
                     // Fallback: assume CPU 0 for node 0, others for higher nodes
                     Ok(vec![numa_node])
@@ -899,7 +942,10 @@ impl IoUringAdvancedTransport {
                 // Range like "0-3"
                 let range: Vec<&str> = part.split('-').collect();
                 if range.len() == 2 {
-                    if let (Ok(start), Ok(end)) = (range[0].trim().parse::<usize>(), range[1].trim().parse::<usize>()) {
+                    if let (Ok(start), Ok(end)) = (
+                        range[0].trim().parse::<usize>(),
+                        range[1].trim().parse::<usize>(),
+                    ) {
                         for cpu in start..=end {
                             cpus.push(cpu);
                         }
@@ -958,7 +1004,7 @@ impl IoUringAdvancedTransport {
             if !probe.is_supported(op) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!("Required io_uring operation {} not supported", op)
+                    format!("Required io_uring operation {} not supported", op),
                 ));
             }
         }
@@ -994,8 +1040,8 @@ impl IoUringAdvancedTransport {
 
     fn calculate_avg_cpu_cycles(&self) -> f64 {
         let total_cycles = self.stats.cpu_cycles.load(Ordering::Relaxed) as f64;
-        let total_ops = (self.stats.messages_sent.load(Ordering::Relaxed) + 
-                        self.stats.messages_received.load(Ordering::Relaxed)) as f64;
+        let total_ops = (self.stats.messages_sent.load(Ordering::Relaxed)
+            + self.stats.messages_received.load(Ordering::Relaxed)) as f64;
         if total_ops > 0.0 {
             total_cycles / total_ops
         } else {
@@ -1049,7 +1095,9 @@ impl AdvancedBufferPool {
 
                 available.push_back(buffer_id);
                 numa_pools[node_idx].buffers.push(buffer_id);
-                numa_pools[node_idx].available_count.fetch_add(1, Ordering::Relaxed);
+                numa_pools[node_idx]
+                    .available_count
+                    .fetch_add(1, Ordering::Relaxed);
 
                 buffer_id += 1;
             }
@@ -1057,7 +1105,8 @@ impl AdvancedBufferPool {
 
         // Register buffers with io_uring for zero-copy
         if config.use_fixed_buffers {
-            let buffer_ring: Vec<libc::iovec> = registered_buffers.iter()
+            let buffer_ring: Vec<libc::iovec> = registered_buffers
+                .iter()
                 .map(|buf| libc::iovec {
                     iov_base: buf.data.as_ptr() as *mut libc::c_void,
                     iov_len: buf.data.len(),
@@ -1136,12 +1185,16 @@ impl AdvancedBufferPool {
         }
 
         // Try to get buffer from best NUMA node
-        if let Some(buffer_idx) = self.numa_pools[best_node_idx].buffers.iter()
+        if let Some(buffer_idx) = self.numa_pools[best_node_idx]
+            .buffers
+            .iter()
             .find(|&&buf_id| self.available.contains(&buf_id))
             .cloned()
         {
             self.available.retain(|&id| id != buffer_idx);
-            self.numa_pools[best_node_idx].available_count.fetch_sub(1, Ordering::Relaxed);
+            self.numa_pools[best_node_idx]
+                .available_count
+                .fetch_sub(1, Ordering::Relaxed);
             self.in_use.fetch_add(1, Ordering::Relaxed);
             return Some(buffer_idx);
         }
@@ -1159,7 +1212,9 @@ impl AdvancedBufferPool {
                 match Self::allocate_numa_specific_buffer(size, node) {
                     Ok(buffer) => return Ok(buffer),
                     Err(_) => {
-                        tracing::warn!("NUMA-specific allocation failed, falling back to regular allocation");
+                        tracing::warn!(
+                            "NUMA-specific allocation failed, falling back to regular allocation"
+                        );
                     }
                 }
             }
@@ -1184,7 +1239,8 @@ impl AdvancedBufferPool {
         {
             unsafe {
                 // Use huge pages for large allocations
-                if size >= 2 * 1024 * 1024 { // 2MB+
+                if size >= 2 * 1024 * 1024 {
+                    // 2MB+
                     libc::madvise(
                         buffer.as_mut_ptr() as *mut libc::c_void,
                         size,
@@ -1193,7 +1249,8 @@ impl AdvancedBufferPool {
                 }
 
                 // Prefault pages to avoid page faults during operation
-                if size <= 64 * 1024 * 1024 { // Only for reasonable sizes
+                if size <= 64 * 1024 * 1024 {
+                    // Only for reasonable sizes
                     libc::madvise(
                         buffer.as_mut_ptr() as *mut libc::c_void,
                         size,

@@ -1,20 +1,13 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use quiccrunch_core::{
-    QuicTransport,
-    Transport,
-    io_uring_optimized::IoUringOptimizedClient
-};
 use bytes::Bytes;
-use tokio::runtime::Runtime;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use quiccrunch_core::{io_uring_optimized::IoUringOptimizedClient, QuicTransport, Transport};
 use std::time::{Duration, Instant};
+use tokio::runtime::Runtime;
 
 // Advanced test configurations
 const BUFFER_SIZES: &[usize] = &[4096, 8192, 16384, 32768, 65536];
 const BUFFER_COUNTS: &[usize] = &[64, 128, 256, 512, 1024];
-const POLLING_MODES: &[(&str, bool)] = &[
-    ("normal", false),
-    ("kernel-poll", true)
-];
+const POLLING_MODES: &[(&str, bool)] = &[("normal", false), ("kernel-poll", true)];
 
 /// Tests zero-copy buffer ring performance
 async fn buffer_ring_test(
@@ -23,12 +16,7 @@ async fn buffer_ring_test(
     buffer_count: usize,
     messages: usize,
 ) -> std::io::Result<()> {
-    let mut client = IoUringOptimizedClient::new(
-        1024,
-        buffer_size,
-        buffer_count,
-        false
-    )?;
+    let mut client = IoUringOptimizedClient::new(1024, buffer_size, buffer_count, false)?;
 
     let data = vec![0u8; buffer_size];
     let start = Instant::now();
@@ -46,7 +34,9 @@ async fn buffer_ring_test(
                 buffer_size,
                 buffer_count,
                 hits: stats.buffer_hits.load(std::sync::atomic::Ordering::Relaxed),
-                misses: stats.buffer_misses.load(std::sync::atomic::Ordering::Relaxed),
+                misses: stats
+                    .buffer_misses
+                    .load(std::sync::atomic::Ordering::Relaxed),
                 operation_count: i,
             });
         }
@@ -70,12 +60,7 @@ async fn polling_test(
     message_size: usize,
     duration: Duration,
 ) -> std::io::Result<()> {
-    let mut client = IoUringOptimizedClient::new(
-        1024,
-        message_size,
-        256,
-        use_polling
-    )?;
+    let mut client = IoUringOptimizedClient::new(1024, message_size, 256, use_polling)?;
 
     let data = vec![0u8; message_size];
     let end_time = Instant::now() + duration;
@@ -85,7 +70,7 @@ async fn polling_test(
 
     while Instant::now() < end_time {
         let op_start = Instant::now();
-        
+
         // Record submission time
         let submit_start = Instant::now();
         client.send_message_multishot(&data).await?;
@@ -122,7 +107,7 @@ async fn multishot_test(
         1024,
         message_size,
         batch_size * 2, // Double buffer count for smooth operation
-        true // Use polling for best multishot performance
+        true,           // Use polling for best multishot performance
     )?;
 
     let data = vec![0u8; message_size];
@@ -131,7 +116,7 @@ async fn multishot_test(
 
     for _ in 0..iterations {
         let batch_start = Instant::now();
-        
+
         // Submit batch of messages
         for _ in 0..batch_size {
             client.send_message_multishot(&data).await?;
@@ -164,7 +149,7 @@ fn bench_optimized_io_uring(c: &mut Criterion) {
             group.bench_function(
                 BenchmarkId::new(
                     format!("size_{}_count_{}", buffer_size, buffer_count),
-                    buffer_size
+                    buffer_size,
                 ),
                 |b| {
                     b.iter(|| {
@@ -209,23 +194,16 @@ fn bench_optimized_io_uring(c: &mut Criterion) {
             group.throughput(Throughput::Bytes((size * batch_size) as u64));
             group.bench_function(
                 BenchmarkId::new(format!("batch_{}_size_{}", batch_size, size), size),
-                |b| {
-                    b.iter(|| {
-                        rt.block_on(multishot_test(
-                            &mut collector,
-                            batch_size,
-                            size,
-                            100,
-                        ))
-                    })
-                },
+                |b| b.iter(|| rt.block_on(multishot_test(&mut collector, batch_size, size, 100))),
             );
         }
     }
     group.finish();
 
     // Generate detailed analysis report
-    collector.generate_optimized_report(c.benchmark_group("advanced_analysis")).unwrap();
+    collector
+        .generate_optimized_report(c.benchmark_group("advanced_analysis"))
+        .unwrap();
 }
 
 criterion_group! {

@@ -1,22 +1,28 @@
 //! Example: Bidirectional Streaming RPC using QuicCrunch high-level abstractions
 
-use quiccrunch_macros::rpc_service;
-use quiccrunch_core::rpc::{RpcServer, RpcClient, RpcStreamSink, RpcStreamSource, RpcResult};
+use quiccrunch_core::rpc::{RpcClient, RpcResult, RpcServer, RpcStreamSink, RpcStreamSource};
 use quiccrunch_core::{QuicTransport, TlsConfig};
+use quiccrunch_macros::rpc_service;
 use std::sync::Arc;
 use tokio::time::Duration;
 
 #[rpc_service(name = "BidiService")]
 trait BidiService {
     // Bidirectional streaming: stream of requests, stream of responses
-    async fn bidi_stream(&self, input: RpcStreamSource<String>) -> RpcResult<RpcStreamSource<String>>;
+    async fn bidi_stream(
+        &self,
+        input: RpcStreamSource<String>,
+    ) -> RpcResult<RpcStreamSource<String>>;
 }
 
 struct BidiServiceImpl;
 
 #[async_trait::async_trait]
 impl BidiService for BidiServiceImpl {
-    async fn bidi_stream(&self, mut input: RpcStreamSource<String>) -> RpcResult<RpcStreamSource<String>> {
+    async fn bidi_stream(
+        &self,
+        mut input: RpcStreamSource<String>,
+    ) -> RpcResult<RpcStreamSource<String>> {
         let (mut sink, source) = RpcStreamSink::create();
         tokio::spawn(async move {
             let mut i = 0;
@@ -46,7 +52,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let transport = QuicTransport::new(tls_config).unwrap();
         let server = RpcServer::new();
         let service = Arc::new(BidiServiceImpl);
-        server.register_streaming_service("BidiService".to_string(), service).await;
+        server
+            .register_streaming_service("BidiService".to_string(), service)
+            .await;
         server.serve(&transport, server_addr).await.unwrap();
     });
 
@@ -54,7 +62,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Client connects and sends request
-    let tls_config = TlsConfig::load_ca_cert("ca.crt").unwrap_or_else(|_| TlsConfig::generate_self_signed("localhost").unwrap());
+    let tls_config = TlsConfig::load_ca_cert("ca.crt")
+        .unwrap_or_else(|_| TlsConfig::generate_self_signed("localhost").unwrap());
     let transport = QuicTransport::new(tls_config)?;
     let connection = transport.connect(server_addr).await?;
     let client = RpcClient::new(connection);

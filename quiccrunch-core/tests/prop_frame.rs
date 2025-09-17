@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use quiccrunch_core::schema::frame_capnp;
-    use proptest::prelude::*;
     use capnp::message::{Builder, HeapAllocator};
+    use proptest::prelude::*;
+    use quiccrunch_core::schema::frame_capnp;
 
     proptest! {
         #[test]
@@ -24,7 +24,7 @@ mod tests {
             let mut cursor = std::io::Cursor::new(&bytes[..]);
             let message_reader = capnp::serialize::read_message(&mut cursor, capnp::message::ReaderOptions::default()).unwrap();
             let decoded = message_reader.get_root::<frame_capnp::frame::Reader>().unwrap();
-            
+
             prop_assert_eq!(length, decoded.get_length());
         }
 
@@ -58,7 +58,7 @@ mod tests {
             let mut cursor = std::io::Cursor::new(&bytes[..]);
             let message_reader = capnp::serialize::read_message(&mut cursor, capnp::message::ReaderOptions::default()).unwrap();
             let decoded = message_reader.get_root::<frame_capnp::frame::Reader>().unwrap();
-            
+
             prop_assert_eq!(length, decoded.get_length());
 
             let decoded_ctx = decoded.get_trace_context().unwrap();

@@ -45,12 +45,15 @@ fn run_frequency_scaling() {
     });
 
     // Generate report in target directory
-    let output_dir = Path::new("target").join("benchmark").join("frequency_scaling_report");
+    let output_dir = Path::new("target")
+        .join("benchmark")
+        .join("frequency_scaling_report");
     std::fs::create_dir_all(&output_dir).expect("Failed to create output directory");
 
     // Save raw results as JSON
     let json = serde_json::to_string_pretty(&results).expect("Failed to serialize results");
-    std::fs::write(output_dir.join("raw_results.json"), json).expect("Failed to write results file");
+    std::fs::write(output_dir.join("raw_results.json"), json)
+        .expect("Failed to write results file");
 
     // Generate plots
     plotting::plot_efficiency_curves(&results, &output_dir)

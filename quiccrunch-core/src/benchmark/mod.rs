@@ -19,15 +19,15 @@
 
 pub mod metrics;
 
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use serde::{Serialize, Deserialize};
 
 /// Message size test matrix covering small, medium and large messages
 pub const MESSAGE_SIZES: &[usize] = &[
-    16, 32, 64, 128, 256, 512, 768,           // Small (B)
-    1024, 2048, 4096, 8192,                  // Small (KB)  
-    16384, 32768, 65536, 131072,             // Medium (KB)
-    1048576, 2097152, 4194304                // Large (MB)
+    16, 32, 64, 128, 256, 512, 768, // Small (B)
+    1024, 2048, 4096, 8192, // Small (KB)
+    16384, 32768, 65536, 131072, // Medium (KB)
+    1048576, 2097152, 4194304, // Large (MB)
 ];
 
 /// Connection count test matrix for concurrent testing
@@ -131,7 +131,7 @@ pub struct ComparisonMetrics {
 /// Generate test data with realistic patterns
 pub fn generate_test_message(size: usize) -> Vec<u8> {
     let mut data = Vec::with_capacity(size);
-    
+
     // Mix of random data and patterns to simulate real traffic
     for i in 0..size {
         match i % 4 {
@@ -142,11 +142,16 @@ pub fn generate_test_message(size: usize) -> Vec<u8> {
             _ => unreachable!(),
         }
     }
-    
+
     data
 }
 
 /// Generate unique message ID
 pub fn generate_message_id(pattern: &str, sequence: u32) -> String {
-    format!("{}:{:08x}:{}", pattern, sequence, chrono::Utc::now().timestamp_micros())
+    format!(
+        "{}:{:08x}:{}",
+        pattern,
+        sequence,
+        chrono::Utc::now().timestamp_micros()
+    )
 }
