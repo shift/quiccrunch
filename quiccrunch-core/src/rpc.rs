@@ -193,7 +193,7 @@ use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 use tokio::sync::RwLock;
 use futures::Stream;
-use crate::{QuicStream, TransportError, StreamReader, StreamWriter, Splittable, transport::tquic::TquicConnection as Connection};
+use crate::{QuicStream, TransportError, StreamReader, StreamWriter, Splittable, transport::tquic::AsyncTquicClient as Connection};
 use crate::schema::rpc_capnp::*;
 
 /// Service information for discovery

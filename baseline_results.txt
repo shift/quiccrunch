@@ -9,15 +9,6 @@ To build Python bindings, run: cd bindings/python && maturin develop
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
 package:   /home/shift/code/quiccrunch/quiccrunch-core/Cargo.toml
 workspace: /home/shift/code/quiccrunch/Cargo.toml
-   Compiling syn v1.0.109
-   Compiling tracing-core v0.1.34
-   Compiling tracing v0.1.41
-   Compiling nalgebra-macros v0.1.0
-   Compiling strum_macros v0.24.3
-   Compiling nalgebra v0.29.0
-   Compiling tquic v1.6.0
-   Compiling statrs v0.16.1
-   Compiling quiccrunch-core v0.1.0 (/home/shift/code/quiccrunch/quiccrunch-core)
 warning: unused import: `tokio::time`
  --> quiccrunch-core/src/stream.rs:4:5
   |
@@ -104,3 +95,11 @@ warning: field `connection_id` is never read
     |     ^^^^^^^^^^^^^
 
 warning: `quiccrunch-core` (lib) generated 10 warnings (run `cargo fix --lib -p quiccrunch-core` to apply 3 suggestions)
+   Compiling quiccrunch-core v0.1.0 (/home/shift/code/quiccrunch/quiccrunch-core)
+    Finished `release` profile [optimized] target(s) in 35.63s
+     Running `target/release/benchmark client flood --backend tquic --concurrency 1 --duration 60 --message-size 1024`
+error: unexpected argument '--backend' found
+
+Usage: benchmark client flood [OPTIONS]
+
+For more information, try '--help'.

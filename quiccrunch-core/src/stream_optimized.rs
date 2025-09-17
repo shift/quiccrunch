@@ -76,13 +76,6 @@ impl StreamConfig {
 }
 
 enum StreamInner {
-    #[cfg(feature = "backend-quinn")]
-    Quinn { 
-        send: quinn::SendStream, 
-        recv: quinn::RecvStream,
-        send_buffer: Option<MessageBuffer>,
-        recv_buffer: Option<PooledBuffer>,
-    },
     #[cfg(feature = "backend-tquic")]
     Tquic { 
         handle: StreamHandle,
@@ -153,22 +146,7 @@ impl StreamStats {
 }
 
 impl OptimizedQuicStream {
-    /// Create new optimized stream
-    #[cfg(feature = "backend-quinn")]
-    pub fn new_quinn(send: quinn::SendStream, recv: quinn::RecvStream, max_message_size: usize) -> Self {
-        Self {
-            inner: StreamInner::Quinn { 
-                send, 
-                recv,
-                send_buffer: None,
-                recv_buffer: None,
-            },
-            max_message_size,
-            stats: StreamStats::default(),
-            config: StreamConfig::default(),
-        }
-    }
-
+    /// Create new optimized stream for tQUIC backend
     #[cfg(feature = "backend-tquic")]
     pub fn new_tquic(handle: StreamHandle, max_message_size: usize) -> Self {
         Self {
@@ -184,35 +162,16 @@ impl OptimizedQuicStream {
     }
 
     /// Create stream with custom configuration
+    #[cfg(feature = "backend-tquic")]
     pub fn with_config(
-        #[cfg(feature = "backend-quinn")] send: quinn::SendStream,
-        #[cfg(feature = "backend-quinn")] recv: quinn::RecvStream,
-        #[cfg(feature = "backend-tquic")] handle: StreamHandle,
+        handle: StreamHandle,
         max_message_size: usize,
         config: StreamConfig,
     ) -> Self {
-        let inner = {
-            #[cfg(all(feature = "backend-quinn", not(feature = "backend-tquic")))]
-            {
-                StreamInner::Quinn { 
-                    send, 
-                    recv,
-                    send_buffer: Some(MessageBuffer::with_capacity(config.chunk_size)),
-                    recv_buffer: Some(PooledBuffer::get(config.chunk_size)),
-                }
-            }
-            #[cfg(all(feature = "backend-tquic", not(feature = "backend-quinn")))]
-            {
-                StreamInner::Tquic {
-                    handle,
-                    _send_buffer: Some(MessageBuffer::with_capacity(config.chunk_size)),
-                    _recv_buffer: Some(PooledBuffer::get(config.chunk_size)),
-                }
-            }
-            #[cfg(not(any(feature = "backend-quinn", feature = "backend-tquic")))]
-            {
-                compile_error!("No backend feature enabled");
-            }
+        let inner = StreamInner::Tquic {
+            handle,
+            _send_buffer: Some(MessageBuffer::with_capacity(config.chunk_size)),
+            _recv_buffer: Some(PooledBuffer::get(config.chunk_size)),
         };
 
         Self {
@@ -279,31 +238,6 @@ impl OptimizedQuicStream {
     /// Send with zero-copy optimization
     async fn send_zero_copy(&mut self, data: Bytes) -> crate::Result<()> {
         match &mut self.inner {
-            #[cfg(feature = "backend-quinn")]
-            StreamInner::Quinn { send, send_buffer, .. } => {
-                // Prepare zero-copy buffer
-                let buffer = send_buffer.get_or_insert_with(|| {
-                    MessageBuffer::with_capacity(self.config.chunk_size)
-                });
-
-                buffer.write_header(data.len() as u32);
-
-                // For large messages, write directly without copying
-                if data.len() >= self.config.chunk_size {
-                    use tokio::io::AsyncWriteExt;
-                    send.write_all(&(data.len() as u32).to_le_bytes()).await
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                    send.write_all(&data).await
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                    send.flush().await
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                } else {
-                    buffer.write_data(&data);
-                    let message_bytes = std::mem::replace(buffer, MessageBuffer::with_capacity(self.config.chunk_size)).into_bytes();
-                    send.write_all(&message_bytes).await
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                }
-            }
             #[cfg(feature = "backend-tquic")]
             StreamInner::Tquic { handle, .. } => {
                 handle.write(data, false).await?;

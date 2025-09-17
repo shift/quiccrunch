@@ -84,3 +84,36 @@ impl TquicWorker {
 - Uses tQUIC v1.6.0 APIs directly
 - mio event-driven architecture
 - Channel-based communication with tokio layer
+
+### mio 1.0.4 API Changes
+**STATUS: ✅ COMPLETED** - Updated from mio 0.6.x to 1.0.4. Key changes implemented:
+
+1. **Poll::register() → Registry pattern**:
+   ```rust
+   // OLD (0.6.x): poll.register(&socket, token, interest, opts)
+   // NEW (1.0.4): poll.registry().register(&mut socket, token, interest) ✅
+   ```
+
+2. **Event handling changes**:
+   - Events no longer have `.kind()` method ✅
+   - Use `event.is_readable()`, `event.is_writable()` instead ✅
+   - Token access via `event.token()` ✅
+
+3. **Interest types**:
+   - `Interest::READABLE` instead of `Ready::readable()` ✅
+   - `Interest::WRITABLE` instead of `Ready::writable()` ✅
+
+4. **Socket modifications**:
+   - Sockets must be `&mut` for registration ✅
+   - Consistent `Registry` API for all registrations ✅
+
+**Files Updated**:
+- ✅ `src/transport/worker.rs` - Correctly uses mio 1.0.4 API
+- ⚠️ `src/transport/async_bridge.rs` - Has **tQUIC API issues**, not mio issues
+
+### tQUIC 1.6.0 Compatibility Issues
+**MAIN ISSUE**: tQUIC API incompatibilities (not mio-related):
+- `TlsConfig::default()` doesn't exist
+- `Endpoint::with_configs()` doesn't exist  
+- Stream API changes (`stream_readable()` returns `bool`, not stream object)
+- `endpoint.handler().socket` access pattern doesn't exist

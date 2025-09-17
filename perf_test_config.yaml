@@ -1,0 +1,247 @@
+# QuicCrunch Network Performance Test Configuration
+
+## Test Parameters
+
+# Default test configuration
+test_config:
+  # Message parameters
+  default_messages: 10000
+  default_payload_size: 4096
+  max_payload_size: 1048576  # 1MB
+  
+  # Connection parameters
+  default_connections: 1
+  max_connections: 100
+  default_concurrency: 1
+  max_concurrency: 32
+  
+  # Timing parameters
+  default_warmup_seconds: 5
+  default_test_duration_seconds: 60
+  connection_timeout_seconds: 30
+  
+  # Rate limiting
+  default_rate_limit: 0  # 0 = unlimited
+  max_rate_limit: 100000  # requests per second
+
+## Test Suites
+
+# Streaming variant tests - test all RPC patterns
+streaming_tests:
+  - name: "unary_small"
+    test_type: "unary"
+    messages: 5000
+    payload_size: 1024
+    connections: 1
+    concurrency: 1
+    
+  - name: "unary_medium"
+    test_type: "unary"
+    messages: 2000
+    payload_size: 16384
+    connections: 1
+    concurrency: 1
+    
+  - name: "client_streaming"
+    test_type: "client-streaming"
+    messages: 1000
+    payload_size: 4096
+    connections: 1
+    concurrency: 1
+    
+  - name: "server_streaming"
+    test_type: "server-streaming"
+    messages: 1000
+    payload_size: 4096
+    connections: 1
+    concurrency: 1
+    
+  - name: "bidirectional_streaming"
+    test_type: "bidirectional"
+    messages: 1000
+    payload_size: 4096
+    connections: 1
+    concurrency: 1
+
+# Scalability tests - test concurrent load
+scalability_tests:
+  connection_scaling:
+    - connections: 1
+      concurrency: 1
+      messages: 10000
+      payload_size: 4096
+      
+    - connections: 5
+      concurrency: 1
+      messages: 2000
+      payload_size: 4096
+      
+    - connections: 10
+      concurrency: 1
+      messages: 1000
+      payload_size: 4096
+      
+    - connections: 20
+      concurrency: 1
+      messages: 500
+      payload_size: 4096
+  
+  concurrency_scaling:
+    - connections: 1
+      concurrency: 1
+      messages: 10000
+      payload_size: 4096
+      
+    - connections: 1
+      concurrency: 4
+      messages: 10000
+      payload_size: 4096
+      
+    - connections: 1
+      concurrency: 8
+      messages: 10000
+      payload_size: 4096
+      
+    - connections: 1
+      concurrency: 16
+      messages: 10000
+      payload_size: 4096
+
+# Payload size tests - test different message sizes
+payload_tests:
+  - name: "tiny_messages"
+    payload_size: 64
+    messages: 50000
+    test_type: "echo"
+    
+  - name: "small_messages"
+    payload_size: 1024
+    messages: 20000
+    test_type: "echo"
+    
+  - name: "medium_messages"
+    payload_size: 16384
+    messages: 5000
+    test_type: "echo"
+    
+  - name: "large_messages"
+    payload_size: 65536
+    messages: 1000
+    test_type: "echo"
+    
+  - name: "xlarge_messages"
+    payload_size: 262144
+    messages: 500
+    test_type: "echo"
+
+# Throughput tests - sustained load testing
+throughput_tests:
+  - name: "sustained_load_1min"
+    test_type: "throughput"
+    duration_seconds: 60
+    payload_size: 4096
+    connections: 5
+    concurrency: 4
+    rate_limit: 1000
+    
+  - name: "burst_load"
+    test_type: "throughput"
+    duration_seconds: 30
+    payload_size: 1024
+    connections: 10
+    concurrency: 8
+    rate_limit: 0  # No rate limit
+    
+  - name: "endurance_test"
+    test_type: "throughput"
+    duration_seconds: 300  # 5 minutes
+    payload_size: 4096
+    connections: 2
+    concurrency: 2
+    rate_limit: 500
+
+## Server Configuration
+
+server_config:
+  # Network settings
+  bind_address: "127.0.0.1:50051"
+  max_message_size: 1048576  # 1MB
+  
+  # TLS settings
+  use_self_signed_cert: true
+  cert_file: null
+  key_file: null
+  
+  # Performance settings
+  enable_verbose_logging: false
+  metrics_reporting_interval_seconds: 10
+  
+  # QUIC transport settings
+  max_concurrent_bidi_streams: 1000
+  max_concurrent_uni_streams: 100
+  max_idle_timeout_seconds: 60
+  keep_alive_interval_seconds: 15
+
+## Client Configuration
+
+client_config:
+  # Connection settings
+  connection_timeout_seconds: 30
+  request_timeout_seconds: 30
+  
+  # TLS settings
+  skip_cert_verification: true  # For testing only
+  
+  # Performance settings
+  enable_verbose_logging: false
+  warmup_duration_seconds: 5
+  
+  # Retry settings
+  max_retries: 3
+  retry_delay_ms: 100
+
+## Reporting Configuration
+
+reporting_config:
+  # Output formats
+  enable_json_output: true
+  enable_csv_output: true
+  enable_markdown_report: true
+  
+  # Metrics to collect
+  collect_latency_percentiles: true
+  latency_percentiles: [50, 90, 95, 99, 99.9]
+  
+  # Report sections
+  include_system_info: true
+  include_test_parameters: true
+  include_raw_data: false
+  include_charts: false  # Would require additional dependencies
+
+## Performance Targets
+
+# Expected performance baselines for regression testing
+performance_targets:
+  unary_rps_target: 10000        # Requests per second
+  echo_latency_p99_ms: 10.0      # 99th percentile latency
+  throughput_mbps_target: 100.0  # Megabits per second
+  
+  # Scalability targets
+  linear_scaling_efficiency: 0.8  # 80% efficiency expected
+  max_supported_connections: 1000
+  max_supported_concurrency: 100
+
+## Environment Settings
+
+environment:
+  # Test environment detection
+  detect_system_resources: true
+  log_system_info: true
+  
+  # Resource limits
+  max_memory_usage_mb: 1000
+  max_cpu_usage_percent: 80
+  
+  # Cleanup settings
+  cleanup_on_failure: true
+  preserve_logs: true

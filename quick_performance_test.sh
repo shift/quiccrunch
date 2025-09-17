@@ -9,13 +9,13 @@ echo "========================================"
 # Test parameters
 BACKEND="tquic"
 CONCURRENCY=1
-REQUESTS=1000
+DURATION=60
 MESSAGE_SIZE=1024
 
 echo "📊 Test Configuration:"
 echo "  Backend: $BACKEND"
 echo "  Concurrency: $CONCURRENCY"
-echo "  Requests: $REQUESTS"
+echo "  Duration: ${DURATION}s"
 echo "  Message Size: $MESSAGE_SIZE bytes"
 echo ""
 
@@ -23,9 +23,7 @@ echo ""
 echo "🔥 Running BASELINE test (no optimizations)..."
 echo "Features: backend-$BACKEND"
 BASELINE_START=$(date +%s%N)
-nix develop -c cargo run --release -p quiccrunch-core --bin benchmark \
-  --features="backend-$BACKEND" \
-  -- --backend $BACKEND --concurrency $CONCURRENCY --requests $REQUESTS --message-size $MESSAGE_SIZE \
+nix develop -c ./target/release/benchmark client flood --concurrency $CONCURRENCY --duration $DURATION --message-size $MESSAGE_SIZE \
   > baseline_results.txt 2>&1
 BASELINE_END=$(date +%s%N)
 BASELINE_TIME=$((($BASELINE_END - $BASELINE_START) / 1000000))
@@ -37,9 +35,7 @@ echo ""
 echo "⚡ Running OPTIMIZED test (lock-free channels + memory pools + SIMD + adaptive)..."
 echo "Features: backend-$BACKEND,lock-free-channels,memory-pools,simd-optimizations,adaptive-optimizations"
 OPTIMIZED_START=$(date +%s%N)
-nix develop -c cargo run --release -p quiccrunch-core --bin benchmark \
-  --features="backend-$BACKEND,lock-free-channels,memory-pools,simd-optimizations,adaptive-optimizations" \
-  -- --backend $BACKEND --concurrency $CONCURRENCY --requests $REQUESTS --message-size $MESSAGE_SIZE \
+nix develop -c ./target/release/benchmark client flood --concurrency $CONCURRENCY --duration $DURATION --message-size $MESSAGE_SIZE \
   > optimized_results.txt 2>&1
 OPTIMIZED_END=$(date +%s%N)
 OPTIMIZED_TIME=$((($OPTIMIZED_END - $OPTIMIZED_START) / 1000000))

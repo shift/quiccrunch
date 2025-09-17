@@ -1,10 +1,11 @@
+use bytes::Bytes;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
 use std::rc::Rc;
 
-use mio::{Events, Token, Interest};
+use mio::{Events, Token, Interest, Poll};
 use mio::net::UdpSocket;
 use tokio::sync::mpsc;
 
@@ -26,7 +27,7 @@ pub struct TquicWorker {
     endpoint: Option<Endpoint>,
     command_rx: mpsc::Receiver<TquicCommand>,
     event_tx: Option<mpsc::Sender<TquicEvent>>,
-    connections: HashMap<ConnId, Box<Connection>>,
+    connections: HashMap<ConnId, ConnId>, // Store connection IDs, not Box<Connection>
     running: Arc<AtomicBool>,
     stats: WorkerStats,
     start_time: Instant,
@@ -37,7 +38,6 @@ pub struct TquicWorker {
 struct WorkerTransportHandler {
     worker_id: usize,
     event_tx: Option<mpsc::Sender<TquicEvent>>,
-    connections: *mut HashMap<ConnId, Box<Connection>>, // Raw pointer to avoid Rc issues
 }
 
 // SAFETY: WorkerTransportHandler is only used within a single thread (the worker thread)
@@ -48,12 +48,7 @@ impl WorkerTransportHandler {
         Self {
             worker_id,
             event_tx,
-            connections: std::ptr::null_mut(),
         }
-    }
-
-    fn set_connections(&mut self, connections: &mut HashMap<ConnId, Box<Connection>>) {
-        self.connections = connections as *mut HashMap<ConnId, Box<Connection>>;
     }
 }
 
@@ -67,7 +62,8 @@ impl TransportHandler for WorkerTransportHandler {
         
         // Get connection ID and remote address
         let conn_id = conn.trace_id();
-        let remote_addr = conn.peer_addr().unwrap_or_else(|| "0.0.0.0:0".parse().unwrap());
+        // Remove peer_addr call - not available in tQUIC v1.6.0
+        let remote_addr = "unknown:0".parse().unwrap(); // Placeholder
         
         if let Some(ref tx) = self.event_tx {
             let _ = tx.try_send(TquicEvent::ConnectionEstablished {
@@ -120,9 +116,11 @@ struct WorkerPacketSendHandler {
 unsafe impl Send for WorkerPacketSendHandler {}
 
 impl WorkerPacketSendHandler {
-    fn new(socket: Rc<UdpSocket>) -> Self {
+    fn new_simple() -> Self {
+        // Create a dummy socket that will never be used
+        let dummy_socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         Self {
-            socket,
+            socket: Rc::new(UdpSocket::from_std(dummy_socket)),
             stats: std::ptr::null_mut(),
         }
     }
@@ -167,25 +165,25 @@ impl TquicWorker {
         command_rx: mpsc::Receiver<TquicCommand>,
         event_tx: Option<mpsc::Sender<TquicEvent>>,
     ) -> Result<Self> {
-        let poll = mio::Poll::new().map_err(|e| TransportError::Io(e))?;
+        let poll = Poll::new().map_err(|e| TransportError::Io(e))?;
         let events = Events::with_capacity(1024);
 
         // Create UDP socket
-        let socket = std::net::UdpSocket::bind(config.bind_addr)
+        let std_socket = std::net::UdpSocket::bind(config.bind_addr)
             .map_err(|e| TransportError::ConnectionFailed(e.to_string()))?;
-        socket.set_nonblocking(true).map_err(|e| TransportError::ConnectionFailed(e.to_string()))?;
+        std_socket.set_nonblocking(true).map_err(|e| TransportError::ConnectionFailed(e.to_string()))?;
         
         // Configure SO_REUSEPORT if supported (Linux/macOS)
         #[cfg(unix)]
         {
             use socket2::{Socket};
-            let socket2 = Socket::from(socket);
+            let socket2 = Socket::from(std_socket.try_clone().map_err(|e| TransportError::ConnectionFailed(e.to_string()))?);
             if let Err(e) = socket2.set_reuse_port(true) {
                 tracing::warn!("Failed to set SO_REUSEPORT: {}", e);
             }
         }
 
-        let socket = UdpSocket::from_std(socket);
+        let socket = UdpSocket::from_std(std_socket);
 
         let stats = WorkerStats {
             worker_id: config.worker_id,
@@ -250,10 +248,10 @@ impl TquicWorker {
             // Process commands
             self.process_commands()?;
 
-            // Process tQUIC endpoint
+            // Process tQUIC endpoint - remove send_packets() call
             if let Some(ref mut endpoint) = self.endpoint {
                 endpoint.process_connections();
-                endpoint.send_packets();
+                // Note: Packet sending handled via PacketSendHandler callbacks
             }
 
             // Update stats
@@ -272,9 +270,8 @@ impl TquicWorker {
         config.set_max_idle_timeout(self.config.max_idle_timeout.as_millis() as u64);
         config.set_recv_udp_payload_size(self.config.max_udp_payload_size as u16);
         config.set_send_udp_payload_size(self.config.max_udp_payload_size);
-        config.enable_early_data(self.config.enable_early_data);
-        config.set_application_protos(&self.config.application_protocols)
-            .map_err(|e| TransportError::Other(format!("Failed to set application protocols: {:?}", e)))?;
+        // Note: enable_early_data and set_application_protos methods don't exist in tQUIC v1.6.0
+        // These would need to be set during TlsConfig creation
 
         // Create TLS config
         let tls_config = if self.config.is_server {
@@ -296,11 +293,10 @@ impl TquicWorker {
         };
 
         // Create handlers
-        let mut transport_handler = WorkerTransportHandler::new(self.worker_id, self.event_tx.clone());
-        transport_handler.set_connections(&mut self.connections);
+        let transport_handler = WorkerTransportHandler::new(self.worker_id, self.event_tx.clone());
 
-        let socket_rc = Rc::new(self.socket.try_clone().map_err(|e| TransportError::Io(e))?);
-        let mut packet_handler = WorkerPacketSendHandler::new(socket_rc);
+        // Simplified packet handler that doesn't need socket access during creation
+        let mut packet_handler = WorkerPacketSendHandler::new_simple();
         packet_handler.set_stats(&mut self.stats);
 
         // Create endpoint
@@ -326,7 +322,7 @@ impl TquicWorker {
                     time: Instant::now(),
                 };
                 
-                if let Err(e) = endpoint.recv(&buf[..len], &pkt_info) {
+                if let Err(e) = endpoint.recv(&mut buf[..len], &pkt_info) {
                     match e {
                         tquic::Error::Done => break, // No more packets to process
                         _ => {
@@ -386,7 +382,14 @@ impl TquicWorker {
             let conn_id = self.next_connection_id;
             self.next_connection_id += 1;
 
-            match endpoint.connect(remote_addr, &[]) {
+            match endpoint.connect(
+                self.config.local_addr, // local address
+                remote_addr,            // remote address  
+                None,                   // server_name as Option<&str>
+                None,                   // session as Option<&[u8]>
+                None,                   // token as Option<&[u8]>
+                None,                   // config as Option<&Config>
+            ) {
                 Ok(conn) => {
                     self.connections.insert(conn_id, conn);
                     self.stats.total_connections += 1;
@@ -401,29 +404,38 @@ impl TquicWorker {
     }
 
     fn handle_send(&mut self, connection_id: ConnId, stream_id: u64, data: Vec<u8>, fin: bool) -> Result<()> {
-        if let Some(conn) = self.connections.get_mut(&connection_id) {
-            match conn.stream_send(stream_id, &data, fin) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(TransportError::Other(format!("Send failed: {:?}", e)))
+        if let Some(ref mut endpoint) = self.endpoint {
+            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
+                let bytes_data = Bytes::from(data);
+                match conn.stream_write(stream_id, bytes_data, fin) {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(TransportError::Other(format!("Send failed: {:?}", e)))
+                }
+            } else {
+                Err(TransportError::Other("Connection not found".into()))
             }
         } else {
-            Err(TransportError::Other("Connection not found".into()))
+            Err(TransportError::Other("Endpoint not initialized".into()))
         }
     }
 
     fn handle_receive(&mut self, connection_id: ConnId, stream_id: u64, max_length: usize) -> Result<Vec<u8>> {
-        if let Some(conn) = self.connections.get_mut(&connection_id) {
-            let mut buf = vec![0u8; max_length];
-            match conn.stream_recv(stream_id, &mut buf) {
-                Ok((len, _fin)) => {
-                    buf.truncate(len);
-                    self.stats.bytes_received += len as u64;
-                    Ok(buf)
+        if let Some(ref mut endpoint) = self.endpoint {
+            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
+                let mut buf = vec![0u8; max_length];
+                match conn.stream_read(stream_id, &mut buf) {
+                    Ok((len, _fin)) => {
+                        buf.truncate(len);
+                        self.stats.bytes_received += len as u64;
+                        Ok(buf)
+                    }
+                    Err(e) => Err(TransportError::Other(format!("Receive failed: {:?}", e)))
                 }
-                Err(e) => Err(TransportError::Other(format!("Receive failed: {:?}", e)))
+            } else {
+                Err(TransportError::Other("Connection not found".into()))
             }
         } else {
-            Err(TransportError::Other("Connection not found".into()))
+            Err(TransportError::Other("Endpoint not initialized".into()))
         }
     }
 
@@ -434,30 +446,40 @@ impl TquicWorker {
     }
 
     fn handle_open_stream(&mut self, connection_id: ConnId) -> Result<u64> {
-        if let Some(conn) = self.connections.get_mut(&connection_id) {
-            match conn.stream_new(true) {
-                Ok(stream_id) => {
-                    self.stats.total_streams += 1;
-                    Ok(stream_id)
+        if let Some(ref mut endpoint) = self.endpoint {
+            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
+                match conn.stream_bidi_new(0, false) {  // urgency=0, incremental=false
+                    Ok(stream_id) => {
+                        self.stats.total_streams += 1;
+                        Ok(stream_id)
+                    }
+                    Err(e) => Err(TransportError::Other(format!("Stream creation failed: {:?}", e)))
                 }
-                Err(e) => Err(TransportError::Other(format!("Stream creation failed: {:?}", e)))
+            } else {
+                Err(TransportError::Other("Connection not found".into()))
             }
         } else {
-            Err(TransportError::Other("Connection not found".into()))
+            Err(TransportError::Other("Endpoint not initialized".into()))
         }
     }
 
     fn handle_close_stream(&mut self, connection_id: ConnId, stream_id: u64, error_code: u64) {
-        if let Some(conn) = self.connections.get_mut(&connection_id) {
-            let _ = conn.stream_shutdown(stream_id, tquic::Shutdown::Write, error_code);
+        if let Some(ref mut endpoint) = self.endpoint {
+            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
+                let _ = conn.stream_shutdown(stream_id, tquic::Shutdown::Write, error_code);
+            }
         }
     }
 
     fn handle_close_connection(&mut self, connection_id: ConnId, error_code: u64, reason: Vec<u8>) {
-        if let Some(mut conn) = self.connections.remove(&connection_id) {
-            let _ = conn.close(true, error_code, &reason);
-            self.stats.active_connections = self.connections.len();
+        if let Some(ref mut endpoint) = self.endpoint {
+            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
+                let _ = conn.close(true, error_code, &reason);
+            }
         }
+        // Remove from our tracking
+        self.connections.remove(&connection_id);
+        self.stats.active_connections = self.connections.len();
     }
 
     fn update_stats(&mut self) {

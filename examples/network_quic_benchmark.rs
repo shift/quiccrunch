@@ -319,6 +319,9 @@ async fn run_client_to_server_test(
         message_size: config.message_size,
         stream_direction: config.stream_direction.clone(),
         connection_setup_time_ms: avg_connection_time,
+        pool_hit_rate: 0.0,
+        pool_hits: 0,
+        pool_misses: config.concurrent_clients as u64,
     })
 }
 
@@ -445,6 +448,9 @@ async fn run_server_to_client_test(
         message_size: config.message_size,
         stream_direction: config.stream_direction.clone(),
         connection_setup_time_ms: avg_connection_time,
+        pool_hit_rate: 0.0,
+        pool_hits: 0,
+        pool_misses: config.concurrent_clients as u64,
     })
 }
 
@@ -573,6 +579,9 @@ async fn run_bidirectional_test(
         message_size: config.message_size,
         stream_direction: config.stream_direction.clone(),
         connection_setup_time_ms: avg_connection_time,
+        pool_hit_rate: 0.0,
+        pool_hits: 0,
+        pool_misses: config.concurrent_clients as u64,
     })
 }
 

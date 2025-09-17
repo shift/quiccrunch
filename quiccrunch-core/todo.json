@@ -1,0 +1,35 @@
+{
+  "context": "Refactor examples/bidistreaming.rs to use only the core crate's RPC abstractions, ensuring proper tquic backend integration via feature flags/configuration. The example should demonstrate bidirectional streaming RPC using Cap'n Proto, without any direct tquic/socket/event loop logic. If RPC abstractions fail with tquic, fix the integration in the core crate, not in the example.",
+  "tasks": [
+    {
+      "id": "1",
+      "content": "Refactor examples/bidistreaming.rs to use only the core crate's RPC abstractions (RpcClient, RpcServer, etc).",
+      "status": "pending"
+    },
+    {
+      "id": "2",
+      "content": "Remove any direct tquic/socket/event loop logic from the example.",
+      "status": "pending"
+    },
+    {
+      "id": "3",
+      "content": "Verify tquic backend integration is handled via feature flags/configuration in the core crate.",
+      "status": "pending"
+    },
+    {
+      "id": "4",
+      "content": "If RPC abstractions fail with tquic, fix the integration in the core crate (not in the example).",
+      "status": "pending"
+    },
+    {
+      "id": "5",
+      "content": "Draft and implement a sample bidistreaming.rs using only the documented core API.",
+      "status": "pending"
+    },
+    {
+      "id": "6",
+      "content": "Test the updated example and core integration to verify bidirectional streaming RPC works with the tquic backend.",
+      "status": "pending"
+    }
+  ]
+}

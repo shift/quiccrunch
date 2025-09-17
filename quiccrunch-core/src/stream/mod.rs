@@ -1,13 +1,19 @@
+// This file implements QUIC bidirectional stream logic for quiccrunch-core.
+// It provides abstractions for lock-free, tQUIC, and real tQUIC backends.
+// Please report any LSP errors below this comment.
+// Triggering LSP analysis for error detection...
+// Added comment to trigger LSP analysis - please show any compilation errors
 use std::time::Duration;
 use std::sync::Arc;
 use bytes::Bytes;
 
 use tokio::io::AsyncRead;
+use tokio::time;
 use dashmap::DashMap;
-use mio::Poll;
+
 
 /// A QUIC bidirectional stream for sending and receiving messages
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct QuicStream {
     inner: StreamInner,
     max_message_size: usize,
@@ -17,14 +23,19 @@ pub struct QuicStream {
 enum StreamInner {
     #[cfg(feature = "lock-free-channels")]
     LockFree { handle: crate::lockfree::StreamHandle },
-    // tQUIC implementation - simplified for now
-    TQuic { stream_id: u64, connection_id: u64 },
+    // tQUIC implementation - channel-based for async bridge
+    TQuic {
+        command_tx: tokio::sync::mpsc::Sender<crate::transport::async_bridge::TquicCommand>,
+        stream_id: u64,
+        pending_read: Option<tokio::sync::oneshot::Receiver<std::io::Result<Vec<u8>>>>,
+        pending_write: Option<tokio::sync::oneshot::Receiver<std::io::Result<()>>>,
+    },
     #[cfg(feature = "backend-tquic")]
     RealTQuic {
         endpoint: std::sync::Arc<std::sync::Mutex<tquic::Endpoint>>,
         conn_index: u64,
         stream_id: u64,
-        sock: std::rc::Rc<crate::transport::tquic::QuicSocket>,
+        sock: std::sync::Arc<crate::transport::async_mio::AsyncQuicSocket>,
         read_rx: tokio::sync::mpsc::Receiver<bytes::Bytes>,
         write_tx: tokio::sync::mpsc::Sender<bytes::Bytes>,
         close_tx: tokio::sync::mpsc::Sender<()>,
@@ -73,85 +84,72 @@ impl QuicStream {
     }
     
     /// Create a simple tQUIC stream
-    pub fn new_simple_tquic(connection_id: u64, stream_id: u64, max_message_size: usize) -> Self {
-        Self { 
-            inner: StreamInner::TQuic { 
-                stream_id, 
-                connection_id 
-            }, 
-            max_message_size 
-        }
+    pub fn new_simple_tquic(_connection_id: u64, stream_id: u64, max_message_size: usize) -> Self {
+Self { 
+    inner: StreamInner::TQuic { 
+        command_tx: tokio::sync::mpsc::Sender::default(),
+        stream_id,
+        pending_read: None,
+        pending_write: None,
+    },
+    max_message_size
+}
     }
 
     /// Create a real tQUIC stream
     #[cfg(feature = "backend-tquic")]
-    pub fn new_real_tquic(endpoint: std::sync::Arc<std::sync::Mutex<tquic::Endpoint>>, conn_index: u64, stream_id: u64, sock: std::rc::Rc<tquic_tools::QuicSocket>, max_message_size: usize) -> Self {
+    pub fn new_real_tquic(endpoint: std::sync::Arc<std::sync::Mutex<tquic::Endpoint>>, conn_index: u64, stream_id: u64, sock: std::sync::Arc<crate::transport::async_mio::AsyncQuicSocket>, max_message_size: usize) -> Self {
         let (read_tx, read_rx) = tokio::sync::mpsc::channel(100);
         let (write_tx, write_rx) = tokio::sync::mpsc::channel(100);
         let (close_tx, close_rx) = tokio::sync::mpsc::channel(1);
 
         let endpoint_clone = endpoint.clone();
         let sock_clone = sock.clone();
-        let handle = std::thread::spawn(move || {
-            let mut poll = mio::Poll::new().unwrap();
-            let registry = poll.registry();
-            let _ = sock_clone.add("0.0.0.0:0".parse().unwrap(), registry); // register if needed
-            let mut events = mio::Events::with_capacity(1024);
-            let mut buf = vec![0u8; 65536];
-
-            loop {
-                if close_rx.try_recv().is_ok() {
-                    break;
-                }
-
-                if let Ok(mut ep) = endpoint_clone.lock() {
-                    let _ = ep.process_connections();
-                }
-
-                if poll.poll(&mut events, Some(std::time::Duration::from_millis(10))).is_ok() {
-                    for event in events.iter() {
-                        if event.is_readable() {
-                            if let Ok((len, local, remote)) = sock_clone.recv_from(&mut buf, event.token()) {
-                                let pkt_info = tquic::PacketInfo {
-                                    src: remote,
-                                    dst: local,
-                                    time: std::time::Instant::now(),
-                                };
-                                if let Ok(mut ep) = endpoint_clone.lock() {
-                                    let _ = ep.recv(&buf[..len], &pkt_info);
+            let handle = std::thread::spawn(move || {
+                let mut buf = vec![0u8; 65536];
+                loop {
+                    if close_rx.try_recv().is_ok() {
+                        break;
+                    }
+                    if let Ok(mut ep) = endpoint_clone.lock() {
+                        let _ = ep.process_connections();
+                    }
+                    // Remove legacy event loop and undefined variables
+                    // Use async receive in Tokio context
+                    if let Ok((len, remote)) = tokio::runtime::Handle::current().block_on(sock_clone.recv_from(&mut buf)) {
+                        let pkt_info = tquic::PacketInfo {
+                            src: remote,
+                            dst: remote, // Use remote as dst for now
+                            time: std::time::Instant::now(),
+                        };
+                        if let Ok(mut ep) = endpoint_clone.lock() {
+                            let _ = ep.recv(&buf[..len], &pkt_info);
+                        }
+                    }
+                    while let Ok(data) = write_rx.try_recv() {
+                        if let Ok(mut ep) = endpoint_clone.lock() {
+                            if let Some(conn) = ep.conn_get_mut(conn_index) {
+                                let _ = conn.stream_write(stream_id, data, false);
+                            }
+                        }
+                    }
+                    if let Ok(mut ep) = endpoint_clone.lock() {
+                        if let Some(conn) = ep.conn_get_mut(conn_index) {
+                            while let Ok((len, _)) = conn.stream_read(stream_id, &mut buf) {
+                                if len > 0 {
+                                    let _ = read_tx.try_send(bytes::Bytes::copy_from_slice(&buf[..len]));
+                                } else {
+                                    break;
                                 }
                             }
                         }
                     }
-                }
-
-                while let Ok(data) = write_rx.try_recv() {
                     if let Ok(mut ep) = endpoint_clone.lock() {
-                        if let Some(conn) = ep.conn_get_mut(conn_index) {
-                            let _ = conn.stream_write(stream_id, data, false);
-                        }
+                        ep.on_timeout(std::time::Instant::now());
                     }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
                 }
-
-                if let Ok(mut ep) = endpoint_clone.lock() {
-                    if let Some(conn) = ep.conn_get_mut(conn_index) {
-                        while let Ok((len, _)) = conn.stream_read(stream_id, &mut buf) {
-                            if len > 0 {
-                                let _ = read_tx.try_send(bytes::Bytes::copy_from_slice(&buf[..len]));
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if let Ok(mut ep) = endpoint_clone.lock() {
-                    ep.on_timeout(std::time::Instant::now());
-                }
-
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-        });
+            });
 
         Self { 
             inner: StreamInner::RealTQuic { 
@@ -184,9 +182,9 @@ impl QuicStream {
                 );
                 Ok(QuicStream::new_lockfree(new_handle, self.max_message_size))
             }
-              StreamInner::TQuic { stream_id: _, connection_id } => {
+            StreamInner::TQuic { .. } => {
                 let new_stream_id = rand::random::<u64>();
-                Ok(QuicStream::new_simple_tquic(*connection_id, new_stream_id, self.max_message_size))
+                Ok(QuicStream::new_simple_tquic(0, new_stream_id, self.max_message_size)) // Use 0 for connection_id if not available
             }
             #[cfg(feature = "backend-tquic")]
             StreamInner::RealTQuic { conn_index, .. } => {
@@ -211,9 +209,9 @@ impl QuicStream {
                 );
                 Ok(QuicStream::new_lockfree(new_handle, self.max_message_size))
             }
-            StreamInner::TQuic { stream_id: _, connection_id } => {
+            StreamInner::TQuic { .. } => {
                 let new_stream_id = rand::random::<u64>();
-                Ok(QuicStream::new_simple_tquic(*connection_id, new_stream_id, self.max_message_size))
+                Ok(QuicStream::new_simple_tquic(0, new_stream_id, self.max_message_size)) // Use 0 for connection_id if not available
             }
             #[cfg(feature = "backend-tquic")]
             StreamInner::RealTQuic { conn_index, .. } => {
@@ -250,7 +248,7 @@ impl QuicStream {
 
                 handle.write(bytes::Bytes::from(combined), false).await?;
             }
-            StreamInner::TQuic { stream_id, .. } => {
+            StreamInner::TQuic { command_tx: _, stream_id, pending_read: _, pending_write: _ } => {
                 // tQUIC implementation: store in global buffer for echo
                 use dashmap::DashMap;
                 use std::sync::Arc;
@@ -272,7 +270,6 @@ impl QuicStream {
                 combined.extend_from_slice(&header);
                 combined.extend_from_slice(&data);
                 write_tx.try_send(bytes::Bytes::from(combined)).map_err(|_| crate::TransportError::StreamError("send failed".into()))?;
-                Ok(())
             }
         }
 
@@ -320,7 +317,7 @@ impl QuicStream {
         }
 
         match &mut self.inner {
-            StreamInner::TQuic { stream_id, .. } => {
+            StreamInner::TQuic { command_tx: _, stream_id, pending_read: _, pending_write: _ } => {
                 // Try to read header from buffer
                 if let Some(mut buffer_entry) = TQUIC_BUFFER.get_mut(stream_id) {
                     if buffer_entry.len() >= 4 {
@@ -372,7 +369,7 @@ impl QuicStream {
             
             // Read chunk with timeout
             match &mut self.inner {
-                #[cfg(feature = "backend-quinn")]
+                #[cfg(feature = "backend-tquic")]
                 StreamInner::Quinn { recv, .. } => {
                     let mut chunk = vec![0u8; chunk_size];
                     let read_res = time::timeout(READ_TIMEOUT, recv.read_exact(&mut chunk)).await;
@@ -420,7 +417,7 @@ impl QuicStream {
                         Err(_) => return Err(crate::TransportError::StreamError(format!("Content read timeout after {} bytes", bytes_read))),
                     }
                 }
-                StreamInner::TQuic { stream_id, .. } => {
+                StreamInner::TQuic { command_tx: _, stream_id, pending_read: _, pending_write: _ } => {
                     // tQUIC implementation: Read chunk from buffer
                     use dashmap::DashMap;
                     use std::sync::Arc;

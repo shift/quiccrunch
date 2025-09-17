@@ -3,14 +3,14 @@ name = "quiccrunch-core"
 version = "0.1.0"
 edition = "2021"
 authors = ["QuicCrunch Contributors"]
-description = "High-performance QUIC benchmarking framework with Cap'n Proto serialization and dual backend support"
+description = "High-performance QUIC RPC framework with Cap'n Proto serialization and dual backend support"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/shift/quickcrunch"
 homepage = "https://github.com/shift/quickcrunch"
 documentation = "https://docs.rs/quiccrunch"
 readme = "README.md"
-keywords = ["quic", "capnproto", "benchmarking", "networking", "performance"]
-categories = ["network-programming", "development-tools::profiling", "api-bindings"]
+keywords = ["quic", "capnproto", "rpc", "networking", "performance"]
+categories = ["network-programming", "asynchronous", "api-bindings"]
 exclude = [
     "backend_comparison/",
     "json_test/", 
@@ -34,7 +34,7 @@ bytes = "1.5.0"
 thiserror = "1.0.56"
 tracing = "0.1.40"
 async-trait = "0.1.77"
-mio = { version = "0.8", features = ["net"] }
+mio = { version = "1.0.4", features = ["net", "os-poll"] }
 rcgen = "0.12.1"
 rustls = { version = "0.21.10", features = ["dangerous_configuration"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -62,7 +62,7 @@ aesni = "0.8"                    # AES-NI hardware acceleration
 aes-gcm = "0.10"                 # AES-GCM cipher implementation
 getrandom = "0.2"                # Random number generation for crypto
 
-# gRPC dependencies for comparison benchmarking
+  # gRPC dependencies for comparison
 tonic = { version = "0.10", optional = true }
 prost = { version = "0.12", optional = true }
 tower = { version = "0.4", optional = true }
@@ -77,10 +77,10 @@ tracing-opentelemetry = { version = "0.22", optional = true }
 env_logger = "0.11"
 log = "0.4"
 
-# System monitoring for benchmarks
+# System monitoring for performance analysis
 sysinfo = { version = "0.30", optional = true }
 
-# Benchmarking dependencies
+# Performance analysis dependencies
 statrs = "0.16"                    # Statistical analysis for benchmarking
 itertools = "0.12"                 # Iterator tools for comprehensive benchmarks
 
@@ -122,7 +122,7 @@ features = ["env-filter"]
  nix = { version = "0.29", default-features = false, features = ["user"] }
  clap = { version = "4", features = ["derive"] }
  hdrhistogram = "7"
- # gRPC dependencies for comparison benchmarking
+# gRPC dependencies for comparison
  tonic = "0.10"
  prost = "0.12"
  tower = "0.4"
@@ -134,35 +134,10 @@ features = ["env-filter"]
 capnpc = "0.18.0"
 tonic-build = "0.10"
 
-[[example]]
-name = "comprehensive_benchmark"
-required-features = ["benchmark-suite"]
-
-[[example]]
-name = "promotional_demo"
-path = "../examples/promotional_demo.rs"
-
-[[example]]
-name = "network_quic_benchmark"
-path = "../examples/network_quic_benchmark.rs"
-
-[[example]]
-name = "network_benchmark_with_pooling"
-path = "../examples/network_benchmark_with_pooling.rs"
-
-[[example]]
-name = "hit_rate_demo"
-path = "../examples/hit_rate_demo.rs"
-
-[[example]]
-name = "quiccrunch_vs_grpc_comprehensive"
-path = "../examples/quiccrunch_vs_grpc_comprehensive.rs"
-required-features = ["grpc-comparison"]
-
-[[example]]
-name = "simple_grpc_vs_quiccrunch"
-path = "../examples/simple_grpc_vs_quiccrunch.rs"
-required-features = ["grpc-comparison"]
+# Examples are in the benches directory
+# [[example]]
+# name = "comprehensive_benchmark"
+# required-features = ["benchmark-suite"]
 
 [[bin]]
 name = "benchmark"

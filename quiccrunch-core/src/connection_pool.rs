@@ -365,6 +365,7 @@ pub struct EndpointStats {
 mod tests {
     use super::*;
     use crate::config::QuicTransportSettings as TransportSettings;
+    use crate::transport::tquic::TlsConfig;
     use std::sync::Arc;
 
     #[tokio::test]
