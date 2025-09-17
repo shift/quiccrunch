@@ -50,18 +50,19 @@
 
 mod error;
 pub mod transport;
-pub mod connection_pool;
-pub mod crypto_accel;
-pub mod congestion;
+//pub mod connection_pool;
+//pub mod crypto_accel;
+//pub mod congestion;
+//mod stream;
 mod stream;
 mod stream_splitter; // Stream splitting for concurrent RPC operations
-pub mod test_utils;
-pub mod metrics;
-pub mod power;
+//pub mod test_utils;
+//pub mod metrics;
+//pub mod power;
 pub mod config;
-pub mod client;
-pub mod server;
-pub mod rpc;
+//pub mod client;
+//pub mod server;
+//pub mod rpc;
 
 // Benchmark suite module
 #[cfg(feature = "benchmark-suite")]
@@ -129,16 +130,18 @@ pub mod optimizations {
 }
 
 pub use error::{Result, TransportError, FastError};
+pub use config::{ClientConfig, ServerConfig, QuicTransportSettings, CongestionControl, Backend};
 pub use transport::{QuicTransport, Transport};
-pub use connection_pool::{ConnectionPool, ConnectionPoolConfig, ConnectionPoolStats, EndpointStats, ConnectionHealth};
-pub use crypto_accel::{HardwareCrypto, CryptoAccelConfig, HardwareCapabilities, CryptoStats, CryptoStatsSnapshot, BatchCryptoProcessor, CipherSuiteOptimizer};
-pub use congestion::{AdaptiveCongestionControl, CongestionControlConfig, NetworkMetrics, CongestionAlgorithm, NetworkCondition, CongestionControlStats};
+//pub use connection_pool::{ConnectionPool, ConnectionPoolConfig, ConnectionPoolStats, EndpointStats, ConnectionHealth};
+//pub use crypto_accel::{HardwareCrypto, CryptoAccelConfig, HardwareCapabilities, CryptoStats, CryptoStatsSnapshot, BatchCryptoProcessor, CipherSuiteOptimizer};
+//pub use congestion::{AdaptiveCongestionControl, CongestionControlConfig, NetworkMetrics, CongestionAlgorithm, NetworkCondition, CongestionControlStats};
+//pub use stream::QuicStream;
 pub use stream::QuicStream;
 pub use stream_splitter::{SplitStream, StreamReader, StreamWriter, Splittable}; // Stream splitting support
-pub use metrics::{Metrics, Operation};
-pub use client::{QuicClient, QuicConnection};
-pub use server::{QuicServer, QuicListener, MessageHandler, EchoHandler, run_echo_server, run_server_with_handler};
-pub use rpc::{RpcService, RpcServer, RpcClient, PooledRpcClient, RpcConnectionPool, RpcError, RpcResult};
+//pub use metrics::{Metrics, Operation};
+//pub use client::{QuicClient, QuicConnection};
+//pub use server::{QuicServer, QuicListener, MessageHandler, EchoHandler, run_echo_server, run_server_with_handler};
+//pub use rpc::{RpcService, RpcServer, RpcClient, PooledRpcClient, RpcConnectionPool, RpcError, RpcResult};
 
 // Re-export optimized components for high-performance use cases
 pub use stream_optimized::OptimizedQuicStream;

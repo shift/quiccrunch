@@ -94,6 +94,12 @@ pub enum TransportError {
     #[error("Invalid message: {0}")]
     InvalidMessage(String),
 
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Other error: {0}")]
+    Other(String),
+
     // Zero-allocation fast error variant
     #[error("Fast error: {:?}", .0)]
     Fast(FastError),

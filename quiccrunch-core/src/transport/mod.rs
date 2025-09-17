@@ -1,5 +1,11 @@
 
 pub mod tquic;
+pub mod async_bridge;
+pub mod async_mio;
+pub mod messages;
+pub mod worker;
+pub mod worker_pool;
+pub mod adapter;
 
 use async_trait::async_trait;
 use std::error::Error;
@@ -36,7 +42,7 @@ pub trait Splittable {
 
 #[async_trait]
 pub trait Transport {
-    type Connection: AsyncRead + AsyncWrite + Unpin + Send + Splittable;
+    type Connection: AsyncRead + AsyncWrite + Unpin + Splittable;
     type Listener: Listener<Connection = Self::Connection>;
     type Config;
 
@@ -49,7 +55,7 @@ pub trait Transport {
 
 #[async_trait]
 pub trait Listener {
-    type Connection: AsyncRead + AsyncWrite + Unpin + Send;
+    type Connection: AsyncRead + AsyncWrite + Unpin;
     async fn accept(&mut self) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>>;
 }
 
@@ -61,13 +67,13 @@ pub struct QuicTransport {
 
 #[async_trait]
 impl Transport for QuicTransport {
-    type Connection = tquic::TquicConnection;
+    type Connection = crate::QuicStream;
     type Listener = tquic::TquicListener;
     type Config = QuicTransportConfig;
 
     async fn new(config: Self::Config) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        let client = tquic::TquicClient::new(config.client).await?;
-        let server = tquic::TquicServer::new(config.server).await?;
+        let client = tquic::TquicClient::new(None).await?;
+        let server = tquic::TquicServer::new(None).await?;
         Ok(QuicTransport { client, server })
     }
 
