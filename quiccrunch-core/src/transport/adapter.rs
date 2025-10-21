@@ -111,6 +111,21 @@ impl TquicAdapter {
             .map_err(|_| TransportError::ConnectionFailed("Response channel closed".into()))?
     }
 
+    pub async fn accept_stream(&self, connection_id: ConnectionId) -> Result<u64, TransportError> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let cmd = TquicCommand::AcceptStream {
+            connection_id,
+            response: response_tx,
+        };
+
+        self.worker_pool.submit_command(cmd).await?;
+
+        response_rx
+            .await
+            .map_err(|_| TransportError::ConnectionFailed("Response channel closed".into()))?
+    }
+
     pub async fn close_stream(
         &self,
         connection_id: ConnectionId,
@@ -168,14 +183,16 @@ impl TquicClient {
         Ok(TquicClient { adapter })
     }
 
-    pub async fn connect(&self, addr: &str) -> Result<crate::QuicStream, TransportError> {
+    pub async fn connect(&self, addr: &str) -> Result<TquicConnection, TransportError> {
         let remote_addr: SocketAddr = addr
             .parse()
             .map_err(|e| TransportError::ConfigError(format!("Invalid address: {}", e)))?;
 
         let connection_id = self.adapter.connect(remote_addr).await?;
-        // Create a QuicStream with the tQUIC backend
-        Ok(crate::QuicStream::new_simple_tquic(connection_id, 0, 65536))
+        Ok(TquicConnection {
+            adapter: self.adapter.clone(),
+            connection_id,
+        })
     }
 }
 
@@ -225,7 +242,7 @@ impl TquicListener {
 // Implement the Listener trait for TquicListener
 #[async_trait::async_trait]
 impl crate::transport::Listener for TquicListener {
-    type Connection = crate::QuicStream;
+    type Connection = TquicConnection;
 
     async fn accept(
         &mut self,
@@ -235,19 +252,30 @@ impl crate::transport::Listener for TquicListener {
             .accept()
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync + 'static>)?;
-        // Create a QuicStream with the tQUIC backend
-        Ok(crate::QuicStream::new_simple_tquic(connection_id, 0, 65536))
+        Ok(TquicConnection {
+            adapter: self.adapter.clone(),
+            connection_id,
+        })
     }
 }
 
 pub struct TquicConnection {
-    adapter: Arc<TquicAdapter>,
-    connection_id: ConnectionId,
+    pub adapter: Arc<TquicAdapter>,
+    pub connection_id: ConnectionId,
 }
 
 impl TquicConnection {
     pub async fn open_stream(&self) -> Result<TquicStream, TransportError> {
         let stream_id = self.adapter.open_stream(self.connection_id).await?;
+        Ok(TquicStream {
+            adapter: self.adapter.clone(),
+            connection_id: self.connection_id,
+            stream_id,
+        })
+    }
+
+    pub async fn accept_stream(&self) -> Result<TquicStream, TransportError> {
+        let stream_id = self.adapter.accept_stream(self.connection_id).await?;
         Ok(TquicStream {
             adapter: self.adapter.clone(),
             connection_id: self.connection_id,
@@ -262,13 +290,78 @@ impl TquicConnection {
     }
 }
 
-pub struct TquicStream {
+impl Unpin for TquicConnection {}
+
+impl AsyncRead for TquicConnection {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Poll::Pending
+    }
+}
+
+impl AsyncWrite for TquicConnection {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Poll::Ready(Ok(0))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl crate::transport::Splittable for TquicConnection {
+    type Reader = TquicConnectionReader;
+    type Writer = TquicConnectionWriter;
+    
+    fn split(self) -> (Self::Reader, Self::Writer) {
+        let reader = TquicConnectionReader {
+            adapter: self.adapter.clone(),
+            connection_id: self.connection_id,
+        };
+        let writer = TquicConnectionWriter {
+            adapter: self.adapter,
+            connection_id: self.connection_id,
+        };
+        (reader, writer)
+    }
+}
+
+pub struct TquicConnectionReader {
     adapter: Arc<TquicAdapter>,
     connection_id: ConnectionId,
-    stream_id: u64,
+}
+
+pub struct TquicConnectionWriter {
+    adapter: Arc<TquicAdapter>,
+    connection_id: ConnectionId,
+}
+
+pub struct TquicStream {
+    pub adapter: Arc<TquicAdapter>,
+    pub connection_id: ConnectionId,
+    pub stream_id: u64,
 }
 
 impl TquicStream {
+    pub fn new(adapter: Arc<TquicAdapter>, connection_id: ConnectionId, stream_id: u64) -> Self {
+        Self {
+            adapter,
+            connection_id,
+            stream_id,
+        }
+    }
+
     pub async fn send(&mut self, data: &[u8], fin: bool) -> Result<(), TransportError> {
         self.adapter
             .send(self.connection_id, self.stream_id, data.to_vec(), fin)

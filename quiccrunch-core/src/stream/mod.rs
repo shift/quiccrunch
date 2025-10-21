@@ -1,12 +1,6 @@
 // This file implements QUIC bidirectional stream logic for quiccrunch-core.
 // It provides abstractions for lock-free and tQUIC backends.
-use bytes::Bytes;
-use std::sync::Arc;
-use std::time::Duration;
 
-use dashmap::DashMap;
-use tokio::io::AsyncRead;
-use tokio::time;
 
 /// A QUIC bidirectional stream for sending and receiving messages
 #[derive(Debug)]
@@ -273,14 +267,14 @@ impl tokio::io::AsyncWrite for QuicStream {
     }
 
     fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
+        self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
         std::task::Poll::Ready(Ok(()))
     }
 
     fn poll_shutdown(
-        mut self: std::pin::Pin<&mut Self>,
+        self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
         std::task::Poll::Ready(Ok(()))

@@ -28,6 +28,10 @@ pub enum TquicCommand {
         connection_id: ConnectionId,
         response: oneshot::Sender<Result<u64, TransportError>>,
     },
+    AcceptStream {
+        connection_id: ConnectionId,
+        response: oneshot::Sender<Result<u64, TransportError>>,
+    },
     CloseStream {
         connection_id: ConnectionId,
         stream_id: u64,

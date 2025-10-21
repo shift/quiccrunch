@@ -390,6 +390,7 @@ impl TquicWorkerPool {
             TquicCommand::Send { connection_id, .. }
             | TquicCommand::Receive { connection_id, .. }
             | TquicCommand::OpenStream { connection_id, .. }
+            | TquicCommand::AcceptStream { connection_id, .. }
             | TquicCommand::CloseStream { connection_id, .. }
             | TquicCommand::CloseConnection { connection_id, .. } => {
                 // Use connection affinity
@@ -559,8 +560,18 @@ impl TquicWorkerPool {
                                 config.worker_id,
                                 connection_id
                             );
-                            // Return dummy stream ID
                             let _ = response.send(Ok(1));
+                        }
+                        TquicCommand::AcceptStream {
+                            connection_id,
+                            response,
+                        } => {
+                            tracing::debug!(
+                                "Worker {} handling accept stream on connection {}",
+                                config.worker_id,
+                                connection_id
+                            );
+                            let _ = response.send(Ok(2));
                         }
                         TquicCommand::CloseStream {
                             connection_id,

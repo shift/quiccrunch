@@ -33,27 +33,33 @@ pub struct TquicWorker {
     endpoint: Option<Endpoint>,
     command_rx: mpsc::Receiver<TquicCommand>,
     event_tx: Option<mpsc::Sender<TquicEvent>>,
-    connections: HashMap<ConnId, ConnId>, // Store connection IDs, not Box<Connection>
+    connections: HashMap<ConnId, ConnId>,
+    stream_queue: Arc<std::sync::Mutex<HashMap<ConnId, Vec<u64>>>>,
     running: Arc<AtomicBool>,
     stats: WorkerStats,
     start_time: Instant,
     next_connection_id: ConnId,
 }
 
-// Transport handler that doesn't use Rc<RefCell<T>>
 struct WorkerTransportHandler {
     worker_id: usize,
     event_tx: Option<mpsc::Sender<TquicEvent>>,
+    stream_queue: Arc<std::sync::Mutex<HashMap<ConnId, Vec<u64>>>>,
 }
 
 // SAFETY: WorkerTransportHandler is only used within a single thread (the worker thread)
 unsafe impl Send for WorkerTransportHandler {}
 
 impl WorkerTransportHandler {
-    fn new(worker_id: usize, event_tx: Option<mpsc::Sender<TquicEvent>>) -> Self {
+    fn new(
+        worker_id: usize,
+        event_tx: Option<mpsc::Sender<TquicEvent>>,
+        stream_queue: Arc<std::sync::Mutex<HashMap<ConnId, Vec<u64>>>>,
+    ) -> Self {
         Self {
             worker_id,
             event_tx,
+            stream_queue,
         }
     }
 }
@@ -92,12 +98,19 @@ impl TransportHandler for WorkerTransportHandler {
         }
     }
 
-    fn on_stream_created(&mut self, _conn: &mut Connection, stream_id: u64) {
+    fn on_stream_created(&mut self, conn: &mut Connection, stream_id: u64) {
+        let conn_id = conn.trace_id().as_bytes()[0] as u64;
+        
         tracing::debug!(
             worker_id = self.worker_id,
+            connection_id = conn_id,
             stream_id = stream_id,
             "Stream created"
         );
+
+        if let Ok(mut queue) = self.stream_queue.lock() {
+            queue.entry(conn_id).or_insert_with(Vec::new).push(stream_id);
+        }
     }
 
     fn on_stream_readable(&mut self, _conn: &mut Connection, stream_id: u64) {
@@ -358,6 +371,7 @@ impl TquicWorker {
 
         let start_time = Instant::now();
         let running = Arc::new(AtomicBool::new(true));
+        let stream_queue = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
         Ok(TquicWorker {
             worker_id: config.worker_id,
@@ -370,6 +384,7 @@ impl TquicWorker {
             command_rx,
             event_tx,
             connections: HashMap::new(),
+            stream_queue,
             running,
             stats,
             start_time,
@@ -482,7 +497,11 @@ impl TquicWorker {
         };
 
         // Create handlers
-        let transport_handler = WorkerTransportHandler::new(self.worker_id, self.event_tx.clone());
+        let transport_handler = WorkerTransportHandler::new(
+            self.worker_id,
+            self.event_tx.clone(),
+            self.stream_queue.clone(),
+        );
 
         // Simplified packet handler that doesn't need socket access during creation
         let mut packet_handler = WorkerPacketSendHandler::new_simple();
@@ -569,6 +588,13 @@ impl TquicWorker {
                     response,
                 } => {
                     let result = self.handle_open_stream(connection_id);
+                    let _ = response.send(result);
+                }
+                TquicCommand::AcceptStream {
+                    connection_id,
+                    response,
+                } => {
+                    let result = self.handle_accept_stream(connection_id);
                     let _ = response.send(result);
                 }
                 TquicCommand::CloseStream {
@@ -690,6 +716,33 @@ impl TquicWorker {
             } else {
                 Err(TransportError::Other("Connection not found".into()))
             }
+        } else {
+            Err(TransportError::Other("Endpoint not initialized".into()))
+        }
+    }
+
+    fn handle_accept_stream(&mut self, connection_id: ConnId) -> Result<u64> {
+        if let Some(ref mut endpoint) = self.endpoint {
+            if endpoint.conn_get_mut(connection_id).is_none() {
+                return Err(TransportError::ConnectionFailed("Connection not found".into()));
+            }
+
+            if let Ok(mut queue) = self.stream_queue.lock() {
+                if let Some(stream_ids) = queue.get_mut(&connection_id) {
+                    if let Some(stream_id) = stream_ids.pop() {
+                        self.stats.total_streams += 1;
+                        tracing::debug!(
+                            worker_id = self.worker_id,
+                            connection_id = connection_id,
+                            stream_id = stream_id,
+                            "Accepted stream from queue"
+                        );
+                        return Ok(stream_id);
+                    }
+                }
+            }
+
+            Err(TransportError::Other("No pending streams available".into()))
         } else {
             Err(TransportError::Other("Endpoint not initialized".into()))
         }

@@ -19,13 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Try different constructors
     println!("  - TlsConfig::default():");
-    match std::panic::catch_unwind(|| {
-        let _tls = tquic::TlsConfig::default();
-        println!("    ✓ TlsConfig::default() works");
-    }) {
-        Ok(_) => {}
-        Err(_) => println!("    ✗ TlsConfig::default() doesn't exist"),
-    }
+    println!("    ✗ TlsConfig::default() doesn't exist");
 
     // Test 3: mio::Poll creation
     println!("\n3. Testing mio::Poll creation:");

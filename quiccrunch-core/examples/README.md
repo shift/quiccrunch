@@ -1,30 +1,38 @@
-# tQUIC RPC Examples
+# QuicCrunch Examples
 
-This directory contains examples demonstrating all major RPC patterns using tQUIC and Cap'n Proto:
+## Bidirectional Streaming Example
 
-- **client_server_unary.rs**: Client→Server unary RPC. Client sends a request, server replies with a response.
-- **server_client_stream.rs**: Server→Client streaming RPC. Client requests a stream, server sends multiple chunks.
-- **bidistreaming.rs**: Bidirectional streaming RPC. Both client and server send/receive stream chunks.
+### ⚠️ KNOWN ISSUE: Server Mode Non-Functional
 
-All examples use Cap'n Proto for message serialization/deserialization and tQUIC for transport.
-
-## Running Examples
-
-Each example is a standalone Tokio async binary. Run with:
-
-```sh
-cargo run --example client_server_unary
-cargo run --example server_client_stream
-cargo run --example bidistreaming
+**The server in this example does not work.** When you run it, you'll see continuous spurious output like:
+```
+📥 New connection accepted
+🔌 Stream closed by client (received 0 messages)
+✅ Connection handled successfully
 ```
 
-## Requirements
-- tQUIC transport enabled (default)
-- Cap'n Proto schemas built (via build.rs)
+This happens even with no clients connected.
 
-## How It Works
-- Each example sets up a tQUIC client and server.
-- Messages are encoded/decoded using Cap'n Proto.
-- Streams are used for sending/receiving data according to the pattern.
+### Root Cause
 
-See the source files for details and usage.
+The `TquicConnection` API is incomplete - it lacks an `accept_stream()` method to receive client-initiated streams. The server code incorrectly calls `connection.open_stream()` which:
+1. Creates an outbound stream (wrong direction)
+2. Immediately closes because there's no peer
+3. Repeats in a loop
+
+### What's Missing
+
+The transport layer has stream event handlers (`on_stream_created`, `on_stream_readable` in `TquicWorker`), but these are not exposed through the high-level API.
+
+To fix properly requires:
+1. Add `AcceptStream` command to `TquicCommand` enum
+2. Implement stream acceptance in worker pool  
+3. Add `accept_stream()` method to `TquicConnection`
+4. Map incoming stream events from worker to adapter layer
+
+### Current Status
+
+**Client code:** Structurally correct but untestable without working server
+**Server code:** Fundamentally broken due to API limitation
+
+Do not use this example until stream acceptance is implemented.

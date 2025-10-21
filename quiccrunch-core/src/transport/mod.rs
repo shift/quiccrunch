@@ -76,7 +76,7 @@ pub struct QuicTransport {
 
 #[async_trait]
 impl Transport for QuicTransport {
-    type Connection = crate::QuicStream;
+    type Connection = tquic::TquicConnection;
     type Listener = tquic::TquicListener;
     type Config = QuicTransportConfig;
 

@@ -139,65 +139,9 @@ tonic-build = "0.10"
 # name = "comprehensive_benchmark"
 # required-features = ["benchmark-suite"]
 
-[[bin]]
-name = "benchmark"
-path = "src/bin/benchmark.rs"
 
-[[bin]]
-name = "validate_performance_fixes"
-path = "src/bin/validate_performance_fixes.rs"
 
-[[bin]]
-name = "simple_real_test"
-path = "../simple_real_test.rs"
 
-[[bin]]
-name = "perf_test_server"
-path = "src/bin/perf_test_server.rs"
-
-[[bin]]
-name = "perf_test_client"
-path = "src/bin/perf_test_client.rs"
-
-[[bin]]
-name = "bidirectional_benchmark_server"
-path = "src/bin/bidirectional_benchmark_server.rs"
-
-[[bin]]
-name = "bidirectional_benchmark_client"
-path = "src/bin/bidirectional_benchmark_client.rs"
-
-[[bench]]
-name = "transport"
-harness = false
-
-[[bench]]
-name = "patterns"
-harness = false
-
-[[bench]]
-name = "profiles"
-harness = false
-
-[[bench]]
-name = "io_uring_comparison"
-harness = false
-
-[[bench]]
-name = "optimization_fixes"
-harness = false
-
-[[bench]]
-name = "connection_pool"
-harness = false
-
-[[bench]]
-name = "worker_pool_performance"
-harness = false
-
-[[bench]]
-name = "socket_optimization"
-harness = false
 
 [features]
 # Backends map to optional deps (mutually exclusive at compile time)

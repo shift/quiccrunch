@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use tokio::sync::oneshot;
 
 use crate::transport::worker_pool::TquicWorkerPool;
-use crate::transport::messages::{TquicCommand as WorkerCommand, WorkerConfig, ConnectionId};
+use crate::transport::messages::{TquicCommand as WorkerCommand, WorkerConfig};
 
 /// Commands sent to the tQUIC bridge thread  
 #[derive(Debug)]

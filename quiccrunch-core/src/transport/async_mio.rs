@@ -1,9 +1,8 @@
-use mio::{Interest, Registry, Token};
+use mio::{Interest, Token};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
 use tquic::{PacketInfo, PacketSendHandler, Result};
 
 /// Async UDP socket wrapper that implements PacketSendHandler for tQUIC
