@@ -2,37 +2,57 @@
 
 ## Bidirectional Streaming Example
 
-### ⚠️ KNOWN ISSUE: Server Mode Non-Functional
+The `bidirectional_streaming.rs` example demonstrates the QuicCrunch API for bidirectional QUIC streaming between a client and server.
 
-**The server in this example does not work.** When you run it, you'll see continuous spurious output like:
+### Current Status: Mock Mode
+
+⚠️ **This example runs in mock mode** - the API structure is correct, but the underlying tQUIC worker pool implementation uses stubs that return empty data.
+
+### What Works
+
+- ✅ API structure and usage patterns are demonstrated correctly
+- ✅ Client and server can be started without errors
+- ✅ Connection establishment API works
+- ✅ Stream opening/accepting API works  
+- ✅ Send/receive method signatures are correct
+
+### What Doesn't Work Yet
+
+- ❌ Actual data transmission (stubs return empty `Vec`)
+- ❌ Real QUIC protocol communication
+- ❌ Network I/O between client and server
+
+### Running the Example
+
+Start the server:
+```bash
+cargo run --example bidirectional_streaming -- server
 ```
-📥 New connection accepted
-🔌 Stream closed by client (received 0 messages)
-✅ Connection handled successfully
+
+Run the client:
+```bash
+cargo run --example bidirectional_streaming -- client
 ```
 
-This happens even with no clients connected.
+Both will execute successfully and demonstrate the API flow, but no actual data will be transmitted.
 
-### Root Cause
+### Implementation Status
 
-The `TquicConnection` API is incomplete - it lacks an `accept_stream()` method to receive client-initiated streams. The server code incorrectly calls `connection.open_stream()` which:
-1. Creates an outbound stream (wrong direction)
-2. Immediately closes because there's no peer
-3. Repeats in a loop
+The worker pool in `src/transport/worker_pool.rs` currently has stub implementations:
 
-### What's Missing
+- `TquicCommand::Send` → Returns `Ok(())` without sending data (line 530)
+- `TquicCommand::Receive` → Returns empty `Vec::new()` (line 545)
+- Other commands return mock IDs
 
-The transport layer has stream event handlers (`on_stream_created`, `on_stream_readable` in `TquicWorker`), but these are not exposed through the high-level API.
+A complete `TquicWorker` implementation exists in `src/transport/worker.rs` using real tQUIC endpoints, but the worker pool doesn't instantiate or use it yet.
 
-To fix properly requires:
-1. Add `AcceptStream` command to `TquicCommand` enum
-2. Implement stream acceptance in worker pool  
-3. Add `accept_stream()` method to `TquicConnection`
-4. Map incoming stream events from worker to adapter layer
+### To Enable Real Communication
 
-### Current Status
+Connect the worker pool to the real TquicWorker:
 
-**Client code:** Structurally correct but untestable without working server
-**Server code:** Fundamentally broken due to API limitation
+1. Modify `TquicWorkerPool::new()` to create actual `TquicWorker` instances
+2. Replace stub command handlers with calls to the real worker's tQUIC endpoint
+3. Wire up the event channels between workers and the adapter layer
+4. Implement proper stream event forwarding from tQUIC callbacks
 
-Do not use this example until stream acceptance is implemented.
+The API is ready - only the backend wiring needs completion.
