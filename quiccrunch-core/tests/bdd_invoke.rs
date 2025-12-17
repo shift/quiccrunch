@@ -2,13 +2,12 @@ use std::process::Command;
 
 #[test]
 fn run_bdd_example() {
-    // Force quinn backend for BDD until tquic is implemented
     let status = Command::new(env!("CARGO"))
         .args([
             "run",
             "--no-default-features",
             "--features",
-            "backend-quinn,visualization",
+            "backend-tquic,visualization",
             "--example",
             "bdd",
         ])

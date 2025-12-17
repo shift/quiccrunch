@@ -1,0 +1,58 @@
+[package]
+name = "quiccrunch-benchmark"
+version = "0.1.0"
+edition = "2021"
+authors = ["QuicCrunch Contributors"]
+license = "Apache-2.0 OR MIT"
+description = "QUICCRUNCH implementation for performance comparison with gRPC baseline"
+
+[lib]
+name = "quiccrunch_benchmark"
+path = "src/lib.rs"
+
+[dependencies]
+# QUICCRUNCH dependencies
+quiccrunch-core = { path = "../../quiccrunch-core" }
+quiccrunch-macros = { path = "../../quiccrunch-macros" }
+
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
+
+# Metrics and monitoring
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+bytes = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+clap = { version = "4.4", features = ["derive"] }
+anyhow = "1.0"
+rand = "0.8"
+
+# Performance measurement
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Cap'n Proto for serialization (future optimization)
+# capnp = "0.19"
+# capnpc = "0.19"
+
+[[bin]]
+name = "quiccrunch-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "quiccrunch-client"
+path = "src/bin/client.rs"
+
+[[bin]]
+name = "quiccrunch-benchmark-runner"
+path = "src/bin/benchmark_runner.rs"
+
+[[bin]]
+name = "quiccrunch-demo"
+path = "src/bin/demo.rs"

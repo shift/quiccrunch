@@ -1,10 +1,10 @@
 use bytes::Bytes;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use std::time::{Duration, Instant};
 
@@ -33,8 +33,13 @@ pub struct TquicWorker {
     endpoint: Option<Endpoint>,
     command_rx: mpsc::Receiver<TquicCommand>,
     event_tx: Option<mpsc::Sender<TquicEvent>>,
-    connections: HashMap<ConnId, ConnId>,
-    stream_queue: Arc<std::sync::Mutex<HashMap<ConnId, Vec<u64>>>>,
+    connections: HashMap<ConnId, u64>,
+    reverse_connections: HashMap<u64, ConnId>,
+    trace_id_to_index: HashMap<String, u64>,
+    pending_trace_ids: Arc<Mutex<VecDeque<String>>>,
+    stream_queue: Arc<std::sync::Mutex<HashMap<u64, Vec<u64>>>>,
+    pending_stream_queue: Arc<std::sync::Mutex<HashMap<String, Vec<u64>>>>,
+    stream_buffers: Arc<Mutex<HashMap<(u64, u64), VecDeque<Vec<u8>>>>>,
     running: Arc<AtomicBool>,
     stats: WorkerStats,
     start_time: Instant,
@@ -44,7 +49,11 @@ pub struct TquicWorker {
 struct WorkerTransportHandler {
     worker_id: usize,
     event_tx: Option<mpsc::Sender<TquicEvent>>,
-    stream_queue: Arc<std::sync::Mutex<HashMap<ConnId, Vec<u64>>>>,
+    stream_queue: Arc<std::sync::Mutex<HashMap<u64, Vec<u64>>>>,
+    pending_stream_queue: Arc<std::sync::Mutex<HashMap<String, Vec<u64>>>>,
+    pending_trace_ids: Arc<Mutex<VecDeque<String>>>,
+    stream_buffers: Arc<Mutex<HashMap<(u64, u64), VecDeque<Vec<u8>>>>>,
+    endpoint_ptr: *mut Option<Endpoint>,
 }
 
 // SAFETY: WorkerTransportHandler is only used within a single thread (the worker thread)
@@ -54,34 +63,41 @@ impl WorkerTransportHandler {
     fn new(
         worker_id: usize,
         event_tx: Option<mpsc::Sender<TquicEvent>>,
-        stream_queue: Arc<std::sync::Mutex<HashMap<ConnId, Vec<u64>>>>,
+        stream_queue: Arc<std::sync::Mutex<HashMap<u64, Vec<u64>>>>,
+        pending_stream_queue: Arc<std::sync::Mutex<HashMap<String, Vec<u64>>>>,
+        pending_trace_ids: Arc<Mutex<VecDeque<String>>>,
+        stream_buffers: Arc<Mutex<HashMap<(u64, u64), VecDeque<Vec<u8>>>>>,
+        endpoint_ptr: *mut Option<Endpoint>,
     ) -> Self {
         Self {
             worker_id,
             event_tx,
             stream_queue,
+            pending_stream_queue,
+            pending_trace_ids,
+            stream_buffers,
+            endpoint_ptr,
         }
     }
 }
 
 impl TransportHandler for WorkerTransportHandler {
     fn on_conn_created(&mut self, _conn: &mut Connection) {
-        tracing::debug!(worker_id = self.worker_id, "Connection created");
+        tracing::info!(worker_id = self.worker_id, "🟢 on_conn_created CALLED");
     }
 
     fn on_conn_established(&mut self, conn: &mut Connection) {
-        tracing::debug!(worker_id = self.worker_id, "Connection established");
+        tracing::info!(worker_id = self.worker_id, "🟢 on_conn_established CALLED");
 
-        // Get connection ID and remote address
-        let conn_id = conn.trace_id();
-        // Remove peer_addr call - not available in tQUIC v1.6.0
-        let remote_addr = "unknown:0".parse().unwrap(); // Placeholder
-
-        if let Some(ref tx) = self.event_tx {
-            let _ = tx.try_send(TquicEvent::ConnectionEstablished {
-                connection_id: conn_id.as_bytes()[0] as u64, // Simplified ID extraction
-                remote_addr,
-            });
+        let trace_id = conn.trace_id().to_string();
+        
+        if let Ok(mut queue) = self.pending_trace_ids.lock() {
+            queue.push_back(trace_id.clone());
+            tracing::debug!(
+                worker_id = self.worker_id,
+                trace_id = %trace_id,
+                "Queued trace_id for pending connection"
+            );
         }
     }
 
@@ -99,26 +115,82 @@ impl TransportHandler for WorkerTransportHandler {
     }
 
     fn on_stream_created(&mut self, conn: &mut Connection, stream_id: u64) {
-        let conn_id = conn.trace_id().as_bytes()[0] as u64;
+        let trace_id = conn.trace_id().to_string();
         
-        tracing::debug!(
+        tracing::info!(
             worker_id = self.worker_id,
-            connection_id = conn_id,
             stream_id = stream_id,
-            "Stream created"
+            trace_id = %trace_id,
+            "🟢 on_stream_created CALLED"
         );
-
-        if let Ok(mut queue) = self.stream_queue.lock() {
-            queue.entry(conn_id).or_insert_with(Vec::new).push(stream_id);
+        
+        if let Ok(mut pending_queue) = self.pending_stream_queue.lock() {
+            pending_queue.entry(trace_id.clone()).or_insert_with(Vec::new).push(stream_id);
+            
+            tracing::debug!(
+                worker_id = self.worker_id,
+                stream_id = stream_id,
+                trace_id = %trace_id,
+                "Stream queued by trace_id (pending connection acceptance)"
+            );
         }
     }
 
-    fn on_stream_readable(&mut self, _conn: &mut Connection, stream_id: u64) {
-        tracing::debug!(
+    fn on_stream_readable(&mut self, conn: &mut Connection, stream_id: u64) {
+        tracing::info!(
             worker_id = self.worker_id,
             stream_id = stream_id,
-            "Stream readable"
+            "🔵 on_stream_readable CALLED - buffering data"
         );
+
+        let conn_id = match conn.index() {
+            Some(id) => {
+                tracing::info!(
+                    worker_id = self.worker_id,
+                    stream_id = stream_id,
+                    conn_index = id,
+                    "Connection index retrieved"
+                );
+                id
+            }
+            None => {
+                tracing::warn!(
+                    worker_id = self.worker_id,
+                    stream_id = stream_id,
+                    "Connection has no index, cannot buffer data"
+                );
+                return;
+            }
+        };
+        
+        let mut buf = vec![0u8; 65536];
+        match conn.stream_read(stream_id, &mut buf) {
+            Ok((len, _fin)) => {
+                buf.truncate(len);
+                tracing::debug!(
+                    worker_id = self.worker_id,
+                    conn_id = conn_id,
+                    stream_id = stream_id,
+                    bytes = len,
+                    "Buffered stream data"
+                );
+                
+                if let Ok(mut buffers) = self.stream_buffers.lock() {
+                    buffers
+                        .entry((conn_id, stream_id))
+                        .or_insert_with(VecDeque::new)
+                        .push_back(buf);
+                }
+            }
+            Err(e) => {
+                tracing::debug!(
+                    worker_id = self.worker_id,
+                    stream_id = stream_id,
+                    error = ?e,
+                    "Stream read error in on_stream_readable"
+                );
+            }
+        }
     }
 
     fn on_stream_writable(&mut self, _conn: &mut Connection, stream_id: u64) {
@@ -372,6 +444,9 @@ impl TquicWorker {
         let start_time = Instant::now();
         let running = Arc::new(AtomicBool::new(true));
         let stream_queue = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let pending_stream_queue = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let pending_trace_ids = Arc::new(Mutex::new(VecDeque::new()));
+        let stream_buffers = Arc::new(Mutex::new(HashMap::new()));
 
         Ok(TquicWorker {
             worker_id: config.worker_id,
@@ -384,7 +459,12 @@ impl TquicWorker {
             command_rx,
             event_tx,
             connections: HashMap::new(),
+            reverse_connections: HashMap::new(),
+            trace_id_to_index: HashMap::new(),
+            pending_trace_ids: pending_trace_ids.clone(),
             stream_queue,
+            pending_stream_queue,
+            stream_buffers,
             running,
             stats,
             start_time,
@@ -497,10 +577,15 @@ impl TquicWorker {
         };
 
         // Create handlers
+        let endpoint_ptr = &mut self.endpoint as *mut Option<Endpoint>;
         let transport_handler = WorkerTransportHandler::new(
             self.worker_id,
             self.event_tx.clone(),
             self.stream_queue.clone(),
+            self.pending_stream_queue.clone(),
+            self.pending_trace_ids.clone(),
+            self.stream_buffers.clone(),
+            endpoint_ptr,
         );
 
         // Simplified packet handler that doesn't need socket access during creation
@@ -622,7 +707,7 @@ impl TquicWorker {
 
     fn handle_connect(&mut self, remote_addr: SocketAddr) -> Result<ConnId> {
         if let Some(ref mut endpoint) = self.endpoint {
-            let conn_id = self.next_connection_id;
+            let our_conn_id = self.next_connection_id;
             self.next_connection_id += 1;
 
             match endpoint.connect(
@@ -633,11 +718,20 @@ impl TquicWorker {
                 None,                  // token as Option<&[u8]>
                 None,                  // config as Option<&Config>
             ) {
-                Ok(conn) => {
-                    self.connections.insert(conn_id, conn);
+                Ok(tquic_conn_id) => {
+                    self.connections.insert(our_conn_id, tquic_conn_id.clone());
+                    self.reverse_connections.insert(tquic_conn_id, our_conn_id);
                     self.stats.total_connections += 1;
                     self.stats.active_connections = self.connections.len();
-                    Ok(conn_id)
+                    
+                    tracing::debug!(
+                        worker_id = self.worker_id,
+                        our_id = our_conn_id,
+                        tquic_id = ?tquic_conn_id,
+                        "Connection established with ID mapping"
+                    );
+                    
+                    Ok(our_conn_id)
                 }
                 Err(e) => Err(TransportError::Other(format!("Connection failed: {:?}", e))),
             }
@@ -654,14 +748,21 @@ impl TquicWorker {
         fin: bool,
     ) -> Result<()> {
         if let Some(ref mut endpoint) = self.endpoint {
-            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
+            let tquic_conn_id = self.connections.get(&connection_id)
+                .ok_or_else(|| TransportError::Other("Connection not found".into()))?;
+            
+            if let Some(conn) = endpoint.conn_get_mut(tquic_conn_id.clone()) {
                 let bytes_data = Bytes::from(data);
+                let data_len = bytes_data.len() as u64;
                 match conn.stream_write(stream_id, bytes_data, fin) {
-                    Ok(_) => Ok(()),
+                    Ok(_) => {
+                        self.stats.bytes_sent += data_len;
+                        Ok(())
+                    }
                     Err(e) => Err(TransportError::Other(format!("Send failed: {:?}", e))),
                 }
             } else {
-                Err(TransportError::Other("Connection not found".into()))
+                Err(TransportError::Other("Connection not found in endpoint".into()))
             }
         } else {
             Err(TransportError::Other("Endpoint not initialized".into()))
@@ -674,36 +775,150 @@ impl TquicWorker {
         stream_id: u64,
         max_length: usize,
     ) -> Result<Vec<u8>> {
-        if let Some(ref mut endpoint) = self.endpoint {
-            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
-                let mut buf = vec![0u8; max_length];
-                match conn.stream_read(stream_id, &mut buf) {
-                    Ok((len, _fin)) => {
-                        buf.truncate(len);
-                        self.stats.bytes_received += len as u64;
-                        Ok(buf)
+        let tquic_id = self.connections.get(&connection_id)
+            .ok_or_else(|| TransportError::Other("Connection not found in ID map".into()))?
+            .clone();
+        
+        let max_attempts = 50;
+        let check_interval = std::time::Duration::from_millis(5);
+        
+        for attempt in 0..max_attempts {
+            if let Ok(mut buffers) = self.stream_buffers.lock() {
+                if let Some(queue) = buffers.get_mut(&(tquic_id, stream_id)) {
+                    if let Some(data) = queue.pop_front() {
+                        tracing::debug!(
+                            worker_id = self.worker_id,
+                            connection_id = connection_id,
+                            stream_id = stream_id,
+                            bytes = data.len(),
+                            attempt = attempt,
+                            "Returning buffered data"
+                        );
+                        self.stats.bytes_received += data.len() as u64;
+                        let truncated = if data.len() > max_length {
+                            data[..max_length].to_vec()
+                        } else {
+                            data
+                        };
+                        return Ok(truncated);
                     }
-                    Err(e) => Err(TransportError::Other(format!("Receive failed: {:?}", e))),
+                }
+            }
+            
+            if attempt < max_attempts - 1 {
+                let _ = self.handle_socket_readable();
+                
+                if let Some(ref mut endpoint) = self.endpoint {
+                    let _ = endpoint.process_connections();
+                    
+                    if let Some(conn) = endpoint.conn_get_mut(tquic_id) {
+                        let mut buf = vec![0u8; max_length];
+                        match conn.stream_read(stream_id, &mut buf) {
+                            Ok((len, _fin)) => {
+                                if len > 0 {
+                                    buf.truncate(len);
+                                    tracing::debug!(
+                                        worker_id = self.worker_id,
+                                        connection_id = connection_id,
+                                        stream_id = stream_id,
+                                        bytes = len,
+                                        attempt = attempt,
+                                        "Read data directly from stream"
+                                    );
+                                    self.stats.bytes_received += len as u64;
+                                    return Ok(buf);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::trace!(
+                                    worker_id = self.worker_id,
+                                    error = ?e,
+                                    "stream_read error (normal if no data yet)"
+                                );
+                            }
+                        }
+                    }
+                }
+                
+                std::thread::sleep(check_interval);
+            }
+        }
+        
+        tracing::debug!(
+            worker_id = self.worker_id,
+            connection_id = connection_id,
+            stream_id = stream_id,
+            "No data available after {} attempts",
+            max_attempts
+        );
+        Ok(Vec::new())
+    }
+
+    fn handle_accept(&mut self) -> Result<(ConnId, SocketAddr)> {
+        if let Some(ref mut endpoint) = self.endpoint {
+            if let Ok(mut queue) = self.pending_trace_ids.lock() {
+                if let Some(trace_id) = queue.pop_front() {
+                    for idx in 0..10000 {
+                        if let Some(conn) = endpoint.conn_get_mut(idx) {
+                            let conn_trace_id = conn.trace_id().to_string();
+                            
+                            if conn_trace_id == trace_id {
+                                let remote_addr = "0.0.0.0:0".parse().unwrap();
+                                let our_id = self.next_connection_id;
+                                self.next_connection_id += 1;
+                                
+                                self.connections.insert(our_id, idx);
+                                self.reverse_connections.insert(idx, our_id);
+                                self.trace_id_to_index.insert(trace_id.clone(), idx);
+                                
+                                // Transfer pending streams from trace_id queue to tquic_idx queue
+                                if let Ok(mut pending_streams) = self.pending_stream_queue.lock() {
+                                    if let Some(stream_ids) = pending_streams.remove(&trace_id) {
+                                        if let Ok(mut stream_queue) = self.stream_queue.lock() {
+                                            stream_queue.insert(idx, stream_ids.clone());
+                                            tracing::debug!(
+                                                worker_id = self.worker_id,
+                                                tquic_idx = idx,
+                                                num_streams = stream_ids.len(),
+                                                "Transferred pending streams to tquic_idx queue"
+                                            );
+                                        }
+                                    }
+                                }
+                                
+                                tracing::debug!(
+                                    worker_id = self.worker_id,
+                                    our_id = our_id,
+                                    tquic_idx = idx,
+                                    trace_id = %trace_id,
+                                    "Accepted connection via trace_id lookup"
+                                );
+                                
+                                return Ok((our_id, remote_addr));
+                            }
+                        }
+                    }
+                    
+                    queue.push_back(trace_id);
+                    Err(TransportError::Other("Trace ID not found in connections".into()))
+                } else {
+                    Err(TransportError::Other("No pending connections".into()))
                 }
             } else {
-                Err(TransportError::Other("Connection not found".into()))
+                Err(TransportError::Other("Failed to lock pending trace IDs".into()))
             }
         } else {
             Err(TransportError::Other("Endpoint not initialized".into()))
         }
     }
 
-    fn handle_accept(&mut self) -> Result<(ConnId, SocketAddr)> {
-        // For accepting connections, we need to wait for the transport handler to notify us
-        // This is a simplified implementation - in reality we'd need a queue of pending connections
-        Err(TransportError::Other("Accept not yet implemented".into()))
-    }
-
     fn handle_open_stream(&mut self, connection_id: ConnId) -> Result<u64> {
         if let Some(ref mut endpoint) = self.endpoint {
-            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
+            let tquic_id = self.connections.get(&connection_id)
+                .ok_or_else(|| TransportError::Other("Connection not found in ID map".into()))?;
+            
+            if let Some(conn) = endpoint.conn_get_mut(*tquic_id) {
                 match conn.stream_bidi_new(0, false) {
-                    // urgency=0, incremental=false
                     Ok(stream_id) => {
                         self.stats.total_streams += 1;
                         Ok(stream_id)
@@ -714,7 +929,7 @@ impl TquicWorker {
                     ))),
                 }
             } else {
-                Err(TransportError::Other("Connection not found".into()))
+                Err(TransportError::Other("Connection not found in endpoint".into()))
             }
         } else {
             Err(TransportError::Other("Endpoint not initialized".into()))
@@ -723,12 +938,15 @@ impl TquicWorker {
 
     fn handle_accept_stream(&mut self, connection_id: ConnId) -> Result<u64> {
         if let Some(ref mut endpoint) = self.endpoint {
-            if endpoint.conn_get_mut(connection_id).is_none() {
-                return Err(TransportError::ConnectionFailed("Connection not found".into()));
+            let tquic_id = self.connections.get(&connection_id)
+                .ok_or_else(|| TransportError::Other("Connection not found in ID map".into()))?;
+            
+            if endpoint.conn_get_mut(*tquic_id).is_none() {
+                return Err(TransportError::ConnectionFailed("Connection not found in endpoint".into()));
             }
 
             if let Ok(mut queue) = self.stream_queue.lock() {
-                if let Some(stream_ids) = queue.get_mut(&connection_id) {
+                if let Some(stream_ids) = queue.get_mut(tquic_id) {
                     if let Some(stream_id) = stream_ids.pop() {
                         self.stats.total_streams += 1;
                         tracing::debug!(
@@ -750,20 +968,24 @@ impl TquicWorker {
 
     fn handle_close_stream(&mut self, connection_id: ConnId, stream_id: u64, error_code: u64) {
         if let Some(ref mut endpoint) = self.endpoint {
-            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
-                let _ = conn.stream_shutdown(stream_id, tquic::Shutdown::Write, error_code);
+            if let Some(&tquic_id) = self.connections.get(&connection_id) {
+                if let Some(conn) = endpoint.conn_get_mut(tquic_id) {
+                    let _ = conn.stream_shutdown(stream_id, tquic::Shutdown::Write, error_code);
+                }
             }
         }
     }
 
     fn handle_close_connection(&mut self, connection_id: ConnId, error_code: u64, reason: Vec<u8>) {
         if let Some(ref mut endpoint) = self.endpoint {
-            if let Some(conn) = endpoint.conn_get_mut(connection_id) {
-                let _ = conn.close(true, error_code, &reason);
+            if let Some(tquic_id) = self.connections.remove(&connection_id) {
+                self.reverse_connections.remove(&tquic_id);
+                
+                if let Some(conn) = endpoint.conn_get_mut(tquic_id) {
+                    let _ = conn.close(true, error_code, &reason);
+                }
             }
         }
-        // Remove from our tracking
-        self.connections.remove(&connection_id);
         self.stats.active_connections = self.connections.len();
     }
 

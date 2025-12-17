@@ -28,7 +28,7 @@ tempfile = "3"
 socket2 = { version = "0.5", features = ["all"] }
 plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "svg_backend", "line_series"], optional = true }
 tokio = { version = "1.35.1", features = ["full"] }
-capnp = "0.18.10"
+capnp = "0.23.0"
 futures = "0.3.30"
 bytes = "1.5.0"
 thiserror = "1.0.56"
@@ -131,7 +131,7 @@ features = ["env-filter"]
 
 
 [build-dependencies]
-capnpc = "0.18.0"
+capnpc = "0.23.0"
 tonic-build = "0.10"
 
 # Examples are in the benches directory
@@ -144,10 +144,7 @@ tonic-build = "0.10"
 
 
 [features]
-# Backends map to optional deps (mutually exclusive at compile time)
-# backend-quinn = ["dep:quinn"] # Removed - using tquic only
 backend-tquic = ["dep:tquic"]
-# Keep placeholder for a potential third backend
 backend-alt = []
 
 # Comparison feature for gRPC

@@ -545,6 +545,38 @@ This protocol ensures maximum efficiency by separating context research from imp
 - **Worker Management**: Centralize worker logic in `worker_pool.rs` and `worker.rs`
 - **Stream Handling**: Implement AsyncRead/AsyncWrite in `tquic_stream.rs`
 
+## Current Active Tasks
+
+### Streaming RPC Implementation (P0 CRITICAL)
+**Status**: In Progress  
+**Priority**: P0 - Blocks production readiness  
+**Created**: 2025-10-21  
+**Tracking**: See `quiccrunch-core/todo.json` and opencode todo list
+
+**Objective**: Complete streaming RPC implementation and make bidirectional_streaming.rs example work
+
+**Atomic Tasks**:
+1. **Implement streaming RPC server infrastructure** - Complete `RpcServer::handle_connection()` with streaming pattern support (server/client/bidirectional)
+2. **Fix streaming RPC client methods** - Implement `server_streaming_call()`, `client_streaming_call()`, `bidirectional_streaming_call()` in RpcClient
+3. **Integrate with tQUIC backend** - Ensure stream operations work end-to-end with tQUIC transport
+4. **Update example code** - Refactor `examples/bidirectional_streaming.rs` to use RPC framework (RpcClient/RpcServer) instead of raw transport layer
+5. **Comprehensive testing** - Validate all streaming patterns (unary, server streaming, client streaming, bidirectional) work correctly
+
+**Files Involved**:
+- `src/rpc.rs` - Core RPC server and client implementation
+- `src/rpc/streaming.rs` - Streaming infrastructure (if exists)
+- `src/transport/adapter.rs` - tQUIC transport integration
+- `examples/bidirectional_streaming.rs` - Example code
+- `tests/streaming_rpc_bdd.rs` - BDD test scenarios
+
+**Success Criteria**:
+- All streaming RPC patterns compile and run successfully
+- `bidirectional_streaming.rs` example works end-to-end
+- Tests pass for all streaming scenarios
+- Documentation updated with streaming examples
+
+---
+
 ## Example Usage
 
 ```bash

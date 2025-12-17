@@ -4,9 +4,7 @@ mod types;
 use tokio::process::Command;
 use error::{BenchError, Result};
 use crate::config::QuicTransportSettings as TransportSettings;
-#[cfg(feature = "backend-quinn")]
-#[allow(unused_imports)]
-use quinn as _quinn_unused_to_force_feature;
+
 
 pub use types::*;
 

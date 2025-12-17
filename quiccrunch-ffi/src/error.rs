@@ -57,6 +57,8 @@ impl From<quiccrunch_core::TransportError> for QuicError {
             SerializationError(_) => QuicError::SerializationError,
             InvalidMessage(_) => QuicError::InvalidArgument,
             Fast(_) => QuicError::Error,
+            Io(_) => QuicError::Error,
+            Other(_) => QuicError::Error,
         }
     }
 }

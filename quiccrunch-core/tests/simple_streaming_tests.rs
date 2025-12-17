@@ -8,7 +8,8 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 async fn setup_simple_test() -> (SimpleStreamingClient, tokio::task::JoinHandle<()>) {
-    let transport = QuicTransport::new(TlsConfig::default()).unwrap();
+    let config = TlsConfig::default().into();
+    let transport = QuicTransport::new(config).await.unwrap();
     let listener = transport.listen("127.0.0.1:0").await.unwrap();
     let server_addr = listener.local_addr().unwrap();
 
@@ -20,7 +21,8 @@ async fn setup_simple_test() -> (SimpleStreamingClient, tokio::task::JoinHandle<
 
     sleep(Duration::from_millis(100)).await;
 
-    let client_transport = QuicTransport::new(TlsConfig::default()).unwrap();
+    let client_config = TlsConfig::default().into();
+    let client_transport = QuicTransport::new(client_config).await.unwrap();
     let connection = client_transport
         .connect(&server_addr.to_string())
         .await

@@ -81,12 +81,6 @@ enum StreamInner {
         _send_buffer: Option<MessageBuffer>,
         _recv_buffer: Option<PooledBuffer>,
     },
-    _Optimized {
-        connection: ConnectionHandle,
-        stream_id: u64,
-        send_buffer: MessageBuffer,
-        recv_buffer: PooledBuffer,
-    },
 }
 
 /// Performance statistics for the stream
@@ -243,10 +237,6 @@ impl OptimizedQuicStream {
             StreamInner::Tquic { handle, .. } => {
                 handle.write(data, false).await?;
             }
-            StreamInner::_Optimized { .. } => {
-                // Advanced zero-copy implementation would go here
-                unimplemented!("Optimized backend not yet implemented");
-            }
         }
 
         Ok(())
@@ -262,38 +252,9 @@ impl OptimizedQuicStream {
     /// Send with SIMD-optimized chunking
     async fn send_chunked_optimized(&mut self, data: Bytes) -> crate::Result<()> {
         match &mut self.inner {
-            #[cfg(feature = "backend-quinn")]
-            StreamInner::Quinn { send, .. } => {
-                use tokio::io::AsyncWriteExt;
-
-                // Write length header
-                let header = (data.len() as u32).to_le_bytes();
-                send.write_all(&header)
-                    .await
-                    .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-
-                // Send data in optimized chunks
-                let mut remaining = data.as_ref();
-                while !remaining.is_empty() {
-                    let chunk_size = remaining.len().min(self.config.chunk_size);
-                    let (chunk, rest) = remaining.split_at(chunk_size);
-
-                    send.write_all(chunk)
-                        .await
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                    send.flush()
-                        .await
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-
-                    remaining = rest;
-                }
-            }
             #[cfg(feature = "backend-tquic")]
             StreamInner::Tquic { handle, .. } => {
                 handle.write(data, false).await?;
-            }
-            StreamInner::_Optimized { .. } => {
-                unimplemented!("Optimized backend not yet implemented");
             }
         }
 
@@ -303,67 +264,12 @@ impl OptimizedQuicStream {
     /// Receive with zero-copy optimization
     async fn receive_zero_copy(&mut self) -> crate::Result<Bytes> {
         match &mut self.inner {
-            #[cfg(feature = "backend-quinn")]
-            StreamInner::Quinn {
-                recv, recv_buffer, ..
-            } => {
-                use tokio::io::AsyncReadExt;
-
-                // Read message length
-                let mut header = [0u8; 4];
-                time::timeout(self.config.read_timeout, recv.read_exact(&mut header))
-                    .await
-                    .map_err(|_| crate::TransportError::StreamError("Header read timeout".into()))?
-                    .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-
-                let msg_len = u32::from_le_bytes(header) as usize;
-                if msg_len > self.max_message_size {
-                    return Err(crate::TransportError::StreamError(format!(
-                        "Message size {} exceeds limit {}",
-                        msg_len, self.max_message_size
-                    )));
-                }
-
-                // Use pooled buffer for large messages
-                if msg_len >= self.config.chunk_size {
-                    let mut buffer = recv_buffer
-                        .take()
-                        .unwrap_or_else(|| PooledBuffer::get(msg_len));
-                    buffer.resize(msg_len, 0);
-
-                    time::timeout(
-                        self.config.read_timeout,
-                        recv.read_exact(buffer.as_mut_slice()),
-                    )
-                    .await
-                    .map_err(|_| crate::TransportError::StreamError("Data read timeout".into()))?
-                    .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-
-                    let result = Bytes::from(buffer.into_vec());
-                    *recv_buffer = Some(PooledBuffer::get(self.config.chunk_size)); // Prepare for next read
-                    Ok(result)
-                } else {
-                    // For small messages, use regular allocation
-                    let mut data = vec![0u8; msg_len];
-                    time::timeout(self.config.read_timeout, recv.read_exact(&mut data))
-                        .await
-                        .map_err(|_| {
-                            crate::TransportError::StreamError("Data read timeout".into())
-                        })?
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-                    Ok(Bytes::from(data))
-                }
-            }
             #[cfg(feature = "backend-tquic")]
             StreamInner::Tquic { handle, .. } => {
-                // For tQUIC, read with the configured buffer size
                 handle
                     .read(self.config.chunk_size)
                     .await?
                     .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into()))
-            }
-            StreamInner::_Optimized { .. } => {
-                unimplemented!("Optimized backend not yet implemented");
             }
         }
     }
@@ -371,78 +277,20 @@ impl OptimizedQuicStream {
     /// Receive with SIMD-optimized chunking
     async fn receive_chunked_optimized(&mut self) -> crate::Result<Bytes> {
         match &mut self.inner {
-            #[cfg(feature = "backend-quinn")]
-            StreamInner::Quinn { recv, .. } => {
-                use tokio::io::AsyncReadExt;
-
-                // Read header
-                let mut header = [0u8; 4];
-                time::timeout(self.config.read_timeout, recv.read_exact(&mut header))
-                    .await
-                    .map_err(|_| crate::TransportError::StreamError("Header read timeout".into()))?
-                    .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-
-                let msg_len = u32::from_le_bytes(header) as usize;
-                if msg_len > self.max_message_size {
-                    return Err(crate::TransportError::StreamError(format!(
-                        "Message size {} exceeds limit {}",
-                        msg_len, self.max_message_size
-                    )));
-                }
-
-                // Read data in optimized chunks
-                let mut buffer = PooledBuffer::get(msg_len);
-                buffer.resize(msg_len, 0);
-                let mut bytes_read = 0;
-
-                while bytes_read < msg_len {
-                    let remaining = msg_len - bytes_read;
-                    let chunk_size = remaining.min(self.config.chunk_size);
-
-                    let slice = &mut buffer.as_mut_slice()[bytes_read..bytes_read + chunk_size];
-                    time::timeout(self.config.read_timeout, recv.read_exact(slice))
-                        .await
-                        .map_err(|_| {
-                            crate::TransportError::StreamError("Data read timeout".into())
-                        })?
-                        .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-
-                    bytes_read += chunk_size;
-
-                    // Use SIMD for memory operations if enabled and data is large enough
-                    if self.config.use_simd && chunk_size >= 32 {
-                        self.stats.simd_operations += 1;
-                    }
-                }
-
-                Ok(Bytes::from(buffer.into_vec()))
-            }
             #[cfg(feature = "backend-tquic")]
             StreamInner::Tquic { handle, .. } => handle
                 .read(self.config.chunk_size)
                 .await?
                 .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into())),
-            StreamInner::_Optimized { .. } => {
-                unimplemented!("Optimized backend not yet implemented");
-            }
         }
     }
 
     /// Close the stream
     pub async fn close(&mut self) -> crate::Result<()> {
         match &mut self.inner {
-            #[cfg(feature = "backend-quinn")]
-            StreamInner::Quinn { send, .. } => {
-                send.finish()
-                    .await
-                    .map_err(|e| crate::TransportError::StreamError(e.to_string()))?;
-            }
             #[cfg(feature = "backend-tquic")]
             StreamInner::Tquic { handle, .. } => {
                 handle.close().await?;
-            }
-            StreamInner::_Optimized { .. } => {
-                unimplemented!("Optimized backend not yet implemented");
             }
         }
         Ok(())

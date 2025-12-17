@@ -82,7 +82,12 @@ impl Transport for QuicTransport {
 
     async fn new(config: Self::Config) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
         let client = tquic::TquicClient::new(None).await?;
-        let server = tquic::TquicServer::new(None).await?;
+        
+        let bind_addr: std::net::SocketAddr = "0.0.0.0:0".parse().unwrap();
+        let cert_file = "/tmp/cert.pem".to_string();
+        let key_file = "/tmp/key.pem".to_string();
+        
+        let server = tquic::TquicServer::new(bind_addr, cert_file, key_file, None).await?;
         Ok(QuicTransport { client, server })
     }
 

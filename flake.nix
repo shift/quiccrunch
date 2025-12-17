@@ -39,6 +39,7 @@
             clang
             zlib
             capnproto
+protobuf
             protobuf
             liburing
 

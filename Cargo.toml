@@ -4,6 +4,8 @@ members = [
     "quiccrunch-macros",
     "quiccrunch-cli",
     "quiccrunch-ffi",
+    "benchmark_comparison/grpc",
+    "benchmark_comparison/quiccrunch",
     # "quiccrunch-security", # Temporarily disabled due to missing dependencies
     # "tests/load-testing", # Temporarily disabled - directory removed for space
 ]
@@ -12,7 +14,7 @@ resolver = "2"
 [workspace.dependencies]
 # Shared dependencies for all workspace members
 tokio = { version = "1.35.1", features = ["full"] }
-capnp = "0.18.10"
+capnp = "0.23.0"
 futures = "0.3.30"
 bytes = "1.5.0"
 thiserror = "1.0.56"
