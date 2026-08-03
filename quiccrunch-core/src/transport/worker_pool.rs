@@ -1,16 +1,19 @@
 use dashmap::DashMap;
 use mio::Waker;
-use std::sync::mpsc;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+use std::collections::VecDeque;
+use std::sync::{    atomic::{AtomicUsize, Ordering},
     Arc,
+    Mutex,
 };
+use tokio::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::transport::worker::TquicWorker;
+
 use crate::error::TransportError;
 use crate::transport::messages::{
-    ConnectionId, TquicCommand, WorkerConfig, WorkerHealth, WorkerStats, WorkerStatus,
+    ConnectionId, TquicCommand, TquicEvent, WorkerConfig, WorkerHealth, WorkerStats, WorkerStatus,
 };
 
 #[derive(Debug)]
@@ -194,6 +197,11 @@ impl TquicWorkerPool {
         let mut workers = Vec::with_capacity(worker_count);
         let connection_map = Arc::new(DashMap::new());
         
+        // Create shared pending trace IDs queue for accept load balancing
+        // This allows any worker to accept connections that arrive on any worker's socket
+        // (due to SO_REUSEPORT kernel load balancing)
+        let shared_pending_trace_ids = Arc::new(Mutex::new(VecDeque::new()));
+        
         // Initialize performance monitoring and load balancing
         let load_balancer = LoadBalancer::new(worker_count);
         let performance_monitor = PerformanceMonitor::new(worker_count);
@@ -206,7 +214,8 @@ impl TquicWorkerPool {
             // SO_REUSEPORT allows multiple sockets to bind to the same port
             // The kernel will distribute packets across workers automatically
 
-            let (command_tx, command_rx) = mpsc::channel::<TquicCommand>();
+            let (command_tx, command_rx) = mpsc::channel::<TquicCommand>(100);
+            let (event_tx, _event_rx) = mpsc::channel::<TquicEvent>(100);
             let is_healthy = Arc::new(std::sync::atomic::AtomicBool::new(true));
             let is_healthy_clone = is_healthy.clone();
             
@@ -222,15 +231,32 @@ impl TquicWorkerPool {
                 uptime: Duration::new(0, 0),
             }));
 
+            let shared_pending_trace_ids_clone = shared_pending_trace_ids.clone();
+            let event_tx_clone = event_tx.clone();
+
             let join_handle = thread::Builder::new()
                 .name(format!("tquic-worker-{}", worker_id))
                 .spawn(move || {
-                    // Create and run a simple worker loop
-                    let result = Self::run_worker_loop(config, command_rx);
-
-                    if let Err(e) = result {
-                        tracing::error!("Worker {} failed: {}", worker_id, e);
+                    eprintln!("[worker-{}] Thread started", worker_id);
+                    // Create and run real TquicWorker with shared pending trace IDs
+                    let mut worker = match TquicWorker::new(config, command_rx, Some(event_tx_clone), Some(shared_pending_trace_ids_clone)) {
+                        Ok(w) => {
+                            eprintln!("[worker-{}] Worker created successfully", worker_id);
+                            w
+                        }
+                        Err(e) => {
+                            eprintln!("[worker-{}] Worker creation failed: {}", worker_id, e);
+                            is_healthy_clone.store(false, Ordering::Relaxed);
+                            return;
+                        }
+                    };
+                    
+                    eprintln!("[worker-{}] Starting worker.run()", worker_id);
+                    if let Err(e) = worker.run() {
+                        eprintln!("[worker-{}] Worker.run() failed: {}", worker_id, e);
                         is_healthy_clone.store(false, Ordering::Relaxed);
+                    } else {
+                        eprintln!("[worker-{}] Worker.run() completed normally", worker_id);
                     }
                 })
                 .map_err(|e| {
@@ -240,7 +266,7 @@ impl TquicWorkerPool {
             workers.push(TquicWorkerHandle {
                 worker_id,
                 command_tx,
-                waker: None, // Will be set after worker creation if we implement it
+                waker: None,
                 join_handle,
                 is_healthy,
                 stats: worker_stats,
@@ -289,6 +315,7 @@ impl TquicWorkerPool {
         worker
             .command_tx
             .send(cmd)
+            .await
             .map_err(|_| TransportError::ConnectionFailed("Worker channel closed".into()))?;
 
         // Wake up the worker to process the command if we have a waker
@@ -482,139 +509,6 @@ impl TquicWorkerPool {
             .collect()
     }
 
-    fn run_worker_loop(
-        config: WorkerConfig,
-        command_rx: mpsc::Receiver<TquicCommand>,
-    ) -> Result<(), TransportError> {
-        tracing::info!(
-            "Starting tQUIC worker {} on {}",
-            config.worker_id,
-            config.bind_addr
-        );
-
-        // For now, implement a simple message loop that responds to commands
-        // This will be replaced with actual tQUIC worker implementation
-        let mut running = true;
-
-        while running {
-            match command_rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(cmd) => {
-                    match cmd {
-                        TquicCommand::Connect {
-                            remote_addr,
-                            response,
-                        } => {
-                            tracing::debug!(
-                                "Worker {} handling connect to {}",
-                                config.worker_id,
-                                remote_addr
-                            );
-                            // For now, return a dummy connection ID
-                            let conn_id = (config.worker_id as u64) << 32 | 1;
-                            let _ = response.send(Ok(conn_id));
-                        }
-                        TquicCommand::Send {
-                            connection_id,
-                            stream_id,
-                            data,
-                            fin,
-                            response,
-                        } => {
-                            tracing::debug!(
-                                "Worker {} handling send on connection {} stream {}",
-                                config.worker_id,
-                                connection_id,
-                                stream_id
-                            );
-                            // Simulate successful send
-                            let _ = response.send(Ok(()));
-                        }
-                        TquicCommand::Receive {
-                            connection_id,
-                            stream_id,
-                            max_length,
-                            response,
-                        } => {
-                            tracing::debug!(
-                                "Worker {} handling receive on connection {} stream {}",
-                                config.worker_id,
-                                connection_id,
-                                stream_id
-                            );
-                            // Return empty data for now
-                            let _ = response.send(Ok(Vec::new()));
-                        }
-                        TquicCommand::Accept { response } => {
-                            tracing::debug!("Worker {} handling accept", config.worker_id);
-                            // Return dummy connection for now
-                            let conn_id = (config.worker_id as u64) << 32 | 2;
-                            let remote_addr = "127.0.0.1:0".parse().unwrap();
-                            let _ = response.send(Ok((conn_id, remote_addr)));
-                        }
-                        TquicCommand::OpenStream {
-                            connection_id,
-                            response,
-                        } => {
-                            tracing::debug!(
-                                "Worker {} handling open stream on connection {}",
-                                config.worker_id,
-                                connection_id
-                            );
-                            let _ = response.send(Ok(1));
-                        }
-                        TquicCommand::AcceptStream {
-                            connection_id,
-                            response,
-                        } => {
-                            tracing::debug!(
-                                "Worker {} handling accept stream on connection {}",
-                                config.worker_id,
-                                connection_id
-                            );
-                            let _ = response.send(Ok(2));
-                        }
-                        TquicCommand::CloseStream {
-                            connection_id,
-                            stream_id,
-                            error_code,
-                        } => {
-                            tracing::debug!(
-                                "Worker {} handling close stream {} on connection {}",
-                                config.worker_id,
-                                stream_id,
-                                connection_id
-                            );
-                        }
-                        TquicCommand::CloseConnection {
-                            connection_id,
-                            error_code,
-                            reason,
-                        } => {
-                            tracing::debug!(
-                                "Worker {} handling close connection {}",
-                                config.worker_id,
-                                connection_id
-                            );
-                        }
-                        TquicCommand::Shutdown => {
-                            tracing::info!("Worker {} shutting down", config.worker_id);
-                            running = false;
-                        }
-                    }
-                }
-                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    continue;
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    tracing::info!("Worker {} command channel disconnected", config.worker_id);
-                    running = false;
-                }
-            }
-        }
-
-        tracing::info!("Worker {} stopped", config.worker_id);
-        Ok(())
-    }
 }
 
 impl Drop for TquicWorkerPool {

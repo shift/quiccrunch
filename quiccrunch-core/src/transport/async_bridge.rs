@@ -92,6 +92,7 @@ impl TquicListenerHandle {
             connection_id, 
             0, // stream_id placeholder
             1024 * 1024, // 1MB max message size
+            self.worker_pool.clone(),
         ))
     }
 }
@@ -103,9 +104,13 @@ pub struct AsyncTquicClient {
 }
 
 impl AsyncTquicClient {
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        // Create a default worker configuration
-        let base_config = WorkerConfig::default();
+    pub async fn new(
+        ca_cert: Option<String>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        // Create a default worker configuration with optional CA cert
+        let mut base_config = WorkerConfig::default();
+        base_config.ca_cert_file = ca_cert;
+        base_config.verify_cert = true;
         
         // Create worker pool with optimal worker count
         let worker_count = num_cpus::get().min(8).max(2);
@@ -144,6 +149,7 @@ impl AsyncTquicClient {
             connection_id,
             0, // stream_id placeholder 
             1024 * 1024, // 1MB max message size
+            self.worker_pool.clone(),
         ))
     }
 }
@@ -152,13 +158,23 @@ impl AsyncTquicClient {
 #[derive(Debug)]
 pub struct AsyncTquicServer {
     worker_pool: Arc<TquicWorkerPool>,
+    bind_addr: SocketAddr,
+    cert_file: String,
+    key_file: String,
 }
 
 impl AsyncTquicServer {
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        // Create a default server configuration
+    pub async fn new(
+        bind_addr: SocketAddr,
+        cert_file: String,
+        key_file: String,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        // Create server configuration
         let mut base_config = WorkerConfig::default();
         base_config.is_server = true;
+        base_config.bind_addr = bind_addr;
+        base_config.cert_file = Some(cert_file.clone());
+        base_config.key_file = Some(key_file.clone());
         
         // Create worker pool for server
         let worker_count = num_cpus::get().min(8).max(2);
@@ -167,18 +183,16 @@ impl AsyncTquicServer {
 
         Ok(AsyncTquicServer {
             worker_pool: Arc::new(worker_pool),
+            bind_addr,
+            cert_file,
+            key_file,
         })
     }
 
     pub async fn listen(
         &self,
-        addr: &str,
     ) -> Result<AsyncTquicListener, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let _bind_addr: SocketAddr = addr.parse()
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-
-        // For now, create a simple listener handle
-        // In a real implementation, you'd configure the worker pool to bind to the address
+        // Create a listener handle
         let listener_id = 1; // Placeholder - would be assigned by worker pool
 
         Ok(AsyncTquicListener {

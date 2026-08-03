@@ -430,6 +430,8 @@ impl TquicRuntime {
                 max_udp_payload_size: 65527,
                 enable_early_data: false,
                 application_protocols: vec![b"h3".to_vec(), b"http/0.9".to_vec()],
+                verify_cert: true,
+                ca_cert_file: None,
             };
             
             let mut adapter = TquicAdapter::new(config)
@@ -444,6 +446,9 @@ impl TquicRuntime {
             let mut pending_connects: HashMap<u64, (Instant, oneshot::Sender<Result<u64, TransportError>>)> = HashMap::new();
             
             info!("TquicRuntime thread started on {}", bind_addr);
+            
+            // Set running to true since we're not calling run_event_loop()
+            adapter.running = true;
             
             loop {
                 while let Ok(cmd) = cmd_rx.try_recv() {
@@ -525,7 +530,8 @@ impl TquicRuntime {
                     adapter.endpoint.on_timeout(Instant::now());
                 }
                 
-                let poll_timeout = tquic_timeout.unwrap_or(std::time::Duration::from_millis(100));
+                // Use short poll timeout to ensure command channel is checked frequently
+                let poll_timeout = std::time::Duration::from_millis(10);
                 match adapter.poll.poll(&mut adapter.poll_events, Some(poll_timeout)) {
                     Ok(_) => {
                         let has_readable = adapter.poll_events.iter().any(|e| e.is_readable());
@@ -550,6 +556,7 @@ impl TquicRuntime {
                             }
                         }
                         TquicEvent::StreamReadable { index, stream_id } => {
+                            // First, handle stream accept waiters
                             if let Some(waiters) = pending_stream_accepts.get_mut(&index) {
                                 if let Some(waiter) = waiters.pop() {
                                     let _ = waiter.send(Ok(stream_id));
@@ -562,6 +569,24 @@ impl TquicRuntime {
                                 incoming_streams.entry(index)
                                     .or_insert_with(Vec::new)
                                     .push(stream_id);
+                            }
+                            
+                            // Also fulfill any stream_read waiters for this stream
+                            if let Some(waiters) = stream_readers.remove(&(index, stream_id)) {
+                                let mut buf = vec![0u8; 65536];
+                                match adapter.stream_read(index, stream_id, &mut buf) {
+                                    Ok((n, fin)) => {
+                                        buf.truncate(n);
+                                        for waiter in waiters {
+                                            let _ = waiter.send(Ok((buf.clone(), fin)));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        for waiter in waiters {
+                                            let _ = waiter.send(Err(TransportError::StreamError(format!("{:?}", e))));
+                                        }
+                                    }
+                                }
                             }
                         }
                         _ => {}
@@ -581,23 +606,6 @@ impl TquicRuntime {
                         let _ = resp.send(Err(TransportError::ConnectionFailed("Connection timeout".into())));
                         if let Some(conn) = adapter.endpoint.conn_get_mut(conn_index) {
                             let _ = conn.close(true, 0, b"Connection timeout");
-                        }
-                    }
-                }
-                
-                for ((conn_idx, stream_id), waiters) in stream_readers.drain() {
-                    let mut buf = vec![0u8; 65536];
-                    match adapter.stream_read(conn_idx, stream_id, &mut buf) {
-                        Ok((n, fin)) => {
-                            buf.truncate(n);
-                            for waiter in waiters {
-                                let _ = waiter.send(Ok((buf.clone(), fin)));
-                            }
-                        }
-                        Err(e) => {
-                            for waiter in waiters {
-                                let _ = waiter.send(Err(TransportError::StreamError(format!("{:?}", e))));
-                            }
                         }
                     }
                 }

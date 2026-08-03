@@ -1,0 +1,10 @@
+{
+  "name": "pi-extension-engram-orchestrator",
+  "private": true,
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2"
+  }
+}

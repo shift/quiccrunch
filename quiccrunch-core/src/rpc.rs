@@ -193,7 +193,7 @@ use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 use tokio::sync::RwLock;
 use futures::Stream;
-use crate::{QuicStream, TransportError, StreamReader, StreamWriter, Splittable, transport::tquic::AsyncTquicClient as Connection};
+use crate::{QuicStream, TransportError, StreamReader, StreamWriter, Splittable, transport::async_bridge::AsyncTquicClient};
 use crate::schema::rpc_capnp::*;
 
 /// Service information for discovery
@@ -2243,7 +2243,7 @@ impl RpcServer {
         
         let mut error = rpc_message.init_error();
         error.set_code(error_code);
-        error.set_message(message.into());
+        error.set_message(message.to_string());
         
         let serialized = serialize::write_message_to_words(&msg);
         Bytes::from(serialized)
@@ -2919,15 +2919,15 @@ impl Default for RpcServer {
 /// The `RpcClient` provides a robust foundation for building distributed applications
 /// with excellent performance, reliability, and developer experience.
 pub struct RpcClient {
-    connection: Connection,
+    stream: QuicStream,
     next_request_id: AtomicU64,
 }
 
 impl RpcClient {
     /// Create a new RPC client
-    pub fn new(connection: Connection) -> Self {
+    pub fn new(stream: QuicStream) -> Self {
         Self {
-            connection,
+            stream,
             next_request_id: AtomicU64::new(1),
         }
     }
@@ -2942,11 +2942,10 @@ impl RpcClient {
             // Create Cap'n Proto request
             let request_data = self.create_request(context, params)?;
             
-            // Send request and receive response
-            let mut stream = self.connection.open_bi().await?;
-            stream.send_message(request_data).await?;
+            // Send request and receive response using the stream directly
+            self.stream.send_message(request_data).await?;
             
-            let response_data = stream.receive_message().await?;
+            let response_data = self.stream.receive_message().await?;
             self.parse_response(response_data)
         };
         
@@ -2976,7 +2975,7 @@ impl RpcClient {
         let request_data = self.create_streaming_request(&context, params, StreamingType::ServerStreaming)?;
         
         // Open stream and send request
-        let stream = self.connection.open_bi().await?;
+        let mut stream = self.stream.open_bi().await?;
         let split_stream = stream.into_split_stream();
         let (reader, writer) = split_stream.split();
         
@@ -2995,7 +2994,7 @@ impl RpcClient {
         let request_data = self.create_streaming_request(&context, Bytes::new(), StreamingType::ClientStreaming)?;
         
         // Open stream and send initial request
-        let stream = self.connection.open_bi().await?;
+        let mut stream = self.stream.open_bi().await?;
         let split_stream = stream.into_split_stream();
         let (reader, writer) = split_stream.split();
         
@@ -3022,7 +3021,7 @@ impl RpcClient {
         let request_data = self.create_streaming_request(&context, Bytes::new(), StreamingType::BidirectionalStreaming)?;
         
         // Open stream and send initial request
-        let stream = self.connection.open_bi().await?;
+        let mut stream = self.stream.open_bi().await?;
         let split_stream = stream.into_split_stream();
         let (reader, writer) = split_stream.split();
         
@@ -3046,8 +3045,8 @@ impl RpcClient {
         rpc_message.set_request_id(context.request_id);
         
         let mut request = rpc_message.init_request();
-        request.set_service(context.service.as_str().into());
-        request.set_method(context.method.as_str().into());
+        request.set_service(context.service.as_str());
+        request.set_method(context.method.as_str());
         request.set_parameters(&params);
         request.set_streaming_type(streaming_type);
         
@@ -3102,12 +3101,12 @@ impl RpcClient {
 
 /// Connection pool for RPC clients
 pub struct RpcConnectionPool {
-    connections: Vec<Connection>,
+    connections: Vec<QuicStream>,
     next_connection: AtomicU64,
 }
 
 impl RpcConnectionPool {
-    pub fn new(connections: Vec<Connection>) -> Self {
+    pub fn new(connections: Vec<QuicStream>) -> Self {
         Self {
             connections,
             next_connection: AtomicU64::new(0),
@@ -3120,7 +3119,7 @@ impl RpcConnectionPool {
         }
         
         let index = self.next_connection.fetch_add(1, Ordering::SeqCst) as usize % self.connections.len();
-        self.connections.get(index).map(|conn| RpcClient::new(conn.clone()))
+        self.connections.get(index).cloned().map(RpcClient::new)
     }
 }
 

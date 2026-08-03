@@ -61,6 +61,7 @@ raw-cpuid = "11.0"               # CPU feature detection for crypto acceleration
 aesni = "0.8"                    # AES-NI hardware acceleration
 aes-gcm = "0.10"                 # AES-GCM cipher implementation
 getrandom = "0.2"                # Random number generation for crypto
+jsonwebtoken = { version = "9.2", optional = true }             # JWT token authentication
 
   # gRPC dependencies for comparison
 tonic = { version = "0.10", optional = true }
@@ -188,6 +189,8 @@ telemetry = [
     "dep:tracing-opentelemetry",
     "dep:tracing-subscriber"
 ]
+
+auth = ["dep:jsonwebtoken"]
 
 tls = []
 visualization = ["plotters"]

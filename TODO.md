@@ -1,5 +1,32 @@
 # TODO: QuicCrunch RPC Implementation & Performance Optimization
 
+## 🚨 P0 CRITICAL: tQUIC Integration Fix (Blocks All Real Functionality)
+
+### **IMMEDIATE BLOCKER: Core Transport Non-Functional**
+
+**Problem:** tQUIC v1.6.0 integration has critical gaps preventing real data transmission:
+- ❌ Connection ID translation missing (our ConnId ↔ tQUIC ConnectionId)
+- ❌ Server `handle_accept()` not implemented (returns "not implemented" error)
+- ❌ Stream `send()`/`receive()` use wrong connection IDs, return empty data
+- ❌ Stream queue ID mismatch (tQUIC IDs vs custom IDs)
+
+**Impact:** Server mode non-functional, no real data transmission, benchmarks fail.
+
+**Estimated Fix:** 6-9 hours focused development across 4 phases.
+
+### **Tasks Created:**
+- [ ] **Task**: [Fix tQUIC Integration Gaps](../ai-agent-workflow/tasks/fix-tquic-integration-gaps.md) - Main tracking task
+- [ ] **Phase 1**: [Connection Management Fix](../ai-agent-workflow/context/fix-tquic-integration-phase1-connection-management.md) - ID translation + server accept (2-3h)
+- [ ] **Phase 2**: [Stream Operations Fix](../ai-agent-workflow/context/fix-tquic-integration-phase2-stream-operations.md) - Send/receive/open/accept (1-2h)
+- [ ] **Phase 3**: [Connection Cleanup](../ai-agent-workflow/context/fix-tquic-integration-phase3-cleanup.md) - Proper state cleanup (30m)
+- [ ] **Phase 4**: [Testing & Validation](../ai-agent-workflow/context/fix-tquic-integration-phase4-testing.md) - Integration tests + examples (2-3h)
+
+### **Performance Regression Fix**
+- [ ] **Task**: [Fix Performance Regression](../ai-agent-workflow/tasks/fix-performance-regression.md) - 4x regression (5-8h)
+- [ ] **Context**: [Performance Regression Debugging](../ai-agent-workflow/context/fix-performance-regression.md)
+
+---
+
 ## 🎯 RPC FRAMEWORK IMPLEMENTATION STATUS
 
 ### **PHASE 1: CORE RPC INFRASTRUCTURE** ✅ **COMPLETED**

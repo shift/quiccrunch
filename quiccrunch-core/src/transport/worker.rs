@@ -280,9 +280,13 @@ impl TquicWorker {
         let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))
             .map_err(|e| TransportError::ConnectionFailed(format!("Failed to create socket: {}", e)))?;
         
-        // Enable SO_REUSEPORT for load distribution across workers
+        // Enable SO_REUSEADDR and SO_REUSEPORT for load distribution across workers
+        // Both are needed for proper SO_REUSEPORT behavior on Linux
         #[cfg(unix)]
         {
+            if let Err(e) = socket.set_reuse_address(true) {
+                tracing::warn!(worker_id = worker_id, "Failed to set SO_REUSEADDR: {}", e);
+            }
             if let Err(e) = socket.set_reuse_port(true) {
                 tracing::warn!(worker_id = worker_id, "Failed to set SO_REUSEPORT: {}", e);
             }
@@ -419,6 +423,7 @@ impl TquicWorker {
         config: WorkerConfig,
         command_rx: mpsc::Receiver<TquicCommand>,
         event_tx: Option<mpsc::Sender<TquicEvent>>,
+        shared_pending_trace_ids: Option<Arc<Mutex<VecDeque<String>>>>,
     ) -> Result<Self> {
         let poll = Poll::new().map_err(|e| TransportError::Io(e))?;
         let events = Events::with_capacity(1024);
@@ -445,7 +450,7 @@ impl TquicWorker {
         let running = Arc::new(AtomicBool::new(true));
         let stream_queue = Arc::new(std::sync::Mutex::new(HashMap::new()));
         let pending_stream_queue = Arc::new(std::sync::Mutex::new(HashMap::new()));
-        let pending_trace_ids = Arc::new(Mutex::new(VecDeque::new()));
+        let pending_trace_ids = shared_pending_trace_ids.unwrap_or_else(|| Arc::new(Mutex::new(VecDeque::new())));
         let stream_buffers = Arc::new(Mutex::new(HashMap::new()));
 
         Ok(TquicWorker {

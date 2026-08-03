@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::memory::{MessageBuffer, PooledBuffer};
 // use crate::simd;
-use crate::lockfree::{ConnectionHandle, StreamHandle};
+use crate::lockfree::StreamHandle;
 
 /// Optimized QUIC stream with performance enhancements
 pub struct OptimizedQuicStream {

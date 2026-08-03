@@ -75,9 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         
-        if i < messages.len() - 1 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        // No artificial delay for benchmarking - run at max throughput
     }
     
     let send_duration = send_start.elapsed();

@@ -1,0 +1,7 @@
+{
+  "name": "pi-extension-engram-tools",
+  "private": true,
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49"
+  }
+}

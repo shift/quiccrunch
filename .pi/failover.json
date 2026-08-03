@@ -1,0 +1,201 @@
+{
+  "_comment": "Model failover priority list. Lower priority number = preferred. Groups: z.ai subscription (1-5), Copilot Pro+ free 0x (6-8), Copilot cheap 0.25-0.33x (9-12), Copilot standard 1x (13-16), Copilot expensive 3x (17), OpenRouter free preview (18-22), free external (23-24).",
+
+  "models": [
+    {
+      "_group": "z.ai subscription — pre-paid, no per-request cost",
+      "provider": "zai",
+      "model": "glm-5.1",
+      "priority": 1,
+      "label": "z.ai GLM-5.1",
+      "cooldownMinutes": 15
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5",
+      "priority": 2,
+      "label": "z.ai GLM-5",
+      "cooldownMinutes": 15
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5-turbo",
+      "priority": 3,
+      "label": "z.ai GLM-5 Turbo (fast)",
+      "cooldownMinutes": 10
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4.7",
+      "priority": 4,
+      "label": "z.ai GLM-4.7",
+      "cooldownMinutes": 10
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4.7-flash",
+      "priority": 5,
+      "label": "z.ai GLM-4.7 Flash (fast)",
+      "cooldownMinutes": 5
+    },
+
+    {
+      "_group": "GitHub Copilot Pro+ — FREE, 0x multiplier, effectively unlimited",
+      "provider": "github-copilot",
+      "model": "gpt-4.1",
+      "priority": 6,
+      "label": "Copilot GPT-4.1 (free ∞)",
+      "cooldownMinutes": 5
+    },
+    {
+      "provider": "github-copilot",
+      "model": "gpt-4o",
+      "priority": 7,
+      "label": "Copilot GPT-4o (free ∞)",
+      "cooldownMinutes": 5
+    },
+    {
+      "provider": "github-copilot",
+      "model": "gpt-5-mini",
+      "priority": 8,
+      "label": "Copilot GPT-5 mini (free ∞)",
+      "cooldownMinutes": 5
+    },
+
+    {
+      "_group": "GitHub Copilot Pro+ — cheap, 0.25x multiplier (~6000 req/month)",
+      "provider": "github-copilot",
+      "model": "grok-code-fast-1",
+      "priority": 9,
+      "label": "Copilot Grok Code Fast 1 (0.25x)",
+      "cooldownMinutes": 10
+    },
+
+    {
+      "_group": "GitHub Copilot Pro+ — cheap, 0.33x multiplier (~4500 req/month)",
+      "provider": "github-copilot",
+      "model": "claude-haiku-4.5",
+      "priority": 10,
+      "label": "Copilot Claude Haiku 4.5 (0.33x)",
+      "cooldownMinutes": 10
+    },
+    {
+      "provider": "github-copilot",
+      "model": "gemini-3-flash-preview",
+      "priority": 11,
+      "label": "Copilot Gemini 3 Flash (0.33x)",
+      "cooldownMinutes": 10
+    },
+    {
+      "provider": "github-copilot",
+      "model": "gpt-5.4-mini",
+      "priority": 12,
+      "label": "Copilot GPT-5.4 mini (0.33x)",
+      "cooldownMinutes": 10
+    },
+
+    {
+      "_group": "GitHub Copilot Pro+ — standard, 1x multiplier (1500 req/month pool)",
+      "provider": "github-copilot",
+      "model": "claude-sonnet-4.6",
+      "priority": 2,
+      "label": "Copilot Claude Sonnet 4.6 (1x)",
+      "cooldownMinutes": 10
+    },
+    {
+      "provider": "github-copilot",
+      "model": "gpt-5.4",
+      "priority": 14,
+      "label": "Copilot GPT-5.4 (1x)",
+      "cooldownMinutes": 10
+    },
+    {
+      "provider": "github-copilot",
+      "model": "gemini-2.5-pro",
+      "priority": 15,
+      "label": "Copilot Gemini 2.5 Pro (1x)",
+      "cooldownMinutes": 10
+    },
+    {
+      "provider": "github-copilot",
+      "model": "gpt-5.2-codex",
+      "priority": 16,
+      "label": "Copilot GPT-5.2 Codex (1x)",
+      "cooldownMinutes": 10
+    },
+
+    {
+      "_group": "GitHub Copilot Pro+ — expensive, 3x multiplier (~500 req/month). Route here only for critical tasks.",
+      "provider": "github-copilot",
+      "model": "claude-opus-4.6",
+      "priority": 17,
+      "label": "Copilot Claude Opus 4.6 (3x)",
+      "cooldownMinutes": 30
+    },
+
+    {
+      "_group": "OpenRouter — free preview models (no API key needed)",
+      "provider": "openrouter",
+      "model": "meta-llama/llama-3.1-8b-instruct",
+      "priority": 18,
+      "label": "OpenRouter Llama 3.1 8B (free preview)",
+      "cooldownMinutes": 60
+    },
+    {
+      "provider": "openrouter",
+      "model": "google/gemma-2-9b-instruct",
+      "priority": 19,
+      "label": "OpenRouter Gemma 2 9B (free preview)",
+      "cooldownMinutes": 60
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen-2.5-7b-instruct",
+      "priority": 20,
+      "label": "OpenRouter Qwen 2.5 7B (free preview)",
+      "cooldownMinutes": 60
+    },
+    {
+      "provider": "openrouter",
+      "model": "microsoft/phi-3-mini-128k-instruct",
+      "priority": 21,
+      "label": "OpenRouter Phi-3 Mini (free preview)",
+      "cooldownMinutes": 60
+    },
+    {
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-chat",
+      "priority": 22,
+      "label": "OpenRouter DeepSeek Chat (free preview)",
+      "cooldownMinutes": 60
+    },
+
+    {
+      "_group": "Free external providers — groq and google free tier",
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "priority": 23,
+      "label": "Groq LLaMA 3.3 70B (free)",
+      "cooldownMinutes": 5
+    },
+    {
+      "provider": "groq",
+      "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+      "priority": 24,
+      "label": "Groq LLaMA-4 Maverick (free)",
+      "cooldownMinutes": 5
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2.5-flash",
+      "priority": 25,
+      "label": "Google Gemini 2.5 Flash (free tier)",
+      "cooldownMinutes": 10
+    }
+  ],
+
+  "defaultCooldownMinutes": 30,
+  "autoRequeue": true,
+  "autoReturnToPreferred": true,
+  "maxRequeueAttempts": 3
+}

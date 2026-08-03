@@ -62,7 +62,7 @@ mod stream_splitter; // Stream splitting for concurrent RPC operations
 pub mod config;
 //pub mod client;
 //pub mod server;
-//pub mod rpc;
+pub mod rpc;
 
 // Benchmark suite module
 #[cfg(feature = "benchmark-suite")]
@@ -154,7 +154,7 @@ pub use stream_splitter::{SplitStream, Splittable, StreamReader, StreamWriter}; 
                                                                                 //pub use metrics::{Metrics, Operation};
                                                                                 //pub use client::{QuicClient, QuicConnection};
                                                                                 //pub use server::{QuicServer, QuicListener, MessageHandler, EchoHandler, run_echo_server, run_server_with_handler};
-                                                                                //pub use rpc::{RpcService, RpcServer, RpcClient, PooledRpcClient, RpcConnectionPool, RpcError, RpcResult};
+                                                                                pub use rpc::{RpcService, RpcServer, RpcClient, PooledRpcClient, RpcConnectionPool, RpcError, RpcResult, RpcContext, RpcStreamSink, RpcStreamSource};
 
 // Re-export optimized components for high-performance use cases
 pub use optimizations::{benchmark_system, enable_high_performance, enable_maximum_performance};

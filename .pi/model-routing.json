@@ -1,0 +1,98 @@
+{
+  "_description": "Routes dispatched subagent tasks to model tiers. Priority numbers reference entries in .pi/failover.json.",
+
+  "_priority_map": {
+    "1":  "z.ai GLM-5.1",
+    "2":  "z.ai GLM-5",
+    "3":  "z.ai GLM-5 Turbo",
+    "4":  "z.ai GLM-4.7",
+    "5":  "z.ai GLM-4.7 Flash",
+    "6":  "Copilot GPT-4.1 (free ∞)",
+    "7":  "Copilot GPT-4o (free ∞)",
+    "8":  "Copilot GPT-5 mini (free ∞)",
+    "9":  "Copilot Grok Code Fast 1 (0.25x)",
+    "10": "Copilot Claude Haiku 4.5 (0.33x)",
+    "11": "Copilot Gemini 3 Flash (0.33x)",
+    "12": "Copilot GPT-5.4 mini (0.33x)",
+    "13": "Copilot Claude Sonnet 4.6 (1x)",
+    "14": "Copilot GPT-5.4 (1x)",
+    "15": "Copilot Gemini 2.5 Pro (1x)",
+    "16": "Copilot GPT-5.2 Codex (1x)",
+    "17": "Copilot Claude Opus 4.6 (3x — expensive, critical only)",
+    "18": "Groq LLaMA 3.3 70B (free)",
+    "19": "Groq LLaMA-4 Maverick (free)",
+    "20": "Google Gemini 2.5 Flash (free tier)"
+  },
+
+  "tier_rules": [
+    {
+      "tier": "critical",
+      "_description": "High-stakes: security, architecture, ADRs, orchestration, complex design decisions. Use z.ai best + Claude Sonnet/Opus.",
+      "task_keywords": [
+        "security", "audit", "threat", "vulnerability", "exploit", "cve",
+        "architect", "architecture", "adr", "decision", "design pattern", "protocol design",
+        "orchestrat", "migration strategy", "schema migration", "breaking change",
+        "crypto", "encryption", "authentication", "authorisation", "authorization", "rbac", "permission",
+        "compliance", "gdpr", "pii", "secret", "key management",
+        "incident", "post-mortem", "root cause"
+      ],
+      "agent_keywords": [
+        "security", "architect", "orchestrat", "strategist", "auditor", "principal",
+        "threat", "compliance", "cryptograph"
+      ]
+    },
+    {
+      "tier": "standard",
+      "_description": "Standard implementation: coding, debugging, testing, code review, API/DB/frontend work. Use z.ai then free Copilot models.",
+      "task_keywords": [
+        "implement", "feature", "refactor", "fix", "bug", "patch", "debug",
+        "rust", "typescript", "javascript", "python", "go",
+        "frontend", "backend", "api", "endpoint", "handler", "middleware", "service",
+        "database", "sql", "migration", "schema", "query", "index",
+        "test", "spec", "bdd", "tdd", "coverage", "assertion",
+        "review", "pr", "pull request", "diff",
+        "svelte", "react", "vue", "component", "ui component",
+        "devops", "ci", "cd", "pipeline", "deploy", "container", "docker", "nix",
+        "ssh", "git", "lfs", "webhook", "build"
+      ],
+      "agent_keywords": [
+        "rust", "coder", "developer", "engineer", "tester", "reviewer",
+        "frontend", "backend", "database", "devops", "fullstack",
+        "embedded", "systems", "compiler", "runtime"
+      ]
+    },
+    {
+      "tier": "lightweight",
+      "_description": "Simple tasks: documentation, formatting, renaming, dependency bumps, scaffolding, summaries. Use free models first.",
+      "task_keywords": [
+        "doc", "docs", "documentation", "comment", "changelog",
+        "format", "lint", "tidy", "cleanup",
+        "rename", "stub", "scaffold", "boilerplate", "template",
+        "research", "survey", "list", "summarize", "summary", "readme",
+        "bump", "update deps", "version bump", "dependency",
+        "typo", "spelling", "whitespace"
+      ],
+      "agent_keywords": [
+        "documenter", "writer", "researcher", "scribe", "editor"
+      ]
+    }
+  ],
+
+  "tier_priorities": {
+    "critical": {
+      "_comment": "z.ai flagships first → Copilot Claude Sonnet (best external coder) → Copilot Opus (last resort, 3x) → free Copilot GPT models as emergency fallback",
+      "prefer":   [1, 2, 13, 17],
+      "fallback":  [3, 4, 14, 15, 16, 6, 7, 5, 8, 12, 18, 19, 20]
+    },
+    "standard": {
+      "_comment": "z.ai subscription first → free Copilot models (GPT-4.1/4o are unlimited) → cheap Copilot → free external",
+      "prefer":   [1, 2, 3, 6, 7],
+      "fallback":  [4, 5, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 15, 16]
+    },
+    "lightweight": {
+      "_comment": "Free-first: Copilot free models → fast z.ai flash → cheap Copilot → free external. Never touch 1x or 3x premium for simple work.",
+      "prefer":   [8, 6, 7, 5, 9, 18, 19, 20],
+      "fallback":  [10, 11, 12, 4, 3, 2, 1, 13, 14]
+    }
+  }
+}

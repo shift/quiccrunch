@@ -91,6 +91,8 @@ pub struct WorkerConfig {
     pub max_udp_payload_size: usize,
     pub enable_early_data: bool,
     pub application_protocols: Vec<Vec<u8>>,
+    pub verify_cert: bool,
+    pub ca_cert_file: Option<String>,
 }
 
 impl Default for WorkerConfig {
@@ -105,6 +107,8 @@ impl Default for WorkerConfig {
             max_udp_payload_size: 1350,
             enable_early_data: false,
             application_protocols: vec![b"h3".to_vec()],
+            verify_cert: true,
+            ca_cert_file: None,
         }
     }
 }
