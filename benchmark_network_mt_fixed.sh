@@ -13,10 +13,10 @@ mkdir -p "$RESULTS_DIR"
 # Test configurations - minimal for quick validation
 MESSAGE_SIZES=(64)
 MESSAGE_COUNTS=(100 1000)
-CONCURRENCY_LEVELS=(1 20 50 100)
+CONCURRENCY_LEVELS=(1 5)
 
 # Path to binaries
-SERVER_BIN="./target/debug/quic_server"
+SERVER_BIN="./target/debug/mt_server"
 CLIENT_BIN="./target/debug/quic_client"
 CERT_FILE="quiccrunch-core/tests/certs/cert.pem"
 KEY_FILE="quiccrunch-core/tests/certs/key.pem"

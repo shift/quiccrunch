@@ -1,4 +1,4 @@
-use quiccrunch_core::TlsConfig;
+use tquic::TlsConfig;
 use rcgen::{
     date_time_ymd, Certificate, CertificateParams, DistinguishedName, DnType,
     PKCS_ECDSA_P256_SHA256,

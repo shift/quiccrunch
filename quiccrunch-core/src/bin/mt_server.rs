@@ -1,9 +1,9 @@
-use quiccrunch_core::transport::worker_pool::TquicWorkerPool;
-use quiccrunch_core::transport::messages::WorkerConfig;
+use quiccrunch_core::transport::adapter::{TquicServer, TquicConnection};
+use quiccrunch_core::TransportError;
 use std::time::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 use std::io::Write;
 
 #[tokio::main]
@@ -39,72 +39,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         4
     };
 
-    log::info!("Starting Multi-threaded QUIC server (TquicWorkerPool)");
+    log::info!("Starting Multi-threaded QUIC server (single Endpoint + worker pool)");
     log::info!("Address: {}", addr);
     log::info!("Workers: {}", worker_count);
 
     let bind_addr: std::net::SocketAddr = addr.parse()?;
     
-    let base_config = WorkerConfig {
-        worker_id: 0,
-        bind_addr,
-        is_server: true,
-        cert_file: Some(cert_file),
-        key_file: Some(key_file),
-        max_idle_timeout: Duration::from_secs(30),
-        max_udp_payload_size: 65527,
-        enable_early_data: false,
-        application_protocols: vec![b"h3".to_vec(), b"http/0.9".to_vec()],
-        verify_cert: true,
-        ca_cert_file: None,
-    };
-
-    let pool = Arc::new(TquicWorkerPool::new(worker_count, base_config)?);
+    // Create the server
+    let server = TquicServer::new(bind_addr, cert_file, key_file, Some(1)).await?;
+    let mut listener = server.listen(addr).await?;
     
-    log::info!("Worker pool created with {} workers", worker_count);
     log::info!("Server listening on {}", addr);
 
-    let connection_counter = Arc::new(AtomicU64::new(0));
-
-    loop {
-        // Use accept command on the worker pool
-        let (tx, rx) = oneshot::channel();
-        let cmd = quiccrunch_core::transport::messages::TquicCommand::Accept { response: tx };
-        
-        if let Err(e) = pool.submit_command(cmd).await {
-            log::error!("Failed to submit accept command: {}", e);
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            continue;
-        }
-        
-        match rx.await {
-            Ok(Ok((connection_id, _remote))) => {
-                let conn_id = connection_counter.fetch_add(1, Ordering::Relaxed);
-                log::info!("Connection #{} accepted: worker connection_id={}", conn_id, connection_id);
+    // Channel for distributing connections to workers
+    let (conn_tx, conn_rx) = mpsc::channel::<TquicConnection>(worker_count * 2);
+    let conn_rx = Arc::new(tokio::sync::Mutex::new(conn_rx));
+    
+    // Spawn worker tasks
+    let mut worker_handles = Vec::new();
+    for worker_id in 0..worker_count {
+        let conn_rx = conn_rx.clone();
+        let handle = tokio::spawn(async move {
+            log::info!("Worker {} started", worker_id);
+            loop {
+                let conn = {
+                    let mut rx = conn_rx.lock().await;
+                    match rx.recv().await {
+                        Some(conn) => conn,
+                        None => {
+                            log::info!("Worker {} shutting down (channel closed)", worker_id);
+                            break;
+                        }
+                    }
+                };
                 
-                // Spawn handler for this connection
-                let pool_clone = pool.clone();
-                tokio::spawn(async move {
-                    let mut message_count = 0u64;
-                    let mut total_bytes = 0usize;
+                log::info!("Worker {} handling connection", worker_id);
+                
+                let mut message_count = 0u64;
+                let mut total_bytes = 0usize;
+                
+                // Handle this connection
+                loop {
+                    // Accept a stream from the connection
+                    let mut stream = match conn.accept_stream().await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            log::error!("Worker {}: accept_stream error: {}", worker_id, e);
+                            break;
+                        }
+                    };
+                    
+                    log::info!("Worker {}: stream opened (stream_id={})", worker_id, stream.stream_id);
                     
                     loop {
                         // Receive message
-                        let (tx2, rx2) = oneshot::channel();
-                        let cmd2 = quiccrunch_core::transport::messages::TquicCommand::Receive {
-                            connection_id,
-                            stream_id: 0,
-                            max_length: 8192,
-                            response: tx2,
-                        };
-                        
-                        if let Err(e) = pool_clone.submit_command(cmd2).await {
-                            log::error!("Connection #{}: submit receive failed: {}", conn_id, e);
-                            break;
-                        }
-                        
-                        match rx2.await {
-                            Ok(Ok(data)) => {
+                        match stream.recv().await {
+                            Ok(data) => {
                                 if data.is_empty() {
                                     break;
                                 }
@@ -112,65 +102,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 message_count += 1;
                                 total_bytes += data.len();
                                 
-                                log::trace!("Connection #{}: received {} bytes (message #{})", 
-                                           conn_id, data.len(), message_count);
+                                log::trace!("Worker {}: received {} bytes (message #{})", 
+                                           worker_id, data.len(), message_count);
                                 
                                 let response = format!("Echo: {}", String::from_utf8_lossy(&data));
-                                let (tx3, rx3) = oneshot::channel();
-                                let cmd3 = quiccrunch_core::transport::messages::TquicCommand::Send {
-                                    connection_id,
-                                    stream_id: 0,
-                                    data: response.into_bytes(),
-                                    fin: false,
-                                    response: tx3,
-                                };
-                                
-                                if let Err(e) = pool_clone.submit_command(cmd3).await {
-                                    log::error!("Connection #{}: submit send failed: {}", conn_id, e);
+                                if let Err(e) = stream.send(response.as_bytes(), false).await {
+                                    log::error!("Worker {}: send error: {}", worker_id, e);
                                     break;
                                 }
-                                
-                                match rx3.await {
-                                    Ok(Ok(_)) => {}
-                                    Ok(Err(e)) => {
-                                        log::error!("Connection #{}: send error: {}", conn_id, e);
-                                        break;
-                                    }
-                                    Err(_) => {
-                                        log::error!("Connection #{}: send response channel closed", conn_id);
-                                        break;
-                                    }
-                                }
                             }
-                            Ok(Err(e)) => {
-                                log::error!("Connection #{}: receive error: {}", conn_id, e);
-                                break;
-                            }
-                            Err(_) => {
-                                log::error!("Connection #{}: receive response channel closed", conn_id);
+                            Err(e) => {
+                                log::error!("Worker {}: receive error: {}", worker_id, e);
                                 break;
                             }
                         }
                     }
                     
-                    log::info!("Connection #{}: processed {} messages, {} bytes total", 
-                               conn_id, message_count, total_bytes);
-                    
-                    // Close connection
-                    let cmd_close = quiccrunch_core::transport::messages::TquicCommand::CloseConnection {
-                        connection_id,
-                        error_code: 0,
-                        reason: b"done".to_vec(),
-                    };
-                    let _ = pool_clone.submit_command(cmd_close).await;
-                });
+                    // Close the stream
+                    if let Err(e) = stream.close().await {
+                        log::error!("Worker {}: stream close error: {}", worker_id, e);
+                    }
+                }
+                
+                log::info!("Worker {} finished connection ({} messages, {} bytes)", 
+                          worker_id, message_count, total_bytes);
             }
-            Ok(Err(e)) => {
-                log::debug!("Accept returned error (no pending connections): {}", e);
-                tokio::time::sleep(Duration::from_millis(10)).await;
+        });
+        worker_handles.push(handle);
+    }
+    
+    log::info!("Worker pool started with {} workers", worker_count);
+    
+    log::info!("Server listening on {}", addr);
+
+    let connection_counter = Arc::new(AtomicU64::new(0));
+
+    loop {
+        match listener.accept().await {
+            Ok(connection) => {
+                let conn_id = connection_counter.fetch_add(1, Ordering::Relaxed);
+                log::info!("Connection #{} accepted", conn_id);
+                
+                // Send connection to worker pool
+                if let Err(e) = conn_tx.send(connection).await {
+                    log::error!("Failed to send connection to worker pool: {}", e);
+                }
             }
-            Err(_) => {
-                log::error!("Accept response channel closed");
+            Err(e) => {
+                log::error!("Accept error: {}", e);
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
