@@ -181,6 +181,7 @@ pub mod codegen;
 pub mod retry;
 pub mod service;
 pub mod error;
+pub mod reflection;
 // pub mod discovery; // Temporarily disabled
 
 #[cfg(feature = "auth")]
