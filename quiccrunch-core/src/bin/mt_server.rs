@@ -1,3 +1,9 @@
+//! High-performance multi-threaded QUIC echo server
+//! 
+//! Uses multiple streams per connection for parallel message processing
+//! Each stream handles messages independently, allowing the server to
+//! process multiple messages concurrently per connection.
+
 use quiccrunch_core::transport::adapter::{TquicServer, TquicConnection};
 use quiccrunch_core::TransportError;
 use std::time::Duration;
@@ -75,10 +81,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 log::info!("Worker {} handling connection", worker_id);
                 
-                let mut message_count = 0u64;
-                let mut total_bytes = 0usize;
+                let mut stream_handles = Vec::new();
                 
-                // Handle this connection
+                // Handle this connection with multiple concurrent streams
                 loop {
                     // Accept a stream from the connection
                     let mut stream = match conn.accept_stream().await {
@@ -91,68 +96,84 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     log::info!("Worker {}: stream opened (stream_id={})", worker_id, stream.stream_id);
                     
-                    // Buffer for accumulating data from the stream
-                    let mut recv_buffer = Vec::new();
-                    
-                    loop {
-                        // Receive data from the stream
-                        match stream.recv().await {
-                            Ok(data) => {
-                                if data.is_empty() {
-                                    break;
-                                }
-                                
-                                recv_buffer.extend_from_slice(&data);
-                                
-                                // Process all complete length-prefixed messages in the buffer
-                                while recv_buffer.len() >= 4 {
-                                    let msg_len = u32::from_be_bytes([
-                                        recv_buffer[0], recv_buffer[1],
-                                        recv_buffer[2], recv_buffer[3]
-                                    ]) as usize;
-                                    
-                                    if recv_buffer.len() < 4 + msg_len {
-                                        break; // Wait for more data
-                                    }
-                                    
-                                    // Extract the message data
-                                    let msg_data = &recv_buffer[4..4 + msg_len];
-                                    message_count += 1;
-                                    total_bytes += msg_len;
-                                    
-                                    log::trace!("Worker {}: received {} bytes (message #{})",
-                                               worker_id, msg_len, message_count);
-                                    
-                                    // Echo back the same length-prefixed message
-                                    let mut response = Vec::with_capacity(4 + msg_len);
-                                    response.extend_from_slice(&(msg_len as u32).to_be_bytes());
-                                    response.extend_from_slice(msg_data);
-                                    let response = bytes::Bytes::from(response);
-                                    
-                                    if let Err(e) = stream.send_bytes(response, false).await {
-                                        log::error!("Worker {}: send error: {}", worker_id, e);
+                    // Spawn a task to handle this stream concurrently
+                    let stream_id = stream.stream_id;
+                    let handle = tokio::spawn(async move {
+                        let mut recv_buffer = Vec::new();
+                        let mut message_count = 0u64;
+                        let mut total_bytes = 0usize;
+                        
+                        loop {
+                            // Receive data from the stream
+                            match stream.recv().await {
+                                Ok(data) => {
+                                    if data.is_empty() {
                                         break;
                                     }
                                     
-                                    // Remove processed message from buffer
-                                    recv_buffer.drain(..4 + msg_len);
+                                    recv_buffer.extend_from_slice(&data);
+                                    
+                                    // Process all complete length-prefixed messages in the buffer
+                                    while recv_buffer.len() >= 4 {
+                                        let msg_len = u32::from_be_bytes([
+                                            recv_buffer[0], recv_buffer[1],
+                                            recv_buffer[2], recv_buffer[3]
+                                        ]) as usize;
+                                        
+                                        if recv_buffer.len() < 4 + msg_len {
+                                            break; // Wait for more data
+                                        }
+                                        
+                                        // Extract the message data
+                                        let msg_data = &recv_buffer[4..4 + msg_len];
+                                        message_count += 1;
+                                        total_bytes += msg_len;
+                                        
+                                        // Echo back the same length-prefixed message
+                                        let mut response = Vec::with_capacity(4 + msg_len);
+                                        response.extend_from_slice(&(msg_len as u32).to_be_bytes());
+                                        response.extend_from_slice(msg_data);
+                                        let response = bytes::Bytes::from(response);
+                                        
+                                        if let Err(e) = stream.send_bytes(response, false).await {
+                                            log::error!("Stream {}: send error: {}", stream_id, e);
+                                            break;
+                                        }
+                                        
+                                        // Remove processed message from buffer
+                                        recv_buffer.drain(..4 + msg_len);
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Stream {}: receive error: {}", stream_id, e);
+                                    break;
                                 }
                             }
-                            Err(e) => {
-                                log::error!("Worker {}: receive error: {}", worker_id, e);
-                                break;
-                            }
                         }
-                    }
-                    
-                    // Close the stream
-                    if let Err(e) = stream.close().await {
-                        log::error!("Worker {}: stream close error: {}", worker_id, e);
+                        
+                        // Close the stream
+                        if let Err(e) = stream.close().await {
+                            log::error!("Stream {}: close error: {}", stream_id, e);
+                        }
+                        
+                        (message_count, total_bytes)
+                    });
+                    stream_handles.push((stream_id, handle));
+                }
+                
+                // Wait for all stream tasks to complete
+                for (stream_id, handle) in stream_handles {
+                    match handle.await {
+                        Ok((count, bytes)) => {
+                            log::info!("Stream {} finished ({} messages, {} bytes)", stream_id, count, bytes);
+                        }
+                        Err(e) => {
+                            log::error!("Stream {} task failed: {}", stream_id, e);
+                        }
                     }
                 }
                 
-                log::info!("Worker {} finished connection ({} messages, {} bytes)", 
-                          worker_id, message_count, total_bytes);
+                log::info!("Worker {} finished connection", worker_id);
             }
         });
         worker_handles.push(handle);
