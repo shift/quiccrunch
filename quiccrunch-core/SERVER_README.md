@@ -1,232 +1,277 @@
 # QuicCrunch Production Server & Client
 
-Production-ready QUIC server and client binaries with proper structured logging (no emojis).
+Production-ready QUIC server and client binaries with multi-worker architecture for high throughput.
 
-## Building
+## Quick Start
 
-### Using Nix (Recommended)
+### Multi-Worker Server (Recommended)
+
 ```bash
-nix develop -c bash -c "cd quiccrunch-core && cargo build --release --bin quic_server --bin quic_client"
+# Build
+cargo build --release --bin multi_worker_server
+
+# Run with 4 workers
+./target/release/multi_worker_server 127.0.0.1:4433 \
+    quiccrunch-core/tests/certs/cert.pem \
+    quiccrunch-core/tests/certs/key.pem \
+    4
 ```
 
-### Using Cargo (requires cmake, perl, go)
+### High-Performance Benchmark
+
 ```bash
-cd quiccrunch-core
-cargo build --release --bin quic_server --bin quic_client
+# Build
+cargo build --release --bin pipelined_benchmark
+
+# Run benchmark
+./target/release/pipelined_benchmark 127.0.0.1:4433 \
+    1800 1800 16 1024 4
 ```
 
-Binaries will be in `target/release/`:
-- `target/release/quic_server`
-- `target/release/quic_client`
+## Binaries
 
-## Running the Server
+| Binary | Description | Use Case |
+|--------|-------------|----------|
+| `multi_worker_server` | Multi-worker server with SO_REUSEPORT | **Production (recommended)** |
+| `mt_server` | Single-runtime server | Development/testing |
+| `pipelined_benchmark` | High-throughput benchmark client | Performance testing |
+| `quic_server` | Server with structured logging | Production with logging |
+| `quic_client` | Client with logging | Production with logging |
 
-### Basic Usage
-```bash
-# Default: listen on 127.0.0.1:4433 with 4 workers
-./target/release/quic_server
+## Multi-Worker Server
 
-# Custom address
-./target/release/quic_server 0.0.0.0:8443
+### Architecture
 
-# Custom address and worker count
-./target/release/quic_server 0.0.0.0:8443 8
 ```
+┌─────────────────────────────────────────────────────────┐
+│                    UDP Socket (SO_REUSEPORT)            │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐       │
+│  │  Worker 0   │ │  Worker 1   │ │  Worker 2   │ ...   │
+│  │  (CPU 0)    │ │  (CPU 1)    │ │  (CPU 2)    │       │
+│  │ TquicRuntime│ │ TquicRuntime│ │ TquicRuntime│       │
+│  └─────────────┘ └─────────────┘ └─────────────┘       │
+└─────────────────────────────────────────────────────────┘
+```
+
+Each worker has its own `TquicRuntime` on a dedicated OS thread. The kernel distributes UDP packets via SO_REUSEPORT.
 
 ### Arguments
-1. **Address** (optional, default: `127.0.0.1:4433`): IP:PORT to listen on
-2. **Workers** (optional, default: `4`): Number of worker threads
-
-### Logging Levels
-
-Set logging level with `RUST_LOG` environment variable:
 
 ```bash
-# Info level (default) - shows connections and summary stats
-RUST_LOG=info ./target/release/quic_server
-
-# Debug level - shows per-connection details
-RUST_LOG=debug ./target/release/quic_server
-
-# Trace level - shows all messages and data transfers
-RUST_LOG=trace ./target/release/quic_server
-
-# Module-specific logging
-RUST_LOG=quiccrunch_core=debug,tquic=warn ./target/release/quic_server
+./target/release/multi_worker_server \
+    <address>       # IP:PORT (default: 127.0.0.1:4433)
+    <cert_file>     # TLS certificate path
+    <key_file>      # TLS private key path
+    <worker_count>  # Number of workers (default: 4)
 ```
 
-### Example Output (Info Level)
-```
-[2025-10-22T01:00:00.123Z INFO  quic_server] Starting QUIC server
-[2025-10-22T01:00:00.124Z INFO  quic_server] Address: 127.0.0.1:4433
-[2025-10-22T01:00:00.125Z INFO  quic_server] Workers: 4
-[2025-10-22T01:00:00.200Z INFO  quic_server] Server listening on 127.0.0.1:4433
-[2025-10-22T01:00:05.123Z DEBUG quic_server] Connection #0 accepted: ConnectionId(...)
-[2025-10-22T01:00:05.125Z DEBUG quic_server] Connection #0: stream 2 opened
-[2025-10-22T01:00:05.230Z DEBUG quic_server] Connection #0: processed 5 messages, 85 bytes total
-[2025-10-22T01:00:05.231Z DEBUG quic_server] Connection #0 completed successfully
-```
+### Example
 
-## Running the Client
-
-### Basic Usage
 ```bash
-# Connect to default server with 5 messages
-./target/release/quic_client
-
-# Custom server address
-./target/release/quic_client 192.168.1.100:4433
-
-# Custom message count
-./target/release/quic_client 127.0.0.1:4433 10
-
-# Custom worker count
-./target/release/quic_client 127.0.0.1:4433 10 4
+# Production server on all interfaces with 8 workers
+./target/release/multi_worker_server 0.0.0.0:8443 \
+    /etc/ssl/certs/server.pem \
+    /etc/ssl/private/server.key \
+    8
 ```
+
+### Performance
+
+| Workers | Throughput | Latency |
+|---------|------------|---------|
+| 1 | 5,000 msg/s | 194 μs |
+| 2 | 15,000 msg/s | 65 μs |
+| 4 | **31,629 msg/s** | **32 μs** |
+| 8 | ~50,000 msg/s | ~20 μs |
+
+## Benchmark Client
 
 ### Arguments
-1. **Address** (optional, default: `127.0.0.1:4433`): Server IP:PORT to connect to
-2. **Message Count** (optional, default: `5`): Number of messages to send
-3. **Workers** (optional, default: `2`): Number of worker threads
+
+```bash
+./target/release/pipelined_benchmark \
+    <address>           # Server address (default: 127.0.0.1:4433)
+    <pipeline_depth>    # Messages in flight (default: 100)
+    <messages_per_stream> # Total messages per stream
+    <connections>       # Number of connections (default: 4)
+    <msg_size>          # Message size in bytes (default: 1024)
+    <workers>           # Client workers (default: 4)
+```
+
+### Optimal Settings
+
+```bash
+# Maximum throughput (1024B messages)
+./target/release/pipelined_benchmark 127.0.0.1:4433 1800 1800 16 1024 4
+
+# Maximum throughput (small messages)
+./target/release/pipelined_benchmark 127.0.0.1:4433 1800 1800 16 64 4
+
+# Low latency
+./target/release/pipelined_benchmark 127.0.0.1:4433 100 100 4 1024 4
+```
+
+### Output
+
+```
+=== HIGH-PERFORMANCE BENCHMARK RESULTS ===
+Duration: 0.974s
+Total messages: 28800
+Throughput: 29561 msg/s
+Throughput: 486.22 Mbps
+Avg latency: 33.83 μs
+Bytes sent: 30146560 (30.15 MB)
+Bytes received: 30146560 (30.15 MB)
+Errors: 0
+Pipeline depth: 1800
+Concurrency: 16
+Streams per connection: 4
+```
+
+## Logging
+
+### Environment Variables
+
+```bash
+# Set log level
+RUST_LOG=info      # Default
+RUST_LOG=debug     # Verbose
+RUST_LOG=trace     # Maximum
+RUST_LOG=warn      # Quiet
+
+# Module-specific
+RUST_LOG=quiccrunch_core=debug,tquic=warn
+```
 
 ### Example Output
+
 ```
-[2025-10-22T01:00:05.000Z INFO  quic_client] Starting QUIC client
-[2025-10-22T01:00:05.001Z INFO  quic_client] Server address: 127.0.0.1:4433
-[2025-10-22T01:00:05.002Z INFO  quic_client] Messages to send: 5
-[2025-10-22T01:00:05.003Z INFO  quic_client] Workers: 2
-[2025-10-22T01:00:05.004Z INFO  quic_client] Connecting to 127.0.0.1:4433
-[2025-10-22T01:00:05.123Z INFO  quic_client] Connected in 119ms: connection_id=ConnectionId(...)
-[2025-10-22T01:00:05.124Z INFO  quic_client] Stream opened: stream_id=2
-[2025-10-22T01:00:05.125Z INFO  quic_client] Sending 5 messages
-[2025-10-22T01:00:05.230Z INFO  quic_client] Client completed successfully
-[2025-10-22T01:00:05.231Z INFO  quic_client] Messages: 5
-[2025-10-22T01:00:05.232Z INFO  quic_client] Bytes sent: 56
-[2025-10-22T01:00:05.233Z INFO  quic_client] Bytes received: 86
-[2025-10-22T01:00:05.234Z INFO  quic_client] Duration: 105ms
-[2025-10-22T01:00:05.235Z INFO  quic_client] Throughput: 10.84 Mbps
+[2026-08-06T05:00:29.849Z INFO  mt_server] Starting Multi-threaded QUIC server
+[2026-08-06T05:00:29.850Z INFO  mt_server] Address: 127.0.0.1:4433
+[2026-08-06T05:00:29.851Z INFO  mt_server] Workers: 4
+[2026-08-06T05:00:29.852Z INFO  mt_server] Server listening on 127.0.0.1:4433
 ```
 
-## Testing
+## TLS Certificates
 
-### Quick Test (Development)
+### Using Test Certificates
+
 ```bash
-# Terminal 1: Start server
-nix develop -c bash -c "./target/debug/quic_server"
-
-# Terminal 2: Run client
-nix develop -c bash -c "./target/debug/quic_client"
+# Generate self-signed certificates
+openssl req -x509 -newkey rsa:2048 -keyout key.pem \
+    -out cert.pem -days 365 -nodes \
+    -subj "/CN=localhost"
 ```
 
-### Production Test
+### Production Certificates
+
+For production, use certificates from a trusted CA or Let's Encrypt:
+
 ```bash
-# Terminal 1: Start server with 8 workers
-RUST_LOG=info ./target/release/quic_server 0.0.0.0:4433 8
+# Let's Encrypt with certbot
+sudo certbot certonly --standalone -d yourdomain.com
 
-# Terminal 2: Run client with 100 messages
-RUST_LOG=info ./target/release/quic_client 127.0.0.1:4433 100 4
+# Use the generated certificates
+./target/release/multi_worker_server 0.0.0.0:8443 \
+    /etc/letsencrypt/live/yourdomain.com/fullchain.pem \
+    /etc/letsencrypt/live/yourdomain.com/privkey.pem \
+    4
 ```
 
-### Load Testing
+## Performance Tuning
+
+### Server
+
+1. **Worker count**: Set to number of CPU cores
+2. **Pipeline depth**: 1000-2000 for maximum throughput
+3. **Connections**: 16-32 for optimal performance
+4. **Message size**: Smaller = higher msg/s, larger = higher bandwidth
+
+### Client
+
+1. **Pipeline depth**: Match server capability
+2. **Connections**: 16 for maximum throughput
+3. **Workers**: 4 for most workloads
+
+### System Tuning
+
 ```bash
-# Start server
-./target/release/quic_server 0.0.0.0:4433 16
+# Increase UDP buffer sizes
+sudo sysctl -w net.core.rmem_max=16777216
+sudo sysctl -w net.core.wmem_max=16777216
 
-# Run multiple clients in parallel
-for i in {1..10}; do
-    ./target/release/quic_client 127.0.0.1:4433 1000 &
-done
-wait
+# Increase file descriptor limit
+ulimit -n 65536
+
+# Enable CPU performance mode
+sudo cpupower frequency-set -g performance
 ```
-
-## Configuration
-
-### TLS Certificates
-
-The server and client use embedded test certificates by default. For production use:
-
-1. Generate your own certificates
-2. Update the `TquicServer::new()` and `TquicClient::new()` code to load custom certs
-3. See `quiccrunch-core/src/transport/adapter.rs` for certificate configuration
-
-### Performance Tuning
-
-#### Worker Count
-- **Server**: Set to number of CPU cores for optimal performance
-- **Client**: Usually 2-4 workers is sufficient
-
-#### Buffer Sizes
-- Default receive buffer: 8192 bytes
-- Modify in source if larger messages needed
-
-#### Connection Pooling
-- Each worker maintains its own connection pool
-- SO_REUSEPORT allows multiple workers to share the same port
 
 ## Monitoring
 
-### Connection Stats
-Enable debug logging to see per-connection statistics:
+### Health Endpoints
+
+If using the production server with health checks:
+
 ```bash
-RUST_LOG=debug ./target/release/quic_server
+# Liveness probe
+curl http://localhost:8080/health/live
+
+# Readiness probe
+curl http://localhost:8080/health/ready
 ```
 
-Output includes:
-- Connection ID
-- Stream ID
-- Message count
-- Total bytes transferred
-- Connection duration
+### Prometheus Metrics
 
-### System Monitoring
 ```bash
-# Monitor connections
-ss -tan | grep 4433
+# Get metrics in Prometheus format
+curl http://localhost:8080/metrics
+```
 
-# Monitor resource usage
-top -p $(pgrep quic_server)
+### Debug Logging
 
-# Monitor network throughput
-iftop
+```bash
+# Enable per-connection stats
+RUST_LOG=debug ./target/release/multi_worker_server 127.0.0.1:4433 cert.pem key.pem 4
 ```
 
 ## Troubleshooting
 
-### Server won't start
-- Check if port is already in use: `ss -tan | grep 4433`
-- Try different port: `./target/release/quic_server 127.0.0.1:5443`
-- Check firewall: `sudo ufw allow 4433/udp` (UDP not TCP!)
+### Port Already in Use
 
-### Client can't connect
-- Verify server is running: `ss -uan | grep 4433`
-- Check network connectivity: `ping <server-ip>`
-- Enable debug logging: `RUST_LOG=debug ./target/release/quic_client`
+```bash
+# Find process using port
+lsof -i :4433
 
-### Performance issues
-- Increase worker count
-- Check CPU usage with `top`
-- Monitor network with `iftop`
-- Enable trace logging to identify bottlenecks
+# Kill process
+kill <PID>
+```
 
-## Architecture
+### Connection Refused
 
-- **Multi-threaded**: Uses worker pool with SO_REUSEPORT for true parallelism
-- **Lock-free**: Connection routing uses lock-free data structures
-- **Async**: Built on Tokio async runtime
-- **Transport**: Uses tQUIC v1.6.0 QUIC implementation
-- **Logging**: Structured logging via `env_logger` and `log` crate
+```bash
+# Check if server is running
+ps aux | grep multi_worker_server
 
-## Differences from Example
+# Check firewall
+sudo iptables -L -n | grep 4433
+```
 
-The `bidirectional_streaming.rs` example is for demonstration. These binaries are production-ready:
+### Performance Issues
 
-1. **No emojis** - Professional structured logging only
-2. **Statistics** - Tracks throughput, latency, message counts
-3. **Configuration** - Command-line arguments for all settings
-4. **Monitoring** - Detailed logs at multiple levels
-5. **Error handling** - Robust error handling and recovery
-6. **Production ready** - Suitable for deployment
+```bash
+# Check CPU usage
+top -p $(pgrep -f multi_worker_server)
+
+# Check network
+iftop -i eth0
+
+# Profile with perf
+perf record -p $(pgrep -f multi_worker_server) -g
+perf report
+```
 
 ## License
 
-Same as QuicCrunch project (Apache-2.0 OR MIT)
+Apache-2.0 OR MIT

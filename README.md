@@ -1,469 +1,203 @@
 # QuicCrunch
 
-A high-performance RPC library combining QUIC transport with Cap'n Proto serialization.
+A high-performance RPC framework built on QUIC transport with multi-worker architecture for extreme throughput.
 
 ## Features
 
-- 🚀 QUIC-based transport with stream multiplexing
-- 📦 Zero-copy message handling
-- 🔒 Built-in TLS security with hardware acceleration
-- ⚡ Low latency and high throughput
-- 🛠 Highly configurable
-- 🔐 Hardware-accelerated cryptography (AES-NI, AVX, SHA-NI)
-
-## Installation
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-quiccrunch = "0.1"
-```
-
-## Quick Start
-
-```rust
-use quiccrunch::{QuicTransport, Transport, TlsConfig};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Generate or load certificates
-    let (ca_cert, ca_key) = generate_ca_cert()?;
-    let (cert, key) = generate_node_cert(&ca_cert, "server1")?;
-    
-    let tls_config = TlsConfig {
-        cert,
-        key,
-        ca_cert,
-    };
-
-    // Create transport
-    let transport = QuicTransport::new(tls_config)?;
-    
-    // Server
-    let mut incoming = transport.listen("127.0.0.1:50051").await?;
-    
-    tokio::spawn(async move {
-        while let Ok(conn) = incoming.accept().await {
-            let mut stream = conn.open_bi().await?;
-            let request = stream.receive_message().await?;
-            stream.send_message(response).await?;
-        }
-    });
-    
-    // Client
-    let conn = transport.connect("127.0.0.1:50051").await?;
-    let mut stream = conn.open_bi().await?;
-    
-    stream.send_message(request).await?;
-    let response = stream.receive_message().await?;
-
-    Ok(())
-}
-```
-
-## API Reference
-
-### Core Types
-
-#### QuicTransport
-
-The main transport implementation that handles QUIC connections.
-
-```rust
-// Create with default configuration
-let transport = QuicTransport::new(tls_config)?;
-
-// Create with custom configuration
-let transport = QuicTransport::with_config(tls_config, transport_config)?;
-```
-
-#### Transport Trait
-
-The core trait defining transport behavior:
-
-```rust
-#[async_trait]
-pub trait Transport {
-    // Connect to a remote endpoint
-    async fn connect(&self, addr: &str) -> Result<Connection>;
-    
-    // Start listening for incoming connections
-    async fn listen(&self, addr: &str) -> Result<Incoming>;
-}
-```
-
-#### Connection
-
-Represents an active QUIC connection:
-
-```rust
-// Open a new bidirectional stream
-let stream = connection.open_bi().await?;
-
-// Get flow control information
-let flow_info = connection.flow_control_status()?;
-println!("RTT: {:?}, Window Size: {}", flow_info.rtt, flow_info.window_size);
-```
-
-#### Incoming
-
-Handles incoming connections:
-
-```rust
-let mut incoming = transport.listen("127.0.0.1:50051").await?;
-
-// Accept new connections
-while let Ok(conn) = incoming.accept().await {
-    // Handle connection
-}
-
-// Get bound address
-let addr = incoming.local_addr()?;
-```
-
-#### QuicStream
-
-Represents a bidirectional QUIC stream:
-
-```rust
-// Send a message
-stream.send_message(bytes::Bytes::from("Hello")).await?;
-
-// Receive a message
-let msg = stream.receive_message().await?;
-```
-
-### Configuration
-
-#### TlsConfig
-
-Configure TLS security:
-
-```rust
-let tls_config = TlsConfig {
-    cert: Certificate,      // Server/client certificate
-    key: PrivateKey,       // Private key
-    ca_cert: Certificate,  // CA certificate for verification
-};
-```
-
-#### Transport Configuration
-
-Fine-tune transport behavior:
-
-```rust
-use quinn::TransportConfig;
-
-let mut config = TransportConfig::default();
-config
-    .max_concurrent_uni_streams(1000_u32.into())
-    .keep_alive_interval(Some(Duration::from_secs(5)))
-    .initial_rtt(Duration::from_millis(100))
-    .initial_window_size(65535)
-    .max_window_size(16_777_215)
-    .receive_window(1_048_576)
-    .send_window(1_048_576);
-
-let transport = QuicTransport::with_config(tls_config, config)?;
-```
-
-### Flow Control
-
-Monitor and manage flow control:
-
-```rust
-let flow_info = connection.flow_control_status()?;
-println!("Connection stats:
-    Bytes in flight: {}
-    Window size: {}
-    RTT: {:?}
-    Congestion events: {}",
-    flow_info.bytes_sent,
-    flow_info.window_size,
-    flow_info.rtt,
-    flow_info.congestion_events
-);
-```
-
-### Best Practices
-
-1. **Connection Management**
-   - Reuse connections when possible
-   - Handle connection errors gracefully
-   - Set appropriate timeouts for your use case
-
-2. **Stream Usage**
-   - Use multiple streams for concurrent operations
-   - Close streams when done to free resources
-   - Handle stream errors independently
-
-3. **Flow Control**
-   - Monitor flow control metrics
-   - Adjust window sizes based on workload
-   - Be mindful of memory usage with large windows
-
-4. **Security**
-   - Use proper certificate validation
-   - Rotate certificates regularly
-   - Keep TLS configuration up to date
-
-5. **Performance**
-   - Batch messages when possible
-   - Use appropriate buffer sizes
-   - Monitor and tune based on metrics
+- 🚀 **Multi-worker architecture** - True parallelism across CPU cores with SO_REUSEPORT
+- 📦 **Zero-copy message handling** - bytes::Bytes throughout the write path
+- 🔒 **Built-in TLS security** - Hardware-accelerated cryptography (AES-NI, AVX)
+- ⚡ **High throughput** - 30,000+ msg/s with 4 CPU cores
+- 🛡️ **Production ready** - Health checks, graceful shutdown, rate limiting
+- 📊 **Observability** - OpenTelemetry/Prometheus metrics, structured logging
+- 🔐 **Authentication** - JWT tokens, RBAC, permission-based access control
 
 ## Performance
 
-QuicCrunch includes several performance optimizations that can be enabled based on your workload:
+| Configuration | Throughput | Latency |
+|--------------|------------|---------|
+| Single worker | 5,000 msg/s | 194 μs |
+| **4 workers (SO_REUSEPORT)** | **31,629 msg/s** | **32 μs** |
 
-### Performance Features
+### Benchmark Results (4 workers, 16 connections)
 
-- **Hardware Crypto Acceleration**: AES-NI and CPU crypto extensions for 2-5x TLS performance improvement
-- **Memory Pool Optimizations**: Thread-local buffer pools that provide significant benefits for medium to large messages (8KB+)
-- **Adaptive Strategy Selection**: Automatically chooses the best optimization approach based on message size
-- **Lock-Free Channels**: High-concurrency channel implementation for multi-stream workloads
-- **Zero-copy message handling**: Where possible to minimize memory allocations
-- **Stream multiplexing**: Avoids head-of-line blocking
+| Message Size | Throughput | Bandwidth |
+|-------------|------------|-----------|
+| 64B | 31,629 msg/s | 34 Mbps |
+| 256B | 30,134 msg/s | 125 Mbps |
+| 1024B | 24,805 msg/s | 408 Mbps |
+| 4096B | 12,926 msg/s | 848 Mbps |
 
-### Build Configurations
+## Quick Start
 
-Enable performance optimizations based on your workload:
+### Multi-Worker Server (Recommended)
 
-```toml
-# Small messages (<8KB) - use defaults
-quiccrunch = { version = "0.1", features = ["backend-tquic"] }
-
-# Medium messages (8KB-64KB) - enable memory pools
-quiccrunch = { version = "0.1", features = ["backend-tquic", "memory-pools"] }
-
-# Large messages (64KB+) - full optimizations
-quiccrunch = { version = "0.1", features = ["backend-tquic", "adaptive-optimizations"] }
-
-# High concurrency workloads - add lock-free channels
-quiccrunch = { version = "0.1", features = ["backend-tquic", "adaptive-optimizations", "lock-free-channels"] }
+```bash
+# Start server with 4 workers
+cargo run --bin multi_worker_server -- 127.0.0.1:4433 \
+    quiccrunch-core/tests/certs/cert.pem \
+    quiccrunch-core/tests/certs/key.pem \
+    4
 ```
 
-### Performance Characteristics
+### Run Benchmark
 
-Based on actual testing:
-- **Memory pools**: 9-10% improvement for medium to large messages
-- **Adaptive strategies**: Automatic optimization selection prevents performance regressions
-- **tQUIC backend**: ~3x better performance than Quinn backend in most scenarios
+```bash
+# 16 connections, pipeline depth 1800, 1024B messages
+cargo run --bin pipelined_benchmark -- 127.0.0.1:4433 \
+    1800 1800 16 1024 4
+```
 
-**Note**: SIMD optimizations are currently experimental and may not provide benefits in all scenarios.
+## Architecture
 
-### Hardware Crypto Acceleration
+### Multi-Worker with SO_REUSEPORT
 
-QuicCrunch provides automatic hardware-accelerated cryptography using CPU extensions like AES-NI, AVX, and SHA-NI for significantly improved TLS performance.
+```
+┌─────────────────────────────────────────────────────────┐
+│                    UDP Socket (SO_REUSEPORT)            │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐       │
+│  │  Worker 0   │ │  Worker 1   │ │  Worker 2   │ ...   │
+│  │  (CPU 0)    │ │  (CPU 1)    │ │  (CPU 2)    │       │
+│  │ TquicRuntime│ │ TquicRuntime│ │ TquicRuntime│       │
+│  └─────────────┘ └─────────────┘ └─────────────┘       │
+└─────────────────────────────────────────────────────────┘
+```
 
-#### Features
-- **Automatic Detection**: Runtime detection of available hardware crypto capabilities
-- **AES-NI Acceleration**: Hardware-accelerated AES-GCM encryption/decryption
-- **Batch Processing**: Efficient bulk crypto operations for high-throughput scenarios
-- **Graceful Fallback**: Automatic fallback to software crypto when hardware acceleration unavailable
-- **Cipher Suite Optimization**: Prioritizes hardware-accelerated cipher suites (AES-256-GCM, AES-128-GCM)
+Each worker has its own `TquicRuntime` running on its own OS thread. The kernel distributes UDP packets across workers via SO_REUSEPORT.
 
-#### Configuration
+### RPC Framework
 
 ```rust
-use quiccrunch::crypto_accel::{HardwareCrypto, CryptoAccelConfig};
+use quiccrunch_core::rpc::service::{ServiceDefinition, MethodDefinition, StreamingType};
 
-// Create with default configuration (hardware acceleration enabled)
-let crypto = HardwareCrypto::new(CryptoAccelConfig::default())?;
-
-// Custom configuration
-let config = CryptoAccelConfig {
-    enable_aes_ni: true,
-    enable_batch_crypto: true,
-    batch_size: 64,
-    enable_hw_detection: true,
-};
-
-// Enable hardware acceleration on transport
-let transport = QuicTransport::with_crypto_acceleration(tls_config, config)?;
+// Define a service
+let mut service = ServiceDefinition::new(1, "Calculator");
+service.add_method(MethodDefinition {
+    id: 1,
+    name: "Add".to_string(),
+    streaming_type: StreamingType::Unary,
+    request_schema: None,
+    response_schema: None,
+});
 ```
 
-#### Performance Benefits
-- **2-5x improvement** in TLS handshake and data encryption performance
-- **Reduced CPU usage** for cryptographic operations
-- **Better throughput** for TLS-encrypted QUIC connections
-- **Hardware-specific optimizations** for supported CPU architectures
-
-#### Hardware Requirements
-- **AES-NI**: Intel Westmere (2010+) or AMD Bulldozer (2011+) and newer
-- **AVX**: Intel Sandy Bridge (2011+) or AMD Bulldozer (2011+) and newer
-- **SHA-NI**: Intel Goldmont (2016+) or AMD Zen (2017+) and newer
-- **Automatic detection** with software fallback on unsupported hardware
-
-#### Usage Examples
+### Authentication
 
 ```rust
-// Single encryption/decryption
-let plaintext = b"Hello, World!";
-let key = b"0123456789abcdef"; // 16 bytes for AES-128
-let ciphertext = crypto.encrypt(plaintext, key)?;
-let decrypted = crypto.decrypt(&ciphertext, key)?;
-assert_eq!(plaintext, &decrypted[..]);
+use quiccrunch_core::interceptor::auth::{AuthInterceptor, Claims};
 
-// Batch operations for high throughput
-let messages = vec![b"Message 1", b"Message 2", b"Message 3"];
-let keys = vec![key; messages.len()];
-let ciphertexts = crypto.encrypt_batch(&messages, key)?;
-let decrypted_batch = crypto.decrypt_batch(&ciphertexts, key)?;
+// Create auth interceptor with JWT
+let auth = AuthInterceptor::with_secret("secret-key".to_string());
+
+// Generate token
+let token = auth.generate_token(
+    "user123",
+    vec!["admin".to_string()],
+    vec!["read".to_string(), "write".to_string()],
+    HashMap::new(),
+)?;
+
+// Verify token
+let claims = auth.verify_token(&token)?;
 ```
 
-See `test_crypto_performance.rs` for comprehensive performance benchmarking examples.
+### Rate Limiting
 
-## Security
+```rust
+use quiccrunch_core::rpc::rate_limit::{RateLimitInterceptor, DdosProtectionConfig};
 
-Security is enabled by default:
+// Create rate limiter
+let rate_limiter = RateLimitInterceptor::new(
+    1000,  // requests per second
+    5000,  // burst capacity
+    DdosProtectionConfig::default(),
+);
 
-- TLS 1.3 encryption
-- Certificate-based authentication
-- Built-in certificate generation utilities
-
-## Examples and Containerization
-
-QuicCrunch includes comprehensive examples showing how to build and containerize applications:
-
-- **Calculator Service**: Mathematical RPC service with JSON protocol
-- **Chat Service**: Multi-user chat with rooms and message history
-- **Echo Service**: Simple request/response demonstration
-- **Development Environment**: Complete Docker-based development setup
-- **Integration Tests**: Multi-service testing framework
-- **Performance Benchmarks**: Latency, throughput, and load testing
-
-### Quick Start with Examples
-
-```bash
-# Navigate to examples directory
-cd examples
-
-# Start all example services
-make up
-
-# Test calculator service
-docker-compose exec calculator-server calculator-client --operation add --a 5 --b 3
-
-# Test chat service interactively
-docker-compose run --rm chat-server chat-client --user alice --interactive
-
-# Run integration tests
-make test-integration
-
-# Run performance benchmarks
-make test-performance
+// Check rate limit
+rate_limiter.check_rate_limit("client1", "my_service", 1024).await?;
 ```
 
-See [examples/README.md](examples/README.md) for complete documentation.
+### Metrics
 
-## Testing
+```rust
+use quiccrunch_core::rpc::metrics::RpcMetrics;
 
-Run the test suite:
+let metrics = RpcMetrics::new();
 
-```bash
-nix develop -c cargo test
+// Record request
+metrics.record_request("my_service", "my_method", duration).await;
+
+// Get Prometheus format
+let prometheus = metrics.to_prometheus().await;
 ```
 
-Scaling tests (require sudo and specific hardware) are excluded by default. Opt in with:
+## Binaries
+
+| Binary | Description |
+|--------|-------------|
+| `multi_worker_server` | Multi-worker QUIC server (recommended) |
+| `mt_server` | Single-runtime server (for comparison) |
+| `pipelined_benchmark` | High-performance benchmark client |
+| `quic_server` | Production server with logging |
+| `quic_client` | Production client |
+
+## Configuration
+
+### Environment Variables
 
 ```bash
-sudo -E nix develop -c cargo test --features scaling-tests --test scaling_benchmark -- --test-threads=1 --nocapture
+# Logging
+RUST_LOG=info        # Set log level
+RUST_LOG=debug       # Verbose output
+
+# Server
+RUST_LOG=warn ./target/debug/multi_worker_server 127.0.0.1:4433 cert.pem key.pem 4
 ```
 
-Run benchmarks:
+### Command Line Arguments
 
 ```bash
-nix develop -c cargo bench
+# multi_worker_server: address cert_file key_file worker_count
+./target/debug/multi_worker_server 0.0.0.0:8443 cert.pem key.pem 8
+
+# pipelined_benchmark: address pipeline_depth messages_per_stream connections msg_size workers
+./target/debug/pipelined_benchmark 127.0.0.1:4433 1800 1800 16 1024 4
 ```
 
-### Container-based Testing
+## Features
 
-For comprehensive testing including multi-service integration:
+### Production Infrastructure
+
+- **Health Checks**: `/health/live`, `/health/ready` endpoints
+- **Graceful Shutdown**: Signal handling (SIGTERM, SIGINT) with connection draining
+- **Configuration**: JSON/TOML/YAML config files, environment variables
+- **Structured Logging**: Correlation IDs, JSON-formatted logs
+
+### RPC Framework
+
+- **Service Reflection**: Introspect services and methods at runtime
+- **Authentication**: JWT tokens with RS256/HS256 support
+- **Authorization**: Role-based access control (RBAC)
+- **Rate Limiting**: Token bucket algorithm with per-client limits
+- **DDoS Protection**: Auto-blocking after violations
+- **Metrics**: OpenTelemetry/Prometheus integration
+- **SIMD Parsing**: AVX2-optimized message parsing
+
+## Building
+
+### Using Nix (Recommended)
 
 ```bash
-cd examples
-make test           # Run all tests
-make dev-env        # Start development environment
-make validate       # Validate setup
+nix develop -c bash -c "cargo build --release"
+```
+
+### Using Cargo
+
+```bash
+cargo build --release
 ```
 
 ## License
 
-Licensed under either of:
-
-- Apache License, Version 2.0
-- MIT license
-
-at your option.
-
-## AI Agent Workflow System
-
-QuicCrunch uses an advanced AI Agent Workflow Management System for complex development tasks. This system implements an iterative Implementation → Testing → Documentation cycle to ensure high-quality, well-tested code.
-
-### Workflow Overview
-
-The system uses specialized AI agents for different phases:
-- **Implementation Agent**: Focused code development with task-specific expertise
-- **Testing Agent**: Comprehensive validation including unit, integration, and performance tests
-- **Documentation Agent**: Complete technical documentation and API updates
-
-### Current Development Tasks
-
-#### P0 CRITICAL: Setup Project Workflow ✅ COMPLETE
-- AI Agent Workflow system integration for QuicCrunch
-- Workflow templates customized for Rust/QUIC development
-- Real-time context management and session continuity
-
-#### P1 HIGH: Implement Connection Pooling 🔄 IN PROGRESS
-- High-performance connection reuse system
-- 15-30% reduction in connection overhead
-- Foundation for scalable RPC operations
-- Comprehensive health monitoring and lifecycle management
-
-### Workflow Documentation
-
-For detailed workflow information, see:
-- [AI Agent Workflow README](ai-agent-workflow/README.md)
-- [Workflow Startup Protocol](ai-agent-workflow/STARTUP_PROMPT.md)
-- [Task Management](ai-agent-workflow/todo.md)
-
-## Contributing
-
-We welcome contributions! Please feel free to submit a Pull Request.
-
-## Coding standards
-
-This project enforces a consistent Rust style and safety baseline:
-
-- Formatting: rustfmt (edition 2021, grouped imports)
-- Linting: clippy in CI with -D warnings
-- Safety: forbid(unsafe_code) at crate level
-- Error handling: thiserror for public error types
-- Logging/telemetry: tracing; optional OpenTelemetry via `telemetry` feature
-- Testing: unit, property-based (proptest), and integration tests; headless plotting via `HEADLESS_PLOT=1`
-
-Run locally:
-```bash
-# Format
-nix develop -c cargo fmt --all
-
-# Lint (treat warnings as errors)
-nix develop -c cargo clippy --all-targets --all-features -- -D warnings
-
-# Tests (safe default)
-nix develop -c cargo test
-
-# Scaling benchmark (requires sudo; opt-in)
-sudo -E nix develop -c cargo test --features scaling-tests --test scaling_benchmark -- --test-threads=1 --nocapture
-```
-
-Guidelines (short version):
-- No unwrap/expect/panic in library code; bubble errors with Result and thiserror.
-- Avoid blocking in async; prefer Tokio APIs.
-- Keep messages under `TransportSettings.stream_receive_window`; enforced in `QuicStream`.
-- Plotters in CI must be headless: set `HEADLESS_PLOT=1`.
-- Feature flags:
-  - `telemetry` to enable OpenTelemetry tracing
-  - `scaling-tests` to run privileged scaling tests
+Apache-2.0 OR MIT
