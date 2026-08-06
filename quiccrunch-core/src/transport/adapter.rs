@@ -82,9 +82,27 @@ pub struct QuicSocket {
 
 impl QuicSocket {
     pub fn new(local: &SocketAddr, registry: &mio::Registry) -> Result<Self, TransportError> {
-        let mut socket = mio::net::UdpSocket::bind(*local)?;
-        let local_addr = socket.local_addr()?;
-
+        // Create socket with SO_REUSEPORT for multi-runtime support
+        let socket = socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )?;
+        
+        socket.set_reuse_address(true)?;
+        #[cfg(unix)]
+        socket.set_reuse_port(true)?;
+        socket.set_nonblocking(true)?;
+        
+        // Bind using socket2's bind method
+        socket.bind(&socket2::SockAddr::from(*local))?;
+        
+        let std_socket: std::net::UdpSocket = socket.into();
+        let local_addr = std_socket.local_addr()?;
+        
+        // Convert to mio socket
+        let mut socket = mio::net::UdpSocket::from_std(std_socket);
+        
         registry
             .register(&mut socket, mio::Token(0), Interest::READABLE)?;
 
@@ -907,8 +925,8 @@ impl TquicServer {
 }
 
 pub struct TquicListener {
-    runtime: Arc<TquicRuntime>,
-    bind_addr: SocketAddr,
+    pub runtime: Arc<TquicRuntime>,
+    pub bind_addr: SocketAddr,
 }
 
 impl TquicListener {
