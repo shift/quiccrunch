@@ -184,6 +184,7 @@ pub mod error;
 pub mod reflection;
 pub mod rate_limit;
 pub mod metrics;
+pub mod simd_parser;
 // pub mod discovery; // Temporarily disabled
 
 #[cfg(feature = "auth")]
