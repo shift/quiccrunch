@@ -25,9 +25,19 @@ pub struct RpcContext {
     pub request_id: RequestId,
     pub service_id: ServiceId,
     pub method_id: MethodId,
+    pub service: String,
+    pub method: String,
     pub timeout_ms: u32,
     pub trace_context: Option<TraceContext>,
     pub client_address: Option<String>,
+    /// Request metadata (headers)
+    pub metadata: HashMap<String, String>,
+    /// Extensions for storing arbitrary data (e.g., auth claims)
+    pub extensions: HashMap<String, serde_json::Value>,
+    /// Start time for latency measurement
+    pub start_time: std::time::Instant,
+    /// Timeout duration
+    pub timeout: Option<std::time::Duration>,
 }
 
 /// Trace context for telemetry

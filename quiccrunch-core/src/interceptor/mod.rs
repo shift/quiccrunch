@@ -296,3 +296,13 @@ pub use self::{
     Interceptor, InterceptorChain,
     LoggingInterceptor, MetricsInterceptor, TimeoutInterceptor, CircuitBreakerInterceptor,
 };
+
+// Authentication and Authorization module
+#[cfg(feature = "auth")]
+pub mod auth;
+#[cfg(feature = "auth")]
+pub use self::auth::{
+    AuthInterceptor, AuthConfig, AuthInterceptorBuilder,
+    Claims, Role, Permission,
+    create_auth_interceptor, create_rbac_auth_interceptor,
+};
