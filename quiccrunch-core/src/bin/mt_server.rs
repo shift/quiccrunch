@@ -127,8 +127,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     let mut response = Vec::with_capacity(4 + msg_len);
                                     response.extend_from_slice(&(msg_len as u32).to_be_bytes());
                                     response.extend_from_slice(msg_data);
+                                    let response = bytes::Bytes::from(response);
                                     
-                                    if let Err(e) = stream.send(&response, false).await {
+                                    if let Err(e) = stream.send_bytes(response, false).await {
                                         log::error!("Worker {}: send error: {}", worker_id, e);
                                         break;
                                     }

@@ -64,36 +64,47 @@ async fn run_client(
     let mut message = vec![0u8; 4 + msg_size];
     message[0..4].copy_from_slice(&(msg_size as u32).to_be_bytes());
     message[4..].fill(b'x');
-    let message = Arc::new(message);
+    // Convert to Bytes for zero-copy sends
+    let message = bytes::Bytes::from(message);
     
     // SLIDING WINDOW: Send up to pipeline_depth, then receive one, then send one
-    let in_flight_semaphore = Arc::new(Semaphore::new(pipeline_depth));
     let mut sent = 0;
     let mut received = 0;
     let mut recv_buffer = Vec::new();
 
     while sent < message_count || received < message_count {
-        // Fill pipeline up to depth
+        // Fill pipeline up to depth - batch sends for efficiency
         while sent < message_count && sent - received < pipeline_depth {
-            let permit = in_flight_semaphore.clone().acquire_owned().await.unwrap();
+            // Calculate how many messages to send in this batch
+            let batch_size = std::cmp::min(
+                pipeline_depth - (sent - received),
+                std::cmp::min(32, message_count - sent) // Max 32 messages per batch
+            );
             
-            match timeout(Duration::from_secs(5), stream.send(&message, false)).await {
-                Ok(Ok(_)) => {
-                    total_bytes_sent.fetch_add(message.len() as u64, Ordering::Relaxed);
-                    sent += 1;
+            if batch_size == 0 {
+                break;
+            }
+            
+            // Create batch of messages
+            let mut batch = Vec::with_capacity(batch_size);
+            for _ in 0..batch_size {
+                batch.push((message.clone(), false));
+            }
+            
+            match timeout(Duration::from_secs(5), stream.send_batch(batch)).await {
+                Ok(Ok(count)) => {
+                    total_bytes_sent.fetch_add((message.len() * count) as u64, Ordering::Relaxed);
+                    sent += count;
                 }
                 Ok(Err(e)) => {
-                    log::warn!("Client {}: send error: {}", conn_idx, e);
+                    log::warn!("Client {}: batch send error: {}", conn_idx, e);
                     errors.fetch_add(1, Ordering::Relaxed);
                 }
                 Err(_) => {
-                    log::warn!("Client {}: send timeout", conn_idx);
+                    log::warn!("Client {}: batch send timeout", conn_idx);
                     errors.fetch_add(1, Ordering::Relaxed);
                 }
             }
-            
-            // Release permit immediately after send (receive will release it)
-            drop(permit);
             
             if sent % 100 == 0 {
                 log::info!("Client {}: sent={} received={}", conn_idx, sent, received);

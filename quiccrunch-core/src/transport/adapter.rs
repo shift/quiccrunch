@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::{Mutex, Condvar};
+use std::time::{Duration, Instant};
 use std::thread;
 
 use log::{debug, error, info};
@@ -16,6 +16,64 @@ use crate::error::TransportError;
 use crate::transport::messages::WorkerConfig;
 
 const MAX_BUF_SIZE: usize = 65536;
+
+/// Pre-allocated buffer pool for common message sizes
+/// Reduces allocation overhead by reusing buffers
+pub struct BufferPool {
+    small: Vec<Vec<u8>>,   // 64-256 bytes
+    medium: Vec<Vec<u8>>,  // 256-1024 bytes
+    large: Vec<Vec<u8>>,   // 1024-4096 bytes
+}
+
+impl BufferPool {
+    pub fn new() -> Self {
+        Self {
+            small: Vec::new(),
+            medium: Vec::new(),
+            large: Vec::new(),
+        }
+    }
+    
+    /// Get a buffer of at least the specified size
+    pub fn get(&mut self, min_size: usize) -> Vec<u8> {
+        let size_class = match min_size {
+            0..=256 => 0,
+            257..=1024 => 1,
+            1025..=4096 => 2,
+            _ => return vec![0u8; min_size],
+        };
+        
+        let pool = match size_class {
+            0 => &mut self.small,
+            1 => &mut self.medium,
+            _ => &mut self.large,
+        };
+        
+        if let Some(mut buf) = pool.pop() {
+            buf.clear();
+            buf.resize(min_size, 0);
+            buf
+        } else {
+            vec![0u8; min_size]
+        }
+    }
+    
+    /// Return a buffer to the pool for reuse
+    pub fn put(&mut self, buf: Vec<u8>) {
+        let cap = buf.capacity();
+        let pool = match cap {
+            0..=256 => &mut self.small,
+            257..=1024 => &mut self.medium,
+            1025..=4096 => &mut self.large,
+            _ => return, // Don't pool very large buffers
+        };
+        
+        // Limit pool size to prevent memory bloat
+        if pool.len() < 1024 {
+            pool.push(buf);
+        }
+    }
+}
 
 pub struct QuicSocket {
     socket: Arc<Mutex<mio::net::UdpSocket>>,
@@ -344,14 +402,6 @@ impl TquicAdapter {
             .map_err(|e| TransportError::ConnectionFailed(format!("Connect failed: {:?}", e)))
     }
 
-    pub fn stream_write(&mut self, conn_index: u64, stream_id: u64, data: &[u8], fin: bool) -> Result<usize, TransportError> {
-        let conn = self.endpoint.conn_get_mut(conn_index)
-            .ok_or_else(|| TransportError::ConnectionFailed("Connection not found".into()))?;
-
-        conn.stream_write(stream_id, bytes::Bytes::copy_from_slice(data), fin)
-            .map_err(|e| TransportError::StreamError(format!("Stream write failed: {:?}", e)))
-    }
-
     pub fn stream_read(&mut self, conn_index: u64, stream_id: u64, buf: &mut [u8]) -> Result<(usize, bool), TransportError> {
         let conn = self.endpoint.conn_get_mut(conn_index)
             .ok_or_else(|| TransportError::ConnectionFailed("Connection not found".into()))?;
@@ -386,8 +436,14 @@ enum RuntimeCommand {
     StreamWrite {
         conn_index: u64,
         stream_id: u64,
-        data: Vec<u8>,
+        data: bytes::Bytes,
         fin: bool,
+        resp: oneshot::Sender<Result<usize, TransportError>>,
+    },
+    StreamWriteBatch {
+        conn_index: u64,
+        stream_id: u64,
+        messages: Vec<(bytes::Bytes, bool)>,
         resp: oneshot::Sender<Result<usize, TransportError>>,
     },
     StreamRead {
@@ -405,6 +461,7 @@ enum RuntimeCommand {
 pub struct TquicRuntime {
     cmd_tx: mpsc::UnboundedSender<RuntimeCommand>,
     thread_handle: Option<thread::JoinHandle<()>>,
+    idle_condvar: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl std::fmt::Debug for TquicRuntime {
@@ -416,6 +473,8 @@ impl std::fmt::Debug for TquicRuntime {
 impl TquicRuntime {
     pub fn new(is_server: bool, bind_addr: SocketAddr, cert_file: Option<String>, key_file: Option<String>) -> Result<Self, TransportError> {
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<RuntimeCommand>();
+        let idle_condvar = Arc::new((Mutex::new(false), Condvar::new()));
+        let idle_condvar_clone = idle_condvar.clone();
         
         let thread_handle = thread::spawn(move || {
             let config = WorkerConfig {
@@ -442,6 +501,7 @@ impl TquicRuntime {
             let mut incoming_streams: HashMap<u64, Vec<u64>> = HashMap::new();
             let mut next_stream_ids: HashMap<u64, u64> = HashMap::new();
             let mut pending_connects: HashMap<u64, (Instant, oneshot::Sender<Result<u64, TransportError>>)> = HashMap::new();
+            let mut buffer_pool = BufferPool::new();
             
             info!("TquicRuntime thread started on {}", bind_addr);
             
@@ -498,7 +558,26 @@ impl TquicRuntime {
                             }
                         }
                         RuntimeCommand::StreamWrite { conn_index, stream_id, data, fin, resp } => {
-                            let result = adapter.stream_write(conn_index, stream_id, &data, fin);
+                            let result = adapter.endpoint.conn_get_mut(conn_index)
+                                .ok_or_else(|| TransportError::ConnectionFailed("Connection not found".into()))
+                                .and_then(|conn| {
+                                    conn.stream_write(stream_id, data, fin)
+                                        .map_err(|e| TransportError::StreamError(format!("Stream write failed: {:?}", e)))
+                                });
+                            let _ = resp.send(result);
+                        }
+                        RuntimeCommand::StreamWriteBatch { conn_index, stream_id, messages, resp } => {
+                            let result = adapter.endpoint.conn_get_mut(conn_index)
+                                .ok_or_else(|| TransportError::ConnectionFailed("Connection not found".into()))
+                                .and_then(|conn| {
+                                    let mut total_written = 0;
+                                    for (data, fin) in messages {
+                                        conn.stream_write(stream_id, data, fin)
+                                            .map_err(|e| TransportError::StreamError(format!("Stream write failed: {:?}", e)))?;
+                                        total_written += 1;
+                                    }
+                                    Ok(total_written)
+                                });
                             let _ = resp.send(result);
                         }
                         RuntimeCommand::StreamRead { conn_index, stream_id, resp } => {
@@ -542,9 +621,11 @@ impl TquicRuntime {
                     }
                 }
                 
-                while let Ok(event) = adapter.event_rx.try_recv() {
-                    match event {
-                        TquicEvent::ConnectionEstablished { index, remote } => {
+                // Batch event processing: process up to 64 events per iteration
+                // This reduces loop overhead and improves throughput
+                for _ in 0..64 {
+                    match adapter.event_rx.try_recv() {
+                        Ok(TquicEvent::ConnectionEstablished { index, remote }) => {
                             if let Some((_start, resp)) = pending_connects.remove(&index) {
                                 let _ = resp.send(Ok(index));
                             } else if let Some(waiter) = pending_accepts.pop() {
@@ -553,7 +634,7 @@ impl TquicRuntime {
                                 incoming_connections.push((index, remote));
                             }
                         }
-                        TquicEvent::StreamCreated { index, stream_id } => {
+                        Ok(TquicEvent::StreamCreated { index, stream_id }) => {
                             // A new stream was created - fulfill accept waiters or queue it
                             if let Some(waiters) = pending_stream_accepts.get_mut(&index) {
                                 if let Some(waiter) = waiters.pop() {
@@ -570,10 +651,10 @@ impl TquicRuntime {
                                     .push(stream_id);
                             }
                         }
-                        TquicEvent::StreamReadable { index, stream_id } => {
+                        Ok(TquicEvent::StreamReadable { index, stream_id }) => {
                             // Data available on an existing stream - fulfill read waiters only
                             if let Some(waiters) = stream_readers.remove(&(index, stream_id)) {
-                                let mut buf = vec![0u8; 65536];
+                                let mut buf = buffer_pool.get(65536);
                                 match adapter.stream_read(index, stream_id, &mut buf) {
                                     Ok((n, fin)) => {
                                         buf.truncate(n);
@@ -587,9 +668,11 @@ impl TquicRuntime {
                                         }
                                     }
                                 }
+                                buffer_pool.put(buf);
                             }
                         }
-                        _ => {}
+                        Ok(_) => {}
+                        Err(_) => break, // No more events to process
                     }
                 }
                 
@@ -621,7 +704,11 @@ impl TquicRuntime {
                     || !pending_stream_accepts.is_empty()
                     || !stream_readers.is_empty();
                 if !has_pending_work {
-                    thread::sleep(std::time::Duration::from_millis(1));
+                    // Use condvar with timeout for efficient idle waiting
+                    let (lock, cvar) = &*idle_condvar_clone;
+                    let mut idle = lock.lock().unwrap();
+                    *idle = true;
+                    let _ = cvar.wait_timeout(idle, Duration::from_millis(1)).unwrap();
                 }
             }
             
@@ -631,6 +718,7 @@ impl TquicRuntime {
         Ok(TquicRuntime {
             cmd_tx,
             thread_handle: Some(thread_handle),
+            idle_condvar,
         })
     }
     
@@ -678,13 +766,28 @@ impl TquicRuntime {
             .map_err(|_| TransportError::StreamError("Runtime stopped".into()))?
     }
     
-    pub async fn stream_write(&self, conn_index: u64, stream_id: u64, data: Vec<u8>, fin: bool) -> Result<usize, TransportError> {
+    pub async fn stream_write(&self, conn_index: u64, stream_id: u64, data: bytes::Bytes, fin: bool) -> Result<usize, TransportError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.cmd_tx.send(RuntimeCommand::StreamWrite {
             conn_index,
             stream_id,
             data,
             fin,
+            resp: resp_tx,
+        }).map_err(|_| TransportError::StreamError("Runtime stopped".into()))?;
+        
+        resp_rx.await
+            .map_err(|_| TransportError::StreamError("Runtime stopped".into()))?
+    }
+    
+    /// Batch write multiple messages in a single channel command
+    /// This reduces context switches from 3N to 3 for N messages
+    pub async fn stream_write_batch(&self, conn_index: u64, stream_id: u64, messages: Vec<(bytes::Bytes, bool)>) -> Result<usize, TransportError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.cmd_tx.send(RuntimeCommand::StreamWriteBatch {
+            conn_index,
+            stream_id,
+            messages,
             resp: resp_tx,
         }).map_err(|_| TransportError::StreamError("Runtime stopped".into()))?;
         
@@ -931,7 +1034,23 @@ impl TquicStream {
     }
 
     pub async fn send(&self, data: &[u8], fin: bool) -> Result<(), TransportError> {
-        self.runtime.stream_write(self.conn_index, self.stream_id, data.to_vec(), fin).await?;
+        // Convert &[u8] to Bytes (this copies, but is necessary for backward compatibility)
+        // For zero-copy, use send_bytes() with bytes::Bytes directly
+        self.runtime.stream_write(self.conn_index, self.stream_id, bytes::Bytes::copy_from_slice(data), fin).await?;
+        Ok(())
+    }
+    
+    /// Send data with zero-copy using bytes::Bytes
+    /// This avoids the copy that happens with send() when you already have Bytes
+    pub async fn send_bytes(&self, data: bytes::Bytes, fin: bool) -> Result<(), TransportError> {
+        self.runtime.stream_write(self.conn_index, self.stream_id, data, fin).await?;
+        Ok(())
+    }
+    
+    /// Batch send multiple messages in a single channel command
+    /// This reduces context switches from 3N to 3 for N messages
+    pub async fn send_batch(&self, messages: Vec<(bytes::Bytes, bool)>) -> Result<(), TransportError> {
+        self.runtime.stream_write_batch(self.conn_index, self.stream_id, messages).await?;
         Ok(())
     }
 
@@ -941,7 +1060,7 @@ impl TquicStream {
     }
 
     pub async fn close(&self) -> Result<(), TransportError> {
-        self.runtime.stream_write(self.conn_index, self.stream_id, vec![], true).await?;
+        self.runtime.stream_write(self.conn_index, self.stream_id, bytes::Bytes::new(), true).await?;
         Ok(())
     }
     
