@@ -133,6 +133,7 @@ impl AsyncTquicClient {
         let (response_tx, response_rx) = oneshot::channel();
         
         let cmd = WorkerCommand::Connect {
+            connection_id: 0, // Will be assigned by worker pool
             remote_addr,
             response: response_tx,
         };

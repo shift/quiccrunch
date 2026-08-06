@@ -91,24 +91,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     log::info!("Worker {}: stream opened (stream_id={})", worker_id, stream.stream_id);
                     
+                    // Buffer for accumulating data from the stream
+                    let mut recv_buffer = Vec::new();
+                    
                     loop {
-                        // Receive message
+                        // Receive data from the stream
                         match stream.recv().await {
                             Ok(data) => {
                                 if data.is_empty() {
                                     break;
                                 }
                                 
-                                message_count += 1;
-                                total_bytes += data.len();
+                                recv_buffer.extend_from_slice(&data);
                                 
-                                log::trace!("Worker {}: received {} bytes (message #{})", 
-                                           worker_id, data.len(), message_count);
-                                
-                                let response = format!("Echo: {}", String::from_utf8_lossy(&data));
-                                if let Err(e) = stream.send(response.as_bytes(), false).await {
-                                    log::error!("Worker {}: send error: {}", worker_id, e);
-                                    break;
+                                // Process all complete length-prefixed messages in the buffer
+                                while recv_buffer.len() >= 4 {
+                                    let msg_len = u32::from_be_bytes([
+                                        recv_buffer[0], recv_buffer[1],
+                                        recv_buffer[2], recv_buffer[3]
+                                    ]) as usize;
+                                    
+                                    if recv_buffer.len() < 4 + msg_len {
+                                        break; // Wait for more data
+                                    }
+                                    
+                                    // Extract the message data
+                                    let msg_data = &recv_buffer[4..4 + msg_len];
+                                    message_count += 1;
+                                    total_bytes += msg_len;
+                                    
+                                    log::trace!("Worker {}: received {} bytes (message #{})",
+                                               worker_id, msg_len, message_count);
+                                    
+                                    // Echo back the same length-prefixed message
+                                    let mut response = Vec::with_capacity(4 + msg_len);
+                                    response.extend_from_slice(&(msg_len as u32).to_be_bytes());
+                                    response.extend_from_slice(msg_data);
+                                    
+                                    if let Err(e) = stream.send(&response, false).await {
+                                        log::error!("Worker {}: send error: {}", worker_id, e);
+                                        break;
+                                    }
+                                    
+                                    // Remove processed message from buffer
+                                    recv_buffer.drain(..4 + msg_len);
                                 }
                             }
                             Err(e) => {

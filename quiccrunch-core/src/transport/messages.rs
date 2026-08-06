@@ -5,6 +5,7 @@ use tokio::sync::oneshot;
 #[derive(Debug)]
 pub enum TquicCommand {
     Connect {
+        connection_id: ConnectionId,
         remote_addr: SocketAddr,
         response: oneshot::Sender<Result<ConnectionId, TransportError>>,
     },

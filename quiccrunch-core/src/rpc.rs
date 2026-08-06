@@ -178,7 +178,14 @@
 //! ```
 
 pub mod codegen;
+pub mod retry;
+pub mod service;
+pub mod error;
 // pub mod discovery; // Temporarily disabled
+
+#[cfg(feature = "auth")]
+use crate::interceptor::{Interceptor, InterceptorChain, LoggingInterceptor, MetricsInterceptor, TimeoutInterceptor, CircuitBreakerInterceptor};
+use crate::rpc::retry::{RetryConfig, RetryableError, CircuitBreaker, CircuitBreakerConfig, CircuitState};
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -195,15 +202,7 @@ use tokio::sync::RwLock;
 use futures::Stream;
 use crate::{QuicStream, TransportError, StreamReader, StreamWriter, Splittable, transport::async_bridge::AsyncTquicClient};
 use crate::schema::rpc_capnp::*;
-
-/// Service information for discovery
-#[derive(Debug, Clone)]
-pub struct ServiceInfo {
-    pub name: String,
-    pub version: String,
-    pub description: String,
-    pub endpoints: Vec<EndpointInfo>,
-}
+use crate::rpc::service::HealthStatus;
 
 /// Endpoint information for services
 #[derive(Debug, Clone)]
@@ -3136,7 +3135,7 @@ impl PooledRpcClient {
     pub async fn call(&self, service: &str, method: &str, params: Bytes) -> RpcResult<Bytes> {
         match self.pool.get_client() {
             Some(mut client) => client.call(service, method, params).await,
-            None => Err(RpcError::ServiceUnavailable("No connections available".to_string())),
+            None => Err(RpcError::ServiceUnavailable("No available connections in pool".to_string())),
         }
     }
-}
+    }

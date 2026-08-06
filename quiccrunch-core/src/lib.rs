@@ -64,6 +64,10 @@ pub mod config;
 //pub mod server;
 pub mod rpc;
 
+// Interceptor/Middleware Framework for RPC
+#[cfg(feature = "auth")]
+pub mod interceptor;
+
 // Benchmark suite module
 #[cfg(feature = "benchmark-suite")]
 pub mod benchmark;

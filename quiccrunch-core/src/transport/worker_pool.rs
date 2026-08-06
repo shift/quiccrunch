@@ -1,7 +1,7 @@
 use dashmap::DashMap;
 use mio::Waker;
 use std::collections::VecDeque;
-use std::sync::{    atomic::{AtomicUsize, Ordering},
+use std::sync::{    atomic::{AtomicU64, AtomicUsize, Ordering},
     Arc,
     Mutex,
 };
@@ -21,6 +21,7 @@ pub struct TquicWorkerPool {
     workers: Vec<TquicWorkerHandle>,
     next_worker: AtomicUsize,
     connection_map: Arc<DashMap<ConnectionId, usize>>, // connection_id -> worker_index
+    next_connection_id: AtomicU64,
     worker_count: usize,
     load_balancer: LoadBalancer,
     performance_monitor: PerformanceMonitor,
@@ -277,15 +278,25 @@ impl TquicWorkerPool {
             workers,
             next_worker: AtomicUsize::new(0),
             connection_map,
+            next_connection_id: AtomicU64::new(1),
             worker_count,
             load_balancer,
             performance_monitor,
         })
     }
 
-    pub async fn submit_command(&self, cmd: TquicCommand) -> Result<(), TransportError> {
+    fn next_connection_id(&self) -> ConnectionId {
+        self.next_connection_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub async fn submit_command(&self, mut cmd: TquicCommand) -> Result<(), TransportError> {
         // Record command for performance monitoring
         self.performance_monitor.record_command();
+        
+        // Pre-assign connection_id for Connect commands
+        if let TquicCommand::Connect { ref mut connection_id, .. } = cmd {
+            *connection_id = self.next_connection_id();
+        }
         
         let worker_id = self.select_worker(&cmd);
 
@@ -308,7 +319,11 @@ impl TquicWorkerPool {
         }
 
         // Update connection mapping for new connections
-        if let TquicCommand::Connect { .. } = &cmd {
+        if let TquicCommand::Connect { connection_id, .. } = &cmd {
+            // Pre-assign connection_id for Connect commands and map to worker
+            self.connection_map.insert(*connection_id, worker_id);
+            self.performance_monitor.record_connection();
+        } else {
             self.performance_monitor.record_connection();
         }
 

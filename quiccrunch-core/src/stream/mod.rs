@@ -19,6 +19,7 @@ enum StreamInner {
     TQuic {
         worker_pool: std::sync::Arc<crate::transport::worker_pool::TquicWorkerPool>,
         stream_id: u64,
+        connection_id: u64,
     },
 }
 
@@ -69,11 +70,12 @@ impl QuicStream {
     }
 
     /// Create a simple tQUIC stream with worker pool
-    pub fn new_simple_tquic(_connection_id: u64, stream_id: u64, max_message_size: usize, worker_pool: std::sync::Arc<crate::transport::worker_pool::TquicWorkerPool>) -> Self {
+    pub fn new_simple_tquic(connection_id: u64, stream_id: u64, max_message_size: usize, worker_pool: std::sync::Arc<crate::transport::worker_pool::TquicWorkerPool>) -> Self {
         Self {
             inner: StreamInner::TQuic {
                 worker_pool,
                 stream_id,
+                connection_id,
             },
             max_message_size,
         }
@@ -147,10 +149,10 @@ impl QuicStream {
                     .map_err(|_| crate::TransportError::ConnectionFailed("Write channel closed".into()))?;
                 Ok(())
             }
-            StreamInner::TQuic { worker_pool, stream_id } => {
+            StreamInner::TQuic { worker_pool, stream_id, connection_id } => {
                 let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                 let cmd = crate::transport::messages::TquicCommand::Send {
-                    connection_id: 0, // TODO: pass connection_id
+                    connection_id: *connection_id,
                     stream_id: *stream_id,
                     data: data.to_vec(),
                     fin: false,
@@ -176,10 +178,10 @@ impl QuicStream {
                     .ok_or_else(|| crate::TransportError::ConnectionFailed("Read channel closed".into()))?;
                 Ok(bytes.to_vec())
             }
-            StreamInner::TQuic { worker_pool, stream_id } => {
+            StreamInner::TQuic { worker_pool, stream_id, connection_id } => {
                 let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                 let cmd = crate::transport::messages::TquicCommand::Receive {
-                    connection_id: 0, // TODO: pass connection_id
+                    connection_id: *connection_id,
                     stream_id: *stream_id,
                     max_length: self.max_message_size,
                     response: response_tx,
@@ -204,9 +206,9 @@ impl QuicStream {
                     .map_err(|_| crate::TransportError::ConnectionFailed("Close channel failed".into()))?;
                 Ok(())
             }
-            StreamInner::TQuic { worker_pool, stream_id } => {
+            StreamInner::TQuic { worker_pool, stream_id, connection_id } => {
                 let cmd = crate::transport::messages::TquicCommand::CloseStream {
-                    connection_id: 0, // TODO: pass connection_id
+                    connection_id: *connection_id,
                     stream_id: *stream_id,
                     error_code: 0,
                 };
@@ -246,10 +248,14 @@ impl crate::transport::Splittable for QuicStream {
     fn split(self) -> (Self::Reader, Self::Writer) {
         // For now, create simple wrapper structs
         // In a full implementation, these would properly split the stream
-        let (worker_pool, stream_id) = match &self.inner {
-            StreamInner::TQuic { worker_pool, stream_id } => (worker_pool.clone(), *stream_id),
+        let (worker_pool, stream_id, connection_id) = match &self.inner {
+            StreamInner::TQuic { worker_pool, stream_id, connection_id } => (worker_pool.clone(), *stream_id, *connection_id),
             #[cfg(feature = "lock-free-channels")]
-            StreamInner::LockFree { .. } => (std::sync::Arc::new(crate::transport::worker_pool::TquicWorkerPool::new(1, crate::transport::messages::WorkerConfig::default()).unwrap()), 0),
+            StreamInner::LockFree { .. } => (
+                std::sync::Arc::new(crate::transport::worker_pool::TquicWorkerPool::new(1, crate::transport::messages::WorkerConfig::default()).unwrap()),
+                0,
+                0
+            ),
         };
         let reader = QuicStreamReader {
             _inner: self.inner,
@@ -258,6 +264,7 @@ impl crate::transport::Splittable for QuicStream {
             _inner: StreamInner::TQuic {
                 worker_pool,
                 stream_id,
+                connection_id,
             },
         };
         (reader, writer)

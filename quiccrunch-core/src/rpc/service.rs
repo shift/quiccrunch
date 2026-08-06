@@ -132,7 +132,6 @@ pub enum HealthStatus {
 }
 
 /// Registry for RPC services
-#[derive(Debug)]
 pub struct ServiceRegistry {
     services: RwLock<HashMap<ServiceId, Arc<dyn RpcService>>>,
     service_names: RwLock<HashMap<String, ServiceId>>,

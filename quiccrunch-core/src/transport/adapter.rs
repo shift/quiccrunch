@@ -24,14 +24,11 @@ pub struct QuicSocket {
 
 impl QuicSocket {
     pub fn new(local: &SocketAddr, registry: &mio::Registry) -> Result<Self, TransportError> {
-        let mut socket = mio::net::UdpSocket::bind(*local)
-            .map_err(|e| TransportError::Io(e))?;
-        let local_addr = socket.local_addr()
-            .map_err(|e| TransportError::Io(e))?;
+        let mut socket = mio::net::UdpSocket::bind(*local)?;
+        let local_addr = socket.local_addr()?;
 
         registry
-            .register(&mut socket, mio::Token(0), Interest::READABLE)
-            .map_err(|e| TransportError::Io(e))?;
+            .register(&mut socket, mio::Token(0), Interest::READABLE)?;
 
         Ok(Self {
             socket: Arc::new(Mutex::new(socket)),
@@ -105,6 +102,7 @@ impl TquicHandler {
 enum TquicEvent {
     ConnectionEstablished { index: u64, remote: SocketAddr },
     ConnectionClosed { index: u64 },
+    StreamCreated { index: u64, stream_id: u64 },
     StreamReadable { index: u64, stream_id: u64 },
     StreamWritable { index: u64, stream_id: u64 },
     StreamClosed { index: u64, stream_id: u64 },
@@ -146,6 +144,8 @@ impl TransportHandler for TquicHandler {
 
     fn on_stream_created(&mut self, conn: &mut Connection, stream_id: u64) {
         debug!("{} stream {} created", conn.trace_id(), stream_id);
+        let index = conn.index().unwrap();
+        let _ = self.event_tx.send(TquicEvent::StreamCreated { index, stream_id });
     }
 
     fn on_stream_readable(&mut self, conn: &mut Connection, stream_id: u64) {
@@ -216,8 +216,7 @@ impl TquicAdapter {
             quic_config.set_tls_config(tls_config);
         }
 
-        let poll = mio::Poll::new()
-            .map_err(|e| TransportError::Io(e))?;
+        let poll = mio::Poll::new()?;
         let registry = poll.registry();
 
         let bind_addr = config.bind_addr;
@@ -281,8 +280,7 @@ impl TquicAdapter {
             }
 
             let timeout = self.endpoint.timeout();
-            self.poll.poll(&mut events, timeout)
-                .map_err(|e| TransportError::Io(e))?;
+            self.poll.poll(&mut events, timeout)?;
 
             for event in events.iter() {
                 if event.is_readable() {
@@ -309,7 +307,7 @@ impl TquicAdapter {
                         debug!("socket recv would block");
                         break;
                     }
-                    return Err(TransportError::Io(e));
+                    return Err(e.into());
                 }
             };
             debug!("socket recv {} bytes from {:?}", len, remote);
@@ -530,8 +528,8 @@ impl TquicRuntime {
                     adapter.endpoint.on_timeout(Instant::now());
                 }
                 
-                // Use short poll timeout to ensure command channel is checked frequently
-                let poll_timeout = std::time::Duration::from_millis(10);
+                // Use non-blocking poll for maximum throughput
+                let poll_timeout = std::time::Duration::from_millis(0);
                 match adapter.poll.poll(&mut adapter.poll_events, Some(poll_timeout)) {
                     Ok(_) => {
                         let has_readable = adapter.poll_events.iter().any(|e| e.is_readable());
@@ -555,10 +553,11 @@ impl TquicRuntime {
                                 incoming_connections.push((index, remote));
                             }
                         }
-                        TquicEvent::StreamReadable { index, stream_id } => {
-                            // First, handle stream accept waiters
+                        TquicEvent::StreamCreated { index, stream_id } => {
+                            // A new stream was created - fulfill accept waiters or queue it
                             if let Some(waiters) = pending_stream_accepts.get_mut(&index) {
                                 if let Some(waiter) = waiters.pop() {
+                                    info!("Runtime: fulfilling accept waiter for stream_id={}", stream_id);
                                     let _ = waiter.send(Ok(stream_id));
                                 } else {
                                     incoming_streams.entry(index)
@@ -570,8 +569,9 @@ impl TquicRuntime {
                                     .or_insert_with(Vec::new)
                                     .push(stream_id);
                             }
-                            
-                            // Also fulfill any stream_read waiters for this stream
+                        }
+                        TquicEvent::StreamReadable { index, stream_id } => {
+                            // Data available on an existing stream - fulfill read waiters only
                             if let Some(waiters) = stream_readers.remove(&(index, stream_id)) {
                                 let mut buf = vec![0u8; 65536];
                                 match adapter.stream_read(index, stream_id, &mut buf) {
@@ -612,6 +612,16 @@ impl TquicRuntime {
                 
                 if !adapter.running {
                     break;
+                }
+                
+                // Only sleep when truly idle to maximize throughput
+                // When there's work, the tight loop processes it immediately
+                let has_pending_work = !pending_connects.is_empty()
+                    || !pending_accepts.is_empty()
+                    || !pending_stream_accepts.is_empty()
+                    || !stream_readers.is_empty();
+                if !has_pending_work {
+                    thread::sleep(std::time::Duration::from_millis(1));
                 }
             }
             
@@ -920,12 +930,12 @@ impl TquicStream {
         }
     }
 
-    pub async fn send(&mut self, data: &[u8], fin: bool) -> Result<(), TransportError> {
+    pub async fn send(&self, data: &[u8], fin: bool) -> Result<(), TransportError> {
         self.runtime.stream_write(self.conn_index, self.stream_id, data.to_vec(), fin).await?;
         Ok(())
     }
 
-    pub async fn receive(&mut self, _max_length: usize) -> Result<Vec<u8>, TransportError> {
+    pub async fn receive(&self, _max_length: usize) -> Result<Vec<u8>, TransportError> {
         let (data, _fin) = self.runtime.stream_read(self.conn_index, self.stream_id).await?;
         Ok(data)
     }
@@ -935,7 +945,7 @@ impl TquicStream {
         Ok(())
     }
     
-    pub async fn recv(&mut self) -> Result<Vec<u8>, TransportError> {
+    pub async fn recv(&self) -> Result<Vec<u8>, TransportError> {
         let (data, _fin) = self.runtime.stream_read(self.conn_index, self.stream_id).await?;
         Ok(data)
     }
@@ -966,6 +976,16 @@ impl tokio::io::AsyncWrite for TquicStream {
 
     fn poll_shutdown(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
         std::task::Poll::Ready(Ok(()))
+    }
+}
+
+impl Clone for TquicStream {
+    fn clone(&self) -> Self {
+        Self {
+            conn_index: self.conn_index,
+            stream_id: self.stream_id,
+            runtime: self.runtime.clone(),
+        }
     }
 }
 

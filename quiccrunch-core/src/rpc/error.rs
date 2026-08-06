@@ -9,7 +9,7 @@ use crate::TransportError;
 pub type RpcResult<T> = Result<T, RpcError>;
 
 /// Comprehensive RPC error types
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Transport error: {0}")]
     Transport(#[from] TransportError),

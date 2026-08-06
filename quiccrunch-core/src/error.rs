@@ -69,8 +69,10 @@ impl FastError {
     }
 }
 
+use std::sync::Arc;
+
 /// Error types for the transport layer
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum TransportError {
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
@@ -85,10 +87,10 @@ pub enum TransportError {
     ConfigError(String),
 
     #[error("Certificate error: {0}")]
-    CertificateError(#[from] Box<dyn std::error::Error + Send + Sync>),
+    CertificateError(Arc<dyn std::error::Error + Send + Sync>),
 
     #[error("Timeout error: {0}")]
-    TimeoutError(#[from] tokio::time::error::Elapsed),
+    TimeoutError(String),
 
     #[error("Serialization error: {0}")]
     SerializationError(String),
@@ -97,7 +99,7 @@ pub enum TransportError {
     InvalidMessage(String),
 
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(String),
 
     #[error("Other error: {0}")]
     Other(String),
@@ -110,6 +112,18 @@ pub enum TransportError {
 impl From<Box<dyn std::error::Error>> for TransportError {
     fn from(err: Box<dyn std::error::Error>) -> Self {
         TransportError::ConfigError(err.to_string())
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for TransportError {
+    fn from(err: tokio::time::error::Elapsed) -> Self {
+        TransportError::TimeoutError(err.to_string())
+    }
+}
+
+impl From<std::io::Error> for TransportError {
+    fn from(err: std::io::Error) -> Self {
+        TransportError::Io(err.to_string())
     }
 }
 

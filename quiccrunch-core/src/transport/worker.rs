@@ -425,12 +425,12 @@ impl TquicWorker {
         event_tx: Option<mpsc::Sender<TquicEvent>>,
         shared_pending_trace_ids: Option<Arc<Mutex<VecDeque<String>>>>,
     ) -> Result<Self> {
-        let poll = Poll::new().map_err(|e| TransportError::Io(e))?;
+        let poll = Poll::new()?;
         let events = Events::with_capacity(1024);
 
         // Create waker for command notification
         let waker =
-            Arc::new(Waker::new(poll.registry(), WAKER_TOKEN).map_err(|e| TransportError::Io(e))?);
+            Arc::new(Waker::new(poll.registry(), WAKER_TOKEN)?);
 
         // Create and optimize UDP socket with platform-specific optimizations
         let socket = Self::create_optimized_socket(config.bind_addr, config.worker_id)?;
@@ -486,15 +486,13 @@ impl TquicWorker {
         // Register socket with poll
         self.poll
             .registry()
-            .register(&mut self.socket, SOCKET_TOKEN, Interest::READABLE)
-            .map_err(|e| TransportError::Io(e))?;
+            .register(&mut self.socket, SOCKET_TOKEN, Interest::READABLE)?;
 
         // Main event loop
         while self.running.load(Ordering::Relaxed) {
             // Poll for events with a short timeout
             self.poll
-                .poll(&mut self.events, Some(Duration::from_millis(10)))
-                .map_err(|e| TransportError::Io(e))?;
+                .poll(&mut self.events, Some(Duration::from_millis(10)))?;
 
             // Process poll events
             let mut socket_readable = false;
@@ -618,8 +616,7 @@ impl TquicWorker {
                     src: src_addr,
                     dst: self
                         .socket
-                        .local_addr()
-                        .map_err(|e| TransportError::Io(e))?,
+                        .local_addr()?,
                     time: Instant::now(),
                 };
 
@@ -643,11 +640,12 @@ impl TquicWorker {
     fn process_commands(&mut self) -> Result<()> {
         while let Ok(cmd) = self.command_rx.try_recv() {
             match cmd {
-                TquicCommand::Connect {
+            TquicCommand::Connect {
+                    connection_id,
                     remote_addr,
                     response,
                 } => {
-                    let result = self.handle_connect(remote_addr);
+                    let result = self.handle_connect(connection_id, remote_addr);
                     let _ = response.send(result);
                 }
                 TquicCommand::Send {
@@ -710,10 +708,9 @@ impl TquicWorker {
         Ok(())
     }
 
-    fn handle_connect(&mut self, remote_addr: SocketAddr) -> Result<ConnId> {
+    fn handle_connect(&mut self, connection_id: ConnId, remote_addr: SocketAddr) -> Result<ConnId> {
         if let Some(ref mut endpoint) = self.endpoint {
-            let our_conn_id = self.next_connection_id;
-            self.next_connection_id += 1;
+            let our_conn_id = connection_id;
 
             match endpoint.connect(
                 self.config.bind_addr, // local address
