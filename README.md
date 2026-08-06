@@ -2,55 +2,64 @@
 
 A high-performance RPC framework built on QUIC transport with multi-worker architecture for extreme throughput.
 
-## Features
+[![CI](https://github.com/shift/quiccrunch/actions/workflows/ci.yml/badge.svg)](https://github.com/shift/quiccrunch/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](#license)
 
-- 🚀 **Multi-worker architecture** - True parallelism across CPU cores with SO_REUSEPORT
-- 📦 **Zero-copy message handling** - bytes::Bytes throughout the write path
-- 🔒 **Built-in TLS security** - Hardware-accelerated cryptography (AES-NI, AVX)
-- ⚡ **High throughput** - 30,000+ msg/s with 4 CPU cores
-- 🛡️ **Production ready** - Health checks, graceful shutdown, rate limiting
-- 📊 **Observability** - OpenTelemetry/Prometheus metrics, structured logging
-- 🔐 **Authentication** - JWT tokens, RBAC, permission-based access control
+## Highlights
+
+- **Multi-worker QUIC server** — true parallelism across CPU cores via SO_REUSEPORT
+- **Hardware-accelerated TLS** — AES-NI, AVX, SHA-NI with automatic feature detection
+- **Cap'n Proto serialization** — zero-copy message encoding/decoding
+- **Built-in RPC framework** — service reflection, auth, rate limiting, metrics
+- **30,000+ msg/s** on 4 cores with sub-50μs tail latency
 
 ## Performance
 
-| Configuration | Throughput | Latency |
-|--------------|------------|---------|
-| Single worker | 5,000 msg/s | 194 μs |
-| **4 workers (SO_REUSEPORT)** | **31,629 msg/s** | **32 μs** |
+| Workers | Throughput | p99 Latency |
+|---------|-----------|-------------|
+| 1 | 5,000 msg/s | 194 μs |
+| **4** | **31,629 msg/s** | **32 μs** |
 
-### Benchmark Results (4 workers, 16 connections)
+Benchmarked with 1024B messages, 16 concurrent connections, pipeline depth 1800.
 
-| Message Size | Throughput | Bandwidth |
-|-------------|------------|-----------|
-| 64B | 31,629 msg/s | 34 Mbps |
-| 256B | 30,134 msg/s | 125 Mbps |
-| 1024B | 24,805 msg/s | 408 Mbps |
-| 4096B | 12,926 msg/s | 848 Mbps |
+## Getting Started
 
-## Quick Start
+### Prerequisites
 
-### Multi-Worker Server (Recommended)
+- Rust 1.75+ (stable recommended)
+- Linux (SO_REUSEPORT support required for multi-worker)
+- cmake, clang, pkg-config, libssl-dev
+
+### Build
 
 ```bash
-# Start server with 4 workers
-cargo run --bin multi_worker_server -- 127.0.0.1:4433 \
-    quiccrunch-core/tests/certs/cert.pem \
-    quiccrunch-core/tests/certs/key.pem \
-    4
+# With Nix (recommended)
+nix develop --command bash -c "cargo build --release"
+
+# With Cargo
+cargo build --release
 ```
 
-### Run Benchmark
+### Run the Server
 
 ```bash
-# 16 connections, pipeline depth 1800, 1024B messages
-cargo run --bin pipelined_benchmark -- 127.0.0.1:4433 \
-    1800 1800 16 1024 4
+# Generate test certs (for development only)
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
+  -days 365 -nodes -subj '/CN=localhost'
+
+# Start multi-worker server
+cargo run --bin multi_worker_server -- \
+  127.0.0.1:4433 cert.pem key.pem 4
+```
+
+### Run a Benchmark
+
+```bash
+cargo run --bin pipelined_benchmark -- \
+  127.0.0.1:4433 1800 1800 16 1024 4
 ```
 
 ## Architecture
-
-### Multi-Worker with SO_REUSEPORT
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -64,14 +73,15 @@ cargo run --bin pipelined_benchmark -- 127.0.0.1:4433 \
 └─────────────────────────────────────────────────────────┘
 ```
 
-Each worker has its own `TquicRuntime` running on its own OS thread. The kernel distributes UDP packets across workers via SO_REUSEPORT.
+Each worker runs its own `TquicRuntime` on a dedicated OS thread. The kernel distributes incoming UDP packets across workers via SO_REUSEPORT — no load balancer required.
 
-### RPC Framework
+## Usage
+
+### Define an RPC Service
 
 ```rust
 use quiccrunch_core::rpc::service::{ServiceDefinition, MethodDefinition, StreamingType};
 
-// Define a service
 let mut service = ServiceDefinition::new(1, "Calculator");
 service.add_method(MethodDefinition {
     id: 1,
@@ -85,20 +95,15 @@ service.add_method(MethodDefinition {
 ### Authentication
 
 ```rust
-use quiccrunch_core::interceptor::auth::{AuthInterceptor, Claims};
+use quiccrunch_core::interceptor::auth::AuthInterceptor;
 
-// Create auth interceptor with JWT
 let auth = AuthInterceptor::with_secret("secret-key".to_string());
-
-// Generate token
 let token = auth.generate_token(
     "user123",
     vec!["admin".to_string()],
     vec!["read".to_string(), "write".to_string()],
     HashMap::new(),
 )?;
-
-// Verify token
 let claims = auth.verify_token(&token)?;
 ```
 
@@ -107,97 +112,55 @@ let claims = auth.verify_token(&token)?;
 ```rust
 use quiccrunch_core::rpc::rate_limit::{RateLimitInterceptor, DdosProtectionConfig};
 
-// Create rate limiter
 let rate_limiter = RateLimitInterceptor::new(
     1000,  // requests per second
     5000,  // burst capacity
     DdosProtectionConfig::default(),
 );
-
-// Check rate limit
 rate_limiter.check_rate_limit("client1", "my_service", 1024).await?;
 ```
 
-### Metrics
+### Prometheus Metrics
 
 ```rust
 use quiccrunch_core::rpc::metrics::RpcMetrics;
 
 let metrics = RpcMetrics::new();
-
-// Record request
 metrics.record_request("my_service", "my_method", duration).await;
-
-// Get Prometheus format
 let prometheus = metrics.to_prometheus().await;
 ```
 
-## Binaries
+## Workspace Crates
 
-| Binary | Description |
-|--------|-------------|
-| `multi_worker_server` | Multi-worker QUIC server (recommended) |
-| `mt_server` | Single-runtime server (for comparison) |
-| `pipelined_benchmark` | High-performance benchmark client |
-| `quic_server` | Production server with logging |
-| `quic_client` | Production client |
-
-## Configuration
-
-### Environment Variables
-
-```bash
-# Logging
-RUST_LOG=info        # Set log level
-RUST_LOG=debug       # Verbose output
-
-# Server
-RUST_LOG=warn ./target/debug/multi_worker_server 127.0.0.1:4433 cert.pem key.pem 4
-```
-
-### Command Line Arguments
-
-```bash
-# multi_worker_server: address cert_file key_file worker_count
-./target/debug/multi_worker_server 0.0.0.0:8443 cert.pem key.pem 8
-
-# pipelined_benchmark: address pipeline_depth messages_per_stream connections msg_size workers
-./target/debug/pipelined_benchmark 127.0.0.1:4433 1800 1800 16 1024 4
-```
+| Crate | Description |
+|-------|-------------|
+| `quiccrunch-core` | Core library — transport, RPC, crypto, metrics |
+| `quiccrunch-cli` | Command-line client |
+| `quiccrunch-macros` | Procedural macros for RPC codegen |
+| `quiccrunch-ffi` | C FFI bindings |
 
 ## Features
 
-### Production Infrastructure
+- **Transport**: QUIC via tQUIC backend, multi-stream multiplexing
+- **Serialization**: Cap'n Proto with SIMD-accelerated parsing (AVX2)
+- **Security**: JWT auth (HS256/RS256), RBAC, TLS 1.3 with hardware acceleration
+- **Observability**: OpenTelemetry/Prometheus metrics, structured logging with correlation IDs
+- **Resilience**: Token bucket rate limiting, DDoS protection with auto-blocking
+- **Production**: Health checks (`/health/live`, `/health/ready`), graceful shutdown
 
-- **Health Checks**: `/health/live`, `/health/ready` endpoints
-- **Graceful Shutdown**: Signal handling (SIGTERM, SIGINT) with connection draining
-- **Configuration**: JSON/TOML/YAML config files, environment variables
-- **Structured Logging**: Correlation IDs, JSON-formatted logs
+## Contributing
 
-### RPC Framework
-
-- **Service Reflection**: Introspect services and methods at runtime
-- **Authentication**: JWT tokens with RS256/HS256 support
-- **Authorization**: Role-based access control (RBAC)
-- **Rate Limiting**: Token bucket algorithm with per-client limits
-- **DDoS Protection**: Auto-blocking after violations
-- **Metrics**: OpenTelemetry/Prometheus integration
-- **SIMD Parsing**: AVX2-optimized message parsing
-
-## Building
-
-### Using Nix (Recommended)
+Contributions are welcome! Please open an issue first to discuss what you'd like to change.
 
 ```bash
-nix develop -c bash -c "cargo build --release"
-```
+# Run the full test suite
+cargo test --all-features
 
-### Using Cargo
-
-```bash
-cargo build --release
+# Check formatting and lints
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features
 ```
 
 ## License
 
-Apache-2.0 OR MIT
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.

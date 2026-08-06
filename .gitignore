@@ -1,5 +1,6 @@
 # Build artifacts
 target/
+target_baseline/
 
 # Temporary logs
 *.log
@@ -32,15 +33,39 @@ flamegraph*.svg
 test_results/
 performance_investigation/
 on/
-target_baseline/
+benchmark_results/
+benchmark_results_mt/
+performance_results/
+bidirectional_results/
+validation_test_results/
+comprehensive_comparison_*/
 
-# Certificate files (for security)
+# Certificate files (never commit secrets)
 *.pem
 *.key
 *.crt
 *.cert
 
-# Temporary benchmark files
-simple_bench
-extended_performance_test
-performance_comparison
+# Databases
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+dist/
+*.egg-info/
+
+# Nix
+result
+result-*
+
+# Vendored dependencies
+tquic-upstream/
+
+# Environment files
+.env
+.env.local
+.env.*.local

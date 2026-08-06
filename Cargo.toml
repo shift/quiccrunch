@@ -4,10 +4,6 @@ members = [
     "quiccrunch-macros",
     "quiccrunch-cli",
     "quiccrunch-ffi",
-    "benchmark_comparison/grpc",
-    "benchmark_comparison/quiccrunch",
-    # "quiccrunch-security", # Temporarily disabled due to missing dependencies
-    # "tests/load-testing", # Temporarily disabled - directory removed for space
 ]
 resolver = "2"
 

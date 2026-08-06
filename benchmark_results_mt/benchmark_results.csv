@@ -1,5 +1,0 @@
-TestID,MessageSize,MessageCount,Concurrency,Duration,ThroughputMsgPerSec,ThroughputMbps,AvgLatencyMs,Success,TotalBytesSent,TotalBytesReceived
-64B_100msg_1c,64,100,1,10.021934086,9.97,0,100.2000,1,0,0
-64B_100msg_5c,64,100,5,10.035385812,49.82,0,20.0000,1,0,0
-64B_1000msg_1c,64,1000,1,10.019274426,99.80,0,10.0000,1,0,0
-64B_1000msg_5c,64,1000,5,10.031407052,498.43,0,2.0000,0,0,0
