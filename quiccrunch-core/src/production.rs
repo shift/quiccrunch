@@ -270,8 +270,8 @@ impl ConfigManager {
         }
     }
 
-    /// Load configuration from file
-    pub async fn load_from_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// Load configuration from JSON file
+    pub async fn load_from_json(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let content = tokio::fs::read_to_string(path).await?;
         let config: serde_json::Value = serde_json::from_str(&content)?;
         
@@ -279,6 +279,42 @@ impl ConfigManager {
         *current_config = config;
         
         Ok(())
+    }
+
+    /// Load configuration from TOML file
+    pub async fn load_from_toml(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let content = tokio::fs::read_to_string(path).await?;
+        let config: serde_json::Value = toml::from_str(&content)?;
+        
+        let mut current_config = self.config.write().await;
+        *current_config = config;
+        
+        Ok(())
+    }
+
+    /// Load configuration from YAML file
+    pub async fn load_from_yaml(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let content = tokio::fs::read_to_string(path).await?;
+        let config: serde_json::Value = serde_yaml::from_str(&content)?;
+        
+        let mut current_config = self.config.write().await;
+        *current_config = config;
+        
+        Ok(())
+    }
+
+    /// Auto-detect file format and load configuration
+    pub async fn load(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if path.ends_with(".json") {
+            self.load_from_json(path).await
+        } else if path.ends_with(".toml") {
+            self.load_from_toml(path).await
+        } else if path.ends_with(".yaml") || path.ends_with(".yml") {
+            self.load_from_yaml(path).await
+        } else {
+            // Try JSON as default
+            self.load_from_json(path).await
+        }
     }
 
     /// Load configuration from environment variables
@@ -339,10 +375,26 @@ impl ConfigManager {
         }
     }
 
-    /// Save configuration to file
-    pub async fn save_to_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// Save configuration to JSON file
+    pub async fn save_to_json(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let config = self.config.read().await;
         let content = serde_json::to_string_pretty(&*config)?;
+        tokio::fs::write(path, content).await?;
+        Ok(())
+    }
+
+    /// Save configuration to TOML file
+    pub async fn save_to_toml(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let config = self.config.read().await;
+        let content: String = toml::to_string_pretty(&*config)?;
+        tokio::fs::write(path, content).await?;
+        Ok(())
+    }
+
+    /// Save configuration to YAML file
+    pub async fn save_to_yaml(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let config = self.config.read().await;
+        let content: String = serde_yaml::to_string(&*config)?;
         tokio::fs::write(path, content).await?;
         Ok(())
     }
@@ -410,6 +462,41 @@ impl StructuredLogger {
             log::Level::Debug => log::debug!("{}", log_entry),
             log::Level::Trace => log::trace!("{}", log_entry),
         }
+    }
+
+    /// Log a request
+    pub async fn log_request(&self, method: &str, path: &str, headers: &HashMap<String, String>, body_size: usize) {
+        let mut context = HashMap::new();
+        context.insert("type".to_string(), serde_json::json!("request"));
+        context.insert("method".to_string(), serde_json::json!(method));
+        context.insert("path".to_string(), serde_json::json!(path));
+        context.insert("body_size".to_string(), serde_json::json!(body_size));
+        context.insert("headers".to_string(), serde_json::json!(headers));
+        
+        self.log(log::Level::Info, "Incoming request", context).await;
+    }
+
+    /// Log a response
+    pub async fn log_response(&self, status: u16, path: &str, body_size: usize, duration_ms: u64) {
+        let mut context = HashMap::new();
+        context.insert("type".to_string(), serde_json::json!("response"));
+        context.insert("status".to_string(), serde_json::json!(status));
+        context.insert("path".to_string(), serde_json::json!(path));
+        context.insert("body_size".to_string(), serde_json::json!(body_size));
+        context.insert("duration_ms".to_string(), serde_json::json!(duration_ms));
+        
+        self.log(log::Level::Info, "Outgoing response", context).await;
+    }
+
+    /// Log an error
+    pub async fn log_error(&self, error: &str, path: &str, status: u16) {
+        let mut context = HashMap::new();
+        context.insert("type".to_string(), serde_json::json!("error"));
+        context.insert("error".to_string(), serde_json::json!(error));
+        context.insert("path".to_string(), serde_json::json!(path));
+        context.insert("status".to_string(), serde_json::json!(status));
+        
+        self.log(log::Level::Error, "Request error", context).await;
     }
 }
 

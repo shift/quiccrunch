@@ -62,6 +62,8 @@ aesni = "0.8"                    # AES-NI hardware acceleration
 aes-gcm = "0.10"                 # AES-GCM cipher implementation
 getrandom = "0.2"                # Random number generation for crypto
 jsonwebtoken = { version = "9.2", optional = true }             # JWT token authentication
+toml = "0.8"                     # TOML configuration file support
+serde_yaml = "0.9"               # YAML configuration file support
 
   # gRPC dependencies for comparison
 tonic = { version = "0.10", optional = true }
