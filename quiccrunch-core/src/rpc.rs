@@ -182,6 +182,7 @@ pub mod retry;
 pub mod service;
 pub mod error;
 pub mod reflection;
+pub mod rate_limit;
 // pub mod discovery; // Temporarily disabled
 
 #[cfg(feature = "auth")]
