@@ -545,16 +545,25 @@ impl TquicRuntime {
                         }
                         RuntimeCommand::OpenStream { conn_index, resp } => {
                             let stream_id = next_stream_ids.entry(conn_index).or_insert(0);
-                            let result = adapter.endpoint.conn_get_mut(conn_index)
-                                .and_then(|conn| conn.stream_new(*stream_id, 0, true).ok())
-                                .ok_or_else(|| TransportError::StreamError("Failed to open stream".into()));
-                            
-                            if result.is_ok() {
-                                let current_id = *stream_id;
-                                *stream_id += 4;
-                                let _ = resp.send(Ok(current_id));
-                            } else {
-                                let _ = resp.send(result.map(|_| 0));
+                            let conn = adapter.endpoint.conn_get_mut(conn_index);
+                            if conn.is_none() {
+                                log::error!("OpenStream: connection {} not found", conn_index);
+                                let _ = resp.send(Err(TransportError::StreamError("Connection not found".into())));
+                                continue;
+                            }
+                            let conn = conn.unwrap();
+                            log::debug!("OpenStream: creating stream {} on connection {}", *stream_id, conn_index);
+                            match conn.stream_new(*stream_id, 0, true) {
+                                Ok(()) => {
+                                    log::debug!("OpenStream: stream {} created successfully", *stream_id);
+                                    let current_id = *stream_id;
+                                    *stream_id += 4;
+                                    let _ = resp.send(Ok(current_id));
+                                }
+                                Err(e) => {
+                                    log::error!("OpenStream: stream {} creation failed: {:?}", *stream_id, e);
+                                    let _ = resp.send(Err(TransportError::StreamError(format!("Stream creation failed: {:?}", e))));
+                                }
                             }
                         }
                         RuntimeCommand::StreamWrite { conn_index, stream_id, data, fin, resp } => {
