@@ -94,6 +94,14 @@ pub struct WorkerConfig {
     pub application_protocols: Vec<Vec<u8>>,
     pub verify_cert: bool,
     pub ca_cert_file: Option<String>,
+    /// Client certificate and key presented to a server (mTLS).
+    pub client_cert_file: Option<String>,
+    pub client_key_file: Option<String>,
+    /// Server-side client CA (PEM file or directory). Setting this turns on
+    /// required mTLS on the server.
+    pub client_ca_file: Option<String>,
+    /// SPIFFE trust domain required for peer identities.
+    pub trust_domain: Option<String>,
 }
 
 impl Default for WorkerConfig {
@@ -110,6 +118,10 @@ impl Default for WorkerConfig {
             application_protocols: vec![b"h3".to_vec()],
             verify_cert: true,
             ca_cert_file: None,
+            client_cert_file: None,
+            client_key_file: None,
+            client_ca_file: None,
+            trust_domain: None,
         }
     }
 }

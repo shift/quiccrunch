@@ -570,8 +570,9 @@ impl TquicWorker {
         // Note: enable_early_data and set_application_protos methods don't exist in tQUIC v1.6.0
         // These would need to be set during TlsConfig creation
 
-        // Create TLS config
-        let _tls_config = if self.config.is_server {
+        // Create TLS config. Unlike the previous version, this config is actually
+        // installed on the endpoint below.
+        let mut tls_config = if self.config.is_server {
             if let (Some(cert_file), Some(key_file)) =
                 (&self.config.cert_file, &self.config.key_file)
             {
@@ -598,6 +599,87 @@ impl TquicWorker {
                 TransportError::Other(format!("Failed to create client TLS config: {:?}", e))
             })?
         };
+
+        if self.config.is_server {
+            if let Some(client_ca) = &self.config.client_ca_file {
+                if self.config.trust_domain.is_none() {
+                    return Err(TransportError::Other(
+                        "mTLS requires trust_domain when client_ca_file is set".into(),
+                    ));
+                }
+                if !std::path::Path::new(client_ca).exists() {
+                    return Err(TransportError::Other(format!(
+                        "client CA path does not exist: {}",
+                        client_ca
+                    )));
+                }
+                tls_config.set_ca_certs(client_ca).map_err(|e| {
+                    TransportError::Other(format!(
+                        "Failed to load client CA certificates from {}: {:?}",
+                        client_ca, e
+                    ))
+                })?;
+                tls_config.set_verify_client_cert(true);
+                tracing::info!(
+                    worker_id = self.worker_id,
+                    client_ca = %client_ca,
+                    "tQUIC worker mTLS ENABLED"
+                );
+            } else {
+                tracing::warn!(
+                    worker_id = self.worker_id,
+                    "tQUIC worker TLS is ONE-WAY: client_ca_file not set, mTLS is OFF"
+                );
+            }
+        } else {
+            match (&self.config.client_cert_file, &self.config.client_key_file) {
+                (Some(cert), Some(key)) => {
+                    tls_config.set_certificate_file(cert).map_err(|e| {
+                        TransportError::Other(format!(
+                            "Failed to load client certificate {}: {:?}",
+                            cert, e
+                        ))
+                    })?;
+                    tls_config.set_private_key_file(key).map_err(|e| {
+                        TransportError::Other(format!(
+                            "Failed to load client private key {}: {:?}",
+                            key, e
+                        ))
+                    })?;
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(TransportError::Other(
+                        "client_cert_file and client_key_file must be set together".into(),
+                    ))
+                }
+            }
+
+            if self.config.verify_cert {
+                tls_config.set_verify(true);
+                if let Some(ca_file) = &self.config.ca_cert_file {
+                    if !std::path::Path::new(ca_file).exists() {
+                        return Err(TransportError::Other(format!(
+                            "CA path does not exist: {}",
+                            ca_file
+                        )));
+                    }
+                    tls_config.set_ca_certs(ca_file).map_err(|e| {
+                        TransportError::Other(format!(
+                            "Failed to load CA certificates from {}: {:?}",
+                            ca_file, e
+                        ))
+                    })?;
+                }
+            } else {
+                tracing::warn!(
+                    worker_id = self.worker_id,
+                    "tQUIC worker client certificate verification is DISABLED; \
+                     only acceptable for loopback self-signed tests"
+                );
+            }
+        }
+        config.set_tls_config(tls_config);
 
         // Create handlers
         let endpoint_ptr = &mut self.endpoint as *mut Option<Endpoint>;

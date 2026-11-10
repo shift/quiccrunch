@@ -403,6 +403,7 @@ impl Interceptor for CircuitBreakerInterceptor {
 // Authentication and Authorization module
 #[cfg(feature = "auth")]
 pub mod auth;
+pub mod identity;
 #[cfg(feature = "auth")]
 pub use self::auth::{
     create_auth_interceptor, create_rbac_auth_interceptor, AuthConfig, AuthInterceptor,

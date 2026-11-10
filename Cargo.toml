@@ -33,6 +33,13 @@ quote = "1.0"
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 darling = "0.20"
 
+# tQUIC 1.6.0 does not expose the verified peer certificate chain on an
+# established connection, and its server TLS context cannot require a client
+# certificate. We vendor the unmodified upstream crate and apply the minimal
+# patch in patches/tquic-1.6.0-peer-identity.patch. See docs/SECURITY.md.
+[patch.crates-io]
+tquic = { path = "vendor/tquic" }
+
 [workspace.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

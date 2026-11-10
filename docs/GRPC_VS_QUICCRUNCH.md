@@ -231,10 +231,13 @@ a replicate/commit round trip is milliseconds of disk and consensus work, so the
 tens-to-hundreds of microseconds that separate these transports are not the
 bottleneck. Switching would buy no latency and would lose bulk throughput.
 
-The non-performance blockers are unchanged and decisive: the control plane needs
-mTLS/SPIFFE workload identity, and tQUIC's adapter has no client-certificate or
-metadata/auth integration. The flaky 1-worker/64-connection/depth-1800 cell is an
-additional operational risk, not a reason to migrate.
+The non-performance blocker has changed: the adapter now supports client
+certificate presentation, required server-side mTLS, and SPIFFE-bound peer
+identity reaching the method policy layer (see [`SECURITY.md`](SECURITY.md) and
+[`BACKEND_MESSAGING.md`](BACKEND_MESSAGING.md)). The remaining identity gaps are
+revocation (CRL/OCSP) and CA/server-certificate rotation without a restart. The
+flaky 1-worker/64-connection/depth-1800 cell remains an additional operational
+risk, not a reason to migrate.
 
 If QUIC is revisited, the experiments that could change this verdict are: many
 streams per connection (>16) to actually stress h2 HOL blocking, a lossy WAN

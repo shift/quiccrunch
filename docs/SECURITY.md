@@ -57,42 +57,149 @@ tQUIC benches, examples and tests, and one `WorkerConfig` example opt out
 explicitly. `RuntimeOptions::insecure_loopback_test()` was deliberately not
 added: a helper would hide the decision behind a function name.
 
-## Server side
+## Client certificate presentation
 
-* The adapter's server branch creates `TlsConfig::new_server_config(cert, key,
-  alpn, enable_early_data)` and never calls `set_verify(true)` or loads a client
-  CA. It therefore does **not** request or verify client certificates: the
-  adapter provides one-way TLS only.
-* This is a capability gap, not a fail-open verification default. There is no
-  code path that *claims* to verify clients and silently does not; mTLS is
-  unimplemented. Adding it needs a client-CA option and a deliberate API, so it
-  is not part of this fix.
-* `distri-kv` needs mTLS/SPIFFE workload identity, which remains a blocker for
-  moving the control plane to this adapter.
-* The server's `enable_early_data` argument is hard-coded `true`. The client
-  config passes `false`, so 0-RTT is not negotiated by the adapter today. If a
-  caller enables client early data, it must treat request replay as a risk.
+Clients present a certificate when `RuntimeOptions::client_cert_file` and
+`RuntimeOptions::client_key_file` are both set (or the equivalent
+`WorkerConfig` fields). Setting only one is a configuration error. The same
+fields exist on the worker-pool `WorkerConfig`.
 
-## Separate tQUIC worker-pool path (reported, not changed)
+## Server-side mTLS
 
-`quiccrunch-core/src/transport/worker.rs` (used by `AsyncTquicClient`) builds a
-`TlsConfig` but binds it to `_tls_config` and never calls
-`Config::set_tls_config`. It also ignores `WorkerConfig::verify_cert` and
-`WorkerConfig::ca_cert_file`. That is a pre-existing bug in a path that is not
-the adapter and not the transport measured by `comparison/`. It fails closed in
-practice (a QUIC handshake without a TLS config cannot succeed), but it should
-be wired up and tested separately before anyone relies on `AsyncTquicClient`
-for security decisions.
+The adapter's server branch is configured through `RuntimeOptions`:
+
+| Option | Meaning |
+| --- | --- |
+| `client_ca_file` | PEM file **or** directory of client trust anchors. Presence turns mTLS on. |
+| `trust_domain` | Required with `client_ca_file`; the SPIFFE trust domain peer SANs must match. |
+
+When `client_ca_file` is set the server:
+
+1. loads those anchors into BoringSSL's verify store;
+2. calls the patched `TlsConfig::set_verify_client_cert(true)`, which sets
+   `SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT` and therefore requests a
+   client certificate and makes a missing or unverifiable one a handshake
+   failure;
+3. re-checks the presented chain in `on_conn_established` as defence in depth,
+   closes the connection with application error code `0x100`/`0x101` if no
+   verified identity is available, and does not report the connection as
+   established to the runtime;
+4. increments `RuntimeMetrics::mtls_rejections` on every rejection and
+   `mtls_handshakes` only after the SPIFFE SAN has been validated.
+   `RuntimeMetrics::mtls_enabled` reports whether this runtime is an mTLS
+   server.
+
+A non-existent CA path is a startup error. This matters because tQUIC's
+`set_ca_certs` treats a non-file path as a directory and BoringSSL accepts a
+missing directory as an empty trust store; the adapter refuses the path before
+handing it to BoringSSL.
+
+When `client_ca_file` is **not** set the server stays on one-way TLS and emits
+a `warn!` saying mTLS is OFF. It does not claim to authenticate clients.
+
+## Peer certificate extraction: patched tQUIC 1.6.0
+
+Finding: tQUIC 1.6.0 *does* expose `TlsSession::peer_cert()` and
+`TlsSession::peer_cert_chain()` internally (backed by
+`SSL_get0_peer_certificates`), but `Connection` exposes no accessor and
+`TlsConfig::set_verify` only sets `SSL_VERIFY_PEER`; there is no safe public way
+for an application to (a) require a client certificate or (b) read the verified
+peer chain.
+
+We vendor the unmodified upstream crate under `vendor/tquic/` and apply the
+minimal patch in [`../patches/tquic-1.6.0-peer-identity.patch`](../patches/tquic-1.6.0-peer-identity.patch):
+
+* `Connection::peer_cert_chain() -> Option<Vec<Vec<u8>>>` and
+  `Connection::peer_cert() -> Option<Vec<u8>>` return the verified peer chain in
+  DER (leaf first);
+* `TlsConfig::set_verify_client_cert(bool)` and the BoringSSL
+  `Context::set_verify_client_cert(bool)` set
+  `SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT`.
+
+`[patch.crates-io] tquic = { path = "vendor/tquic" }` in the workspace
+`Cargo.toml` selects the patched copy. Maintenance cost is honest and bounded:
+three source files, ~60 lines, no changes to QUIC/TLS internals. Upgrading
+tQUIC means re-applying this patch against the new tag and re-running the mTLS
+tests. The patch is written in upstream style and is a reasonable upstream PR
+(peer-chain accessors are generally useful; the verify mode is a standard
+BoringSSL knob).
+
+## SPIFFE identity model
+
+The verified leaf certificate must contain exactly one `spiffe://` URI SAN.
+`quiccrunch-core/src/identity.rs` parses it, normalises it, and rejects:
+
+* a missing or non-`spiffe://` SAN (`MissingSpiffeSan`);
+* more than one SPIFFE URI, an empty trust domain or path, uppercase trust
+  domains, userinfo/port components, and empty/`.`/`..` path segments
+  (`MalformedSpiffeId`);
+* a SAN whose trust domain differs from `RuntimeOptions::trust_domain`
+  (`TrustDomainMismatch`).
+
+A successful identity is exposed as `PeerIdentity` via
+`TquicConnection::peer_identity()` (both client and server sides) and
+`TquicListener::accept_with_identity()`. On the client the identity is exposed
+only when `verify_server_cert`/`WorkerConfig::verify_cert` are on; an
+unverified server chain is never turned into an identity. Kubernetes-style
+paths expose `SpiffeId::namespace()` and `SpiffeId::service_account()`.
+
+RBAC mapping: the server copies `PeerIdentity::spiffe_id()` into request
+metadata under `x-quiccrunch-peer-spiffe-id` when it builds the `RpcContext`
+(never from client-supplied metadata). `SpiffePolicy` maps a method
+`Service.Method` to an explicit allowlist of SPIFFE IDs and denies everything
+else, including a missing identity. The `auth`-feature
+`SpiffeIdentityInterceptor` in `interceptor/identity.rs` applies that policy in
+the existing interceptor chain. Methods without a rule are unchanged; use
+`with_require_identity(true)` to fail closed for the whole service.
+
+## Remaining gaps
+
+* Certificate revocation (CRL/OCSP) is not checked. The trust anchor and
+  expiry are checked by BoringSSL; a revoked-but-unexpired certificate is
+  still accepted.
+* Trust anchors and the server certificate are loaded at startup. Issuing a
+  second client certificate from the same CA works without a restart (tested);
+  rotating the CA or the server certificate still requires a restart.
+* SPIFFE bundle-endpoint federation and JWT-SVID support are not implemented;
+  this is X.509-SVID identity only.
+* `AsyncTquicClient`/`worker.rs` now installs its `TlsConfig`, honours
+  `verify_cert`/`ca_cert_file`, presents a client certificate and can require
+  a client CA, but it does not yet expose the peer identity to callers. Use the
+  adapter (`TquicClient`/`TquicServer`) for identity-based authorization.
+* The client verifies the server certificate chain but the adapter has no
+  client-side SPIFFE *policy* for server identities; the server identity is
+  exposed for callers to check.
+* 0-RTT is disabled on the adapter (`new_server_config(..., false)` and client
+  early data `false`). If a caller enables it, request replay must be treated
+  as a risk.
 
 ## Tests
 
-`quiccrunch-core/src/transport/adapter.rs` contains:
+`quiccrunch-core/tests/mtls_identity.rs` generates all certificates in-test and
+runs over real loopback UDP sockets:
+
+* matching CA + client certificate completes mTLS and exposes the client
+  `spiffe://...` identity on the server;
+* server rejects: no client certificate, a certificate from a foreign CA, an
+  expired certificate, and a SPIFFE SAN outside the configured trust domain;
+* client rejects a server certificate signed by a foreign CA by default;
+* the SPIFFE identity reaches `SpiffePolicy` and a method allowlist denies an
+  identity it does not contain;
+* a second client certificate from the same CA is accepted without restarting
+  the server.
+
+`quiccrunch-core/src/transport/adapter.rs` also keeps:
 
 * `runtime_options_verify_server_cert_by_default` — pins `true` on
   `RuntimeOptions::default()`, `benchmark()`, `benchmark_client()` and
   `WorkerConfig::default()`.
-* `self_signed_server_is_rejected_with_default_options` — starts a server with
-  a freshly generated self-signed loopback certificate and asserts that a
-  default client cannot complete the handshake (handshake timeout/TLS failure).
-* `explicit_opt_out_accepts_self_signed_loopback_server` — proves the opt-out
-  path is the only reason the connection is accepted.
+* `self_signed_server_is_rejected_with_default_options`.
+* `explicit_opt_out_accepts_self_signed_loopback_server`.
+
+Reproduce:
+
+```bash
+cd /tmp/opencode/qc-id
+nix develop -c env CARGO_TARGET_DIR=/run/media/shift/80c4f9f3-68ab-424f-830b-1c14514bc50f/code/.cargo-target-qc-id \
+  cargo test --offline -p quiccrunch-core --test mtls_identity -- --test-threads=1
+```

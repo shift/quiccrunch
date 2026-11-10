@@ -60,6 +60,7 @@ mod stream_splitter; // Stream splitting for concurrent RPC operations
                      //pub mod metrics;
                      //pub mod power;
 pub mod config;
+pub mod identity;
 //pub mod client;
 //pub mod server;
 pub mod production;
