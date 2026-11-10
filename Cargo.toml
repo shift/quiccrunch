@@ -4,6 +4,7 @@ members = [
     "quiccrunch-macros",
     "quiccrunch-cli",
     "quiccrunch-ffi",
+    "comparison",
 ]
 resolver = "2"
 

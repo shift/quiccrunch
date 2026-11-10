@@ -7,10 +7,10 @@
 //!   cargo run --example bidirectional_streaming_fixed server
 //!   cargo run --example bidirectional_streaming_fixed client
 
-use quiccrunch_core::transport::adapter::{TquicClient, TquicServer};
+use quiccrunch_core::transport::adapter::{RuntimeOptions, TquicClient, TquicServer};
 use quiccrunch_core::TransportError;
-use std::time::Duration;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::oneshot;
 
 #[tokio::main]
@@ -45,12 +45,12 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr = "127.0.0.1:4433".parse().unwrap();
     let cert_file = "cert.pem".to_string();
     let key_file = "key.pem".to_string();
-    
+
     // Generate test certificates if they don't exist
     if !std::path::Path::new(&cert_file).exists() {
         generate_test_certificates(&cert_file, &key_file)?;
     }
-    
+
     let server = TquicServer::new(bind_addr, cert_file, key_file, Some(4)).await?;
     let addr = "127.0.0.1:4433";
     let mut listener = server.listen(addr).await?;
@@ -58,7 +58,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     // Use a shutdown signal for graceful shutdown
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    
+
     // Handle Ctrl+C
     let shutdown_tx = Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx)));
     ctrlc::set_handler(move || {
@@ -68,7 +68,8 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = tx.send(());
             }
         }
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     loop {
         tokio::select! {
@@ -102,13 +103,15 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection(connection: quiccrunch_core::transport::adapter::TquicConnection) -> Result<(), TransportError> {
+async fn handle_connection(
+    connection: quiccrunch_core::transport::adapter::TquicConnection,
+) -> Result<(), TransportError> {
     log::info!("Handling new connection");
-    
+
     match connection.accept_stream().await {
         Ok(mut stream) => {
             log::info!("Stream accepted, starting echo loop");
-            
+
             loop {
                 match stream.receive(8192).await {
                     Ok(data) => {
@@ -116,10 +119,10 @@ async fn handle_connection(connection: quiccrunch_core::transport::adapter::Tqui
                             log::info!("Received empty data, closing stream");
                             break;
                         }
-                        
+
                         let message = String::from_utf8_lossy(&data);
                         log::info!("Received: {}", message);
-                        
+
                         let response = format!("Echo: {}", message);
                         match stream.send(response.as_bytes(), false).await {
                             Ok(_) => {
@@ -137,7 +140,7 @@ async fn handle_connection(connection: quiccrunch_core::transport::adapter::Tqui
                     }
                 }
             }
-            
+
             if let Err(e) = stream.close().await {
                 log::error!("Error closing stream: {}", e);
             }
@@ -146,29 +149,34 @@ async fn handle_connection(connection: quiccrunch_core::transport::adapter::Tqui
             log::error!("Failed to accept stream: {}", e);
         }
     }
-    
+
     log::info!("Connection handler complete");
     Ok(())
 }
 
 async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Starting bidirectional streaming client");
-    
+
     // Give server time to start
     tokio::time::sleep(Duration::from_millis(500)).await;
-    
-    let client = TquicClient::new(Some(2)).await?;
+
+    let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    })
+    .await?;
     let addr = "127.0.0.1:4433";
-    
+
     log::info!("Connecting to {}", addr);
     match client.connect(addr).await {
         Ok(connection) => {
             log::info!("Connected: conn_index={:?}", connection.conn_index);
-            
+
             match connection.open_stream().await {
                 Ok(mut stream) => {
                     log::info!("Stream opened: stream_id={}", stream.stream_id);
-                    
+
                     let messages = vec![
                         "Hello from client!",
                         "This is message 2",
@@ -176,12 +184,12 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                         "Fourth message here",
                         "Final message!",
                     ];
-                    
+
                     log::info!("Sending {} messages", messages.len());
-                    
+
                     for (i, msg) in messages.iter().enumerate() {
                         log::info!("Message {}: {}", i + 1, msg);
-                        
+
                         match stream.send(msg.as_bytes(), false).await {
                             Ok(_) => {
                                 log::info!("Message sent successfully");
@@ -191,7 +199,7 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                                 break;
                             }
                         }
-                        
+
                         match stream.receive(8192).await {
                             Ok(data) if !data.is_empty() => {
                                 let response = String::from_utf8_lossy(&data);
@@ -205,10 +213,10 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                                 break;
                             }
                         }
-                        
+
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
-                    
+
                     log::debug!("Closing stream");
                     if let Err(e) = stream.send(&[], true).await {
                         log::error!("Error sending close: {}", e);
@@ -221,7 +229,7 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                     log::error!("Failed to open stream: {}", e);
                 }
             }
-            
+
             log::debug!("Closing connection");
             if let Err(e) = connection.close().await {
                 log::error!("Error closing connection: {}", e);
@@ -231,28 +239,33 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
             log::error!("Failed to connect: {}", e);
         }
     }
-    
+
     log::info!("Client finished successfully");
     Ok(())
 }
 
-fn generate_test_certificates(cert_file: &str, key_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_test_certificates(
+    cert_file: &str,
+    key_file: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     use rcgen::{Certificate, CertificateParams, KeyPair};
     use std::fs::File;
     use std::io::Write;
-    
+
     let mut params = CertificateParams::default();
-    params.distinguished_name.push(rcgen::DnType::CommonName, "localhost");
-    
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "localhost");
+
     let cert = Certificate::from_params(params)?;
     let cert_pem = cert.serialize_pem()?;
     let key_pem = cert.serialize_private_key_pem()?;
-    
+
     let mut cert_file = File::create(cert_file)?;
     cert_file.write_all(cert_pem.as_bytes())?;
-    
+
     let mut key_file = File::create(key_file)?;
     key_file.write_all(key_pem.as_bytes())?;
-    
+
     Ok(())
 }

@@ -58,13 +58,15 @@ fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
 fn run_client() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Starting TQUIC client (synchronous mio)");
-    
+
     thread::sleep(Duration::from_secs(1));
 
     let config = WorkerConfig {
         worker_id: 0,
         bind_addr: "127.0.0.1:0".parse()?,
         is_server: false,
+        // Loopback self-signed example certificate: opt out explicitly.
+        verify_cert: false,
         ..Default::default()
     };
 

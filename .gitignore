@@ -69,3 +69,7 @@ tquic-upstream/
 .env
 .env.local
 .env.*.local
+
+# Comparison harness: throwaway TLS material and scratch calibration output
+comparison/certs/
+comparison/results/matrix-calraw.csv

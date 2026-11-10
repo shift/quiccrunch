@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use mio::{Interest, Waker};
 use tokio::sync::{mpsc, oneshot};
 
@@ -576,6 +576,17 @@ pub struct RuntimeOptions {
     pub initial_max_stream_data: u64,
     /// ACK every N ack-eliciting packets; 1 minimises RTT at the cost of ACKs.
     pub ack_eliciting_threshold: u64,
+    /// Verify the server certificate chain and name on the client.
+    ///
+    /// **Defaults to `true`.** This is the security-relevant default for the
+    /// real data path. A caller that talks to a self-signed loopback test
+    /// certificate must opt out explicitly and visibly, e.g.
+    /// `RuntimeOptions { verify_server_cert: false, ..Default::default() }`.
+    /// Disabling it emits a warning when the runtime is constructed.
+    pub verify_server_cert: bool,
+    /// PEM file with the trust anchors used when `verify_server_cert` is set.
+    /// When unset, the platform trust store is used.
+    pub ca_cert_file: Option<String>,
 }
 
 impl Default for RuntimeOptions {
@@ -590,6 +601,8 @@ impl Default for RuntimeOptions {
             initial_max_data: 32 * 1024 * 1024,
             initial_max_stream_data: 8 * 1024 * 1024,
             ack_eliciting_threshold: 2,
+            verify_server_cert: true,
+            ca_cert_file: None,
         }
     }
 }
@@ -608,6 +621,8 @@ impl RuntimeOptions {
             initial_max_data: 64 * 1024 * 1024,
             initial_max_stream_data: 16 * 1024 * 1024,
             ack_eliciting_threshold: 1,
+            verify_server_cert: true,
+            ca_cert_file: None,
         }
     }
 
@@ -672,11 +687,43 @@ impl TquicAdapter {
 
             quic_config.set_tls_config(tls_config);
         } else {
-            let tls_config =
+            // Two independent switches can disable verification: the runtime
+            // option (used by TquicRuntime clients) and WorkerConfig::verify_cert
+            // (used by callers constructing TquicAdapter directly). Both must
+            // opt out; either one being false wins, so a caller cannot
+            // accidentally re-enable a deliberately insecure test transport.
+            let verify = options.verify_server_cert && config.verify_cert;
+            let ca_file = options
+                .ca_cert_file
+                .as_ref()
+                .or(config.ca_cert_file.as_ref());
+
+            let mut tls_config =
                 TlsConfig::new_client_config(vec![b"h3".to_vec(), b"http/0.9".to_vec()], false)
                     .map_err(|e| {
                         TransportError::ConfigError(format!("TLS config failed: {:?}", e))
                     })?;
+
+            if verify {
+                tls_config.set_verify(true);
+                // With no explicit CA file the BoringSSL context keeps the
+                // platform trust store loaded in Context::new().
+                if let Some(ca_file) = ca_file {
+                    tls_config.set_ca_certs(ca_file).map_err(|e| {
+                        TransportError::ConfigError(format!(
+                            "Failed to load CA certificates from {}: {:?}",
+                            ca_file, e
+                        ))
+                    })?;
+                }
+            } else {
+                warn!(
+                    "tQUIC client TLS server-certificate verification is DISABLED \
+                     (verify_server_cert={}, WorkerConfig::verify_cert={}); \
+                     this is only acceptable for loopback self-signed test certificates",
+                    options.verify_server_cert, config.verify_cert
+                );
+            }
 
             quic_config.set_tls_config(tls_config);
         }
@@ -1956,3 +2003,104 @@ impl Clone for TquicStream {
 }
 
 impl Unpin for TquicStream {}
+
+#[cfg(test)]
+mod tls_verification_tests {
+    //! The TLS default is security-relevant: a regression to `false` would
+    //! silently make the real data path accept any certificate. These tests
+    //! pin the default and prove that a self-signed loopback server is
+    //! rejected with it (and only accepted when a caller opts out by name).
+
+    use super::*;
+    use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType};
+    use std::time::Duration;
+
+    #[test]
+    fn runtime_options_verify_server_cert_by_default() {
+        assert!(
+            RuntimeOptions::default().verify_server_cert,
+            "RuntimeOptions::default() must verify the server certificate"
+        );
+        assert!(
+            RuntimeOptions::benchmark(0).verify_server_cert,
+            "benchmark() must preserve certificate verification"
+        );
+        assert!(
+            RuntimeOptions::benchmark_client().verify_server_cert,
+            "benchmark_client() must preserve certificate verification"
+        );
+        assert!(
+            crate::transport::messages::WorkerConfig::default().verify_cert,
+            "WorkerConfig::default() must verify the server certificate"
+        );
+    }
+
+    fn self_signed_server() -> (tempfile::TempDir, SocketAddr) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut params = CertificateParams::new(vec!["127.0.0.1".to_string()]);
+        params.distinguished_name = DistinguishedName::new();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "loopback-self-signed-test");
+        let cert = Certificate::from_params(params).expect("generate cert");
+        std::fs::write(dir.path().join("cert.pem"), cert.serialize_pem().unwrap()).unwrap();
+        std::fs::write(dir.path().join("key.pem"), cert.serialize_private_key_pem()).unwrap();
+
+        // Pick a free UDP port, then let the server bind it.
+        let probe = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let addr = probe.local_addr().unwrap();
+        drop(probe);
+        (dir, addr)
+    }
+
+    #[tokio::test]
+    async fn self_signed_server_is_rejected_with_default_options() {
+        let (dir, addr) = self_signed_server();
+        let _server = TquicServer::new(
+            addr,
+            dir.path().join("cert.pem").to_string_lossy().into_owned(),
+            dir.path().join("key.pem").to_string_lossy().into_owned(),
+            Some(1),
+        )
+        .await
+        .expect("start server");
+
+        let client = TquicClient::new(None).await.expect("client");
+        let result =
+            tokio::time::timeout(Duration::from_secs(30), client.connect(&addr.to_string()))
+                .await
+                .expect("handshake attempt must not hang");
+        assert!(
+            result.is_err(),
+            "a self-signed server must be rejected when verify_server_cert is true"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_opt_out_accepts_self_signed_loopback_server() {
+        let (dir, addr) = self_signed_server();
+        let _server = TquicServer::new(
+            addr,
+            dir.path().join("cert.pem").to_string_lossy().into_owned(),
+            dir.path().join("key.pem").to_string_lossy().into_owned(),
+            Some(1),
+        )
+        .await
+        .expect("start server");
+
+        let client = TquicClient::with_options(RuntimeOptions {
+            // Loopback self-signed test certificate: the only reason this
+            // opt-out is legitimate.
+            verify_server_cert: false,
+            ..RuntimeOptions::default()
+        })
+        .await
+        .expect("client");
+        let result =
+            tokio::time::timeout(Duration::from_secs(30), client.connect(&addr.to_string())).await;
+        assert!(
+            matches!(result, Ok(Ok(_))),
+            "explicit opt-out must still connect to the loopback test server"
+        );
+    }
+}

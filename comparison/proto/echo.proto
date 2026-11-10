@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package comparison;
+
+// Minimal echo RPC. The payload is opaque application bytes; the server has no
+// business logic and does not inspect it.
+service Echo {
+  rpc Echo(stream EchoRequest) returns (stream EchoResponse);
+}
+
+message EchoRequest {
+  bytes payload = 1;
+}
+
+message EchoResponse {
+  bytes payload = 1;
+}
