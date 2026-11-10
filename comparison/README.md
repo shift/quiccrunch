@@ -22,12 +22,13 @@ the methodology and reproduction guide.
 | per-conn parallelism | 4 bidirectional h2 streams | 4 QUIC streams |
 | pipeline depth | 1 / 64 / 1800 requests in flight per stream | same |
 
-Both sides terminate TLS and **verify the server certificate**. The harness
-sets `RuntimeOptions::verify_server_cert = true` (a new, opt-in field on the
-QUIC adapter; its default is unchanged for compatibility) and loads a throwaway
-CA from `comparison/certs/`. Neither side uses mTLS: client certificates and
-SPIFFE identity, which the distri-kv control plane needs, are not implemented
-by either harness (see caveats).
+Both sides terminate TLS and **verify the server certificate**. The QUIC
+adapter verifies by default (`RuntimeOptions::verify_server_cert = true`,
+`WorkerConfig::verify_cert = true`); the harness supplies the throwaway CA from
+`comparison/certs/` and does not opt out. See
+[`docs/SECURITY.md`](../docs/SECURITY.md). Neither side uses mTLS: client
+certificates and SPIFFE identity, which the distri-kv control plane needs, are
+not implemented by either harness (see caveats).
 
 The RPC is intentionally empty of business logic:
 

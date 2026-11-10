@@ -1,4 +1,4 @@
-use quiccrunch_core::transport::adapter::{TquicClient, TquicServer};
+use quiccrunch_core::transport::adapter::{RuntimeOptions, TquicClient, TquicServer};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -14,7 +14,7 @@ async fn test_tquic_basic_send_receive() -> Result<(), Box<dyn std::error::Error
     let server_handle = tokio::spawn(async move {
         let connection = listener.accept().await.unwrap();
         let mut stream = connection.accept_stream().await.unwrap();
-        
+
         let data = loop {
             let data = stream.receive(1024).await.unwrap();
             if !data.is_empty() {
@@ -23,13 +23,18 @@ async fn test_tquic_basic_send_receive() -> Result<(), Box<dyn std::error::Error
             tokio::time::sleep(Duration::from_millis(10)).await;
         };
         assert_eq!(&data, b"Hello from client");
-        
+
         stream.send(b"Hello from server", false).await.unwrap();
     });
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let client = TquicClient::new(Some(1)).await?;
+    let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    })
+    .await?;
     let connection = client.connect(TEST_SERVER_ADDR).await?;
 
     let mut stream = connection.open_stream().await?;
@@ -43,7 +48,8 @@ async fn test_tquic_basic_send_receive() -> Result<(), Box<dyn std::error::Error
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    }).await?;
+    })
+    .await?;
     assert_eq!(&data, b"Hello from server");
 
     server_handle.await?;
@@ -59,7 +65,7 @@ async fn test_tquic_multiple_messages() -> Result<(), Box<dyn std::error::Error>
     let server_handle = tokio::spawn(async move {
         let connection = listener.accept().await.unwrap();
         let mut stream = connection.accept_stream().await.unwrap();
-        
+
         for i in 0..10 {
             let data = loop {
                 let data = stream.receive(1024).await.unwrap();
@@ -70,7 +76,7 @@ async fn test_tquic_multiple_messages() -> Result<(), Box<dyn std::error::Error>
             };
             let expected = format!("Message {}", i);
             assert_eq!(&data, expected.as_bytes());
-            
+
             let response = format!("Response {}", i);
             stream.send(response.as_bytes(), false).await.unwrap();
         }
@@ -78,7 +84,12 @@ async fn test_tquic_multiple_messages() -> Result<(), Box<dyn std::error::Error>
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let client = TquicClient::new(Some(1)).await?;
+    let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    })
+    .await?;
     let connection = client.connect(TEST_SERVER_ADDR_2).await?;
 
     let mut stream = connection.open_stream().await?;
@@ -95,7 +106,8 @@ async fn test_tquic_multiple_messages() -> Result<(), Box<dyn std::error::Error>
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-        }).await?;
+        })
+        .await?;
         let expected = format!("Response {}", i);
         assert_eq!(&data, expected.as_bytes());
     }
@@ -116,7 +128,7 @@ async fn test_tquic_large_payload() -> Result<(), Box<dyn std::error::Error>> {
     let server_handle = tokio::spawn(async move {
         let connection = listener.accept().await.unwrap();
         let mut stream = connection.accept_stream().await.unwrap();
-        
+
         let mut received = Vec::new();
         let mut empty_count = 0;
         loop {
@@ -135,16 +147,21 @@ async fn test_tquic_large_payload() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             }
         }
-        
+
         assert_eq!(received.len(), large_data_clone.len());
         assert_eq!(received, large_data_clone);
-        
+
         stream.send(b"ACK", false).await.unwrap();
     });
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let client = TquicClient::new(Some(1)).await?;
+    let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    })
+    .await?;
     let connection = client.connect(TEST_SERVER_ADDR_3).await?;
 
     let mut stream = connection.open_stream().await?;
@@ -158,7 +175,8 @@ async fn test_tquic_large_payload() -> Result<(), Box<dyn std::error::Error>> {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    }).await?;
+    })
+    .await?;
     assert_eq!(&data, b"ACK");
 
     server_handle.await?;

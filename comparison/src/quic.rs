@@ -38,9 +38,12 @@ impl QuicBackend {
             QuicProfile::Default => RuntimeOptions::default(),
         };
         if let Some(ca) = ca_file.as_ref() {
+            // Verification is on by default; this only supplies the test CA.
+            // The harness never disables it, including on loopback.
             options.verify_server_cert = true;
             options.ca_cert_file = Some(ca.clone());
         }
+        let verify = options.verify_server_cert;
         let mut clients = Vec::with_capacity(runtimes.max(1));
         for _ in 0..runtimes.max(1) {
             clients.push(
@@ -52,7 +55,7 @@ impl QuicBackend {
         Ok(Self {
             clients,
             profile,
-            verify: ca_file.is_some(),
+            verify,
         })
     }
 }

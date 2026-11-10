@@ -81,12 +81,17 @@ impl Transport for QuicTransport {
     type Config = QuicTransportConfig;
 
     async fn new(config: Self::Config) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        let client = tquic::TquicClient::new(None).await?;
-        
+        let client = tquic::TquicClient::with_options(crate::transport::adapter::RuntimeOptions {
+            // Loopback self-signed test certificate: verification is explicitly off.
+            verify_server_cert: false,
+            ..crate::transport::adapter::RuntimeOptions::default()
+        })
+        .await?;
+
         let bind_addr: std::net::SocketAddr = "0.0.0.0:0".parse().unwrap();
         let cert_file = "/tmp/cert.pem".to_string();
         let key_file = "/tmp/key.pem".to_string();
-        
+
         let server = tquic::TquicServer::new(bind_addr, cert_file, key_file, None).await?;
         Ok(QuicTransport { client, server })
     }
@@ -95,13 +100,19 @@ impl Transport for QuicTransport {
         &self,
         addr: &str,
     ) -> Result<Self::Connection, Box<dyn Error + Send + Sync + 'static>> {
-        self.client.connect(addr).await.map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)
+        self.client
+            .connect(addr)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)
     }
 
     async fn listen(
         &self,
         addr: &str,
     ) -> Result<Self::Listener, Box<dyn Error + Send + Sync + 'static>> {
-        self.server.listen(addr).await.map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)
+        self.server
+            .listen(addr)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)
     }
 }

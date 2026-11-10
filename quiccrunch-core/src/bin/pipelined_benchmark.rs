@@ -696,7 +696,15 @@ async fn run(cfg: BenchConfig) -> Result<(), Box<dyn std::error::Error>> {
     // `--client-runtimes` lets the runner find the knee.
     let mut clients = Vec::with_capacity(cfg.client_runtimes);
     for _ in 0..cfg.client_runtimes {
-        clients.push(TquicClient::with_options(RuntimeOptions::benchmark_client()).await?);
+        clients.push(
+            TquicClient::with_options(RuntimeOptions {
+                // Loopback self-signed benchmark certificate: verification is
+                // explicitly disabled here and nowhere else.
+                verify_server_cert: false,
+                ..RuntimeOptions::benchmark_client()
+            })
+            .await?,
+        );
     }
 
     let mut conn_tasks = Vec::with_capacity(cfg.connections);

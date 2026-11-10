@@ -149,7 +149,11 @@ mod real_network_tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         
         // Create real client
-        let client = TquicClient::new(None).await.unwrap();
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.unwrap();
         
         // Multiple real network connections
         let mut client_handles = Vec::new();
@@ -230,7 +234,11 @@ mod real_network_tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         
         // Create multiple concurrent client connections
-        let client = TquicClient::new(None).await.unwrap();
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.unwrap();
         let mut handles = Vec::new();
         
         for i in 0..connection_count {
@@ -342,7 +350,11 @@ mod real_network_tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         
         // Client sending large data
-        let client = TquicClient::new(None).await.unwrap();
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.unwrap();
         let connection = client.connect(&bind_addr).await.unwrap();
         let mut stream = connection.open_bi().await.unwrap();
         
@@ -376,7 +388,11 @@ mod real_network_tests {
         let config = NetworkTestConfig::default();
         let port = config.base_port + 6;
         
-        let client = TquicClient::new(None).await.unwrap();
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.unwrap();
         
         // Test connection to non-existent server
         let invalid_addr = format!("127.0.0.1:{}", port);
@@ -472,7 +488,11 @@ mod stress_tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         
         // Create stress load with many concurrent clients
-        let client = TquicClient::new(None).await.unwrap();
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.unwrap();
         let mut handles = Vec::new();
         
         let start_time = Instant::now();
@@ -571,7 +591,11 @@ mod stress_tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         
         // Client creating rapid connection churn
-        let client = TquicClient::new(None).await.unwrap();
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.unwrap();
         let churn_count = 100;
         let start_time = Instant::now();
         
@@ -655,7 +679,11 @@ mod performance_tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         
         // Client sending measured load
-        let client = TquicClient::new(None).await.unwrap();
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.unwrap();
         let connection = client.connect(&bind_addr).await.unwrap();
         let mut stream = connection.open_bi().await.unwrap();
         
@@ -735,7 +763,11 @@ mod performance_tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         
         // Client measuring round-trip latency
-        let client = TquicClient::new(None).await.unwrap();
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.unwrap();
         let connection = client.connect(&bind_addr).await.unwrap();
         let mut stream = connection.open_bi().await.unwrap();
         

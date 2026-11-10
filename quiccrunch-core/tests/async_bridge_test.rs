@@ -1,19 +1,27 @@
 #[cfg(test)]
 mod async_bridge_tests {
-    use quiccrunch_core::transport::adapter::{TquicClient, TquicServer};
+    use quiccrunch_core::transport::adapter::{RuntimeOptions, TquicClient, TquicServer};
     use std::net::SocketAddr;
     use std::time::Duration;
     use tokio::time::timeout;
     
     #[tokio::test]
     async fn test_client_creation() {
-        let result = TquicClient::new(None).await;
+        let result = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await;
         assert!(result.is_ok(), "TquicClient creation should succeed");
     }
     
     #[tokio::test]
     async fn test_connect_invalid_address() {
-        let client = TquicClient::new(None).await.expect("Client creation failed");
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client creation failed");
         let result = client.connect("invalid address").await;
         assert!(result.is_err(), "Connection to invalid address should fail");
     }
@@ -69,7 +77,11 @@ mod async_bridge_tests {
         
         tokio::time::sleep(Duration::from_millis(100)).await;
         
-        let client = TquicClient::new(None).await.expect("Client creation failed");
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client creation failed");
         
         let result = timeout(Duration::from_secs(2), client.connect("127.0.0.1:14433")).await;
         
@@ -127,7 +139,11 @@ mod async_bridge_tests {
         
         tokio::time::sleep(Duration::from_millis(200)).await;
         
-        let client = TquicClient::new(None).await.expect("Client creation failed");
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client creation failed");
         
         match timeout(Duration::from_secs(2), client.connect("127.0.0.1:14434")).await {
             Ok(Ok(conn)) => {
@@ -191,7 +207,11 @@ mod async_bridge_tests {
         
         tokio::time::sleep(Duration::from_millis(200)).await;
         
-        let client = TquicClient::new(None).await.expect("Client creation failed");
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client creation failed");
         
         if let Ok(Ok(conn)) = timeout(Duration::from_secs(2), client.connect("127.0.0.1:14435")).await {
             println!("Client connected");
@@ -225,7 +245,11 @@ mod async_bridge_tests {
     #[tokio::test]
     #[ignore = "Needs refinement - immediate failure vs timeout"]
     async fn test_connection_timeout() {
-        let client = TquicClient::new(None).await.expect("Client creation failed");
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client creation failed");
         
         let result = timeout(Duration::from_secs(12), client.connect("192.0.2.1:4433")).await;
         
@@ -297,7 +321,11 @@ mod async_bridge_tests {
         
         tokio::time::sleep(Duration::from_millis(200)).await;
         
-        let client = TquicClient::new(None).await.expect("Client creation failed");
+        let client = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client creation failed");
         
         match timeout(Duration::from_secs(3), client.connect("127.0.0.1:14437")).await {
             Ok(Ok(conn)) => {
@@ -405,9 +433,21 @@ mod async_bridge_tests {
         
         tokio::time::sleep(Duration::from_millis(200)).await;
         
-        let client1 = TquicClient::new(None).await.expect("Client 1 creation failed");
-        let client2 = TquicClient::new(None).await.expect("Client 2 creation failed");
-        let client3 = TquicClient::new(None).await.expect("Client 3 creation failed");
+        let client1 = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client 1 creation failed");
+        let client2 = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client 2 creation failed");
+        let client3 = TquicClient::with_options(RuntimeOptions {
+        // Loopback self-signed test certificate: verification is explicitly off.
+        verify_server_cert: false,
+        ..RuntimeOptions::default()
+    }).await.expect("Client 3 creation failed");
         
         let conn1 = timeout(Duration::from_secs(2), client1.connect("127.0.0.1:14436")).await
             .expect("Timeout")
