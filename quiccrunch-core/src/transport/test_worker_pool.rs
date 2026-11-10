@@ -8,7 +8,6 @@ use tokio::sync::oneshot;
 
 use super::messages::{TquicCommand, WorkerConfig};
 use super::worker_pool::TquicWorkerPool;
-use crate::error::TransportError;
 
 #[cfg(test)]
 mod tests {
@@ -25,6 +24,8 @@ mod tests {
             max_udp_payload_size: 1200,
             enable_early_data: false,
             application_protocols: vec![b"quic-crunch".to_vec()],
+            verify_cert: true,
+            ca_cert_file: None,
         }
     }
 
@@ -57,6 +58,7 @@ mod tests {
             let remote_addr: SocketAddr = format!("127.0.0.1:{}", 8000 + i).parse().unwrap();
 
             let cmd = TquicCommand::Connect {
+                connection_id: 0,
                 remote_addr,
                 response: tx,
             };

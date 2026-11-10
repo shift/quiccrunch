@@ -1,11 +1,25 @@
-//! Multi-worker QUIC server with SO_REUSEPORT
+//! Multi-worker QUIC echo server with SO_REUSEPORT.
 //!
-//! Each worker has its own TquicRuntime on its own OS thread,
-//! enabling true parallel QUIC processing across multiple CPU cores.
+//! Each worker owns a UDP socket bound with `SO_REUSEPORT` and a dedicated
+//! `TquicRuntime` thread, so the kernel spreads QUIC flows across cores.
+//!
+//! The echo path is deliberately byte-oriented: a QUIC stream is a byte stream,
+//! so echoing a received chunk preserves the client's framing without parsing
+//! it and without allocating a response buffer per message.
+//!
+//! Usage:
+//!   multi_worker_server [addr] [cert] [key] [workers] [--bench]
+//!
+//! `--bench` selects pacing-free, deep-window transport settings suitable for
+//! same-host throughput measurement. Without it, production defaults apply.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+use quiccrunch_core::transport::adapter::{
+    RuntimeOptions, TquicConnection, TquicListener, TquicRuntime, TquicStream,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -13,81 +27,110 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .format_timestamp_millis()
         .init();
 
-    eprintln!("[multi_worker_server] Starting...");
-
     let args: Vec<String> = std::env::args().collect();
-    let addr: SocketAddr = args.get(1)
+    let addr: SocketAddr = args
+        .get(1)
         .map(|a| a.as_str())
         .unwrap_or("127.0.0.1:4433")
         .parse()?;
 
-    let cert_file = args.get(2).cloned().unwrap_or_else(|| {
-        "quiccrunch-core/tests/certs/cert.pem".to_string()
-    });
-    
-    let key_file = args.get(3).cloned().unwrap_or_else(|| {
-        "quiccrunch-core/tests/certs/key.pem".to_string()
-    });
+    let cert_file = args
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "quiccrunch-core/tests/certs/cert.pem".to_string());
+    let key_file = args
+        .get(3)
+        .cloned()
+        .unwrap_or_else(|| "quiccrunch-core/tests/certs/key.pem".to_string());
 
-    let worker_count = args.get(4)
+    let worker_count = args
+        .get(4)
         .and_then(|a| a.parse().ok())
-        .unwrap_or(4);
+        .unwrap_or_else(num_cpus::get);
 
-    log::info!("Starting Multi-Worker QUIC server with SO_REUSEPORT");
-    log::info!("Address: {}", addr);
-    log::info!("Workers: {}", worker_count);
+    let bench_mode = args.iter().any(|a| a == "--bench");
+    // Exact worker distribution: worker w listens on port + w instead of
+    // sharing one SO_REUSEPORT group. Useful for isolating worker scaling from
+    // kernel hash skew. Production default remains SO_REUSEPORT.
+    let spread = args.iter().any(|a| a == "--spread");
 
-    // Spawn worker tasks - each with its own TquicRuntime
+    log::info!(
+        "multi_worker_server: addr={} workers={} mode={}",
+        addr,
+        worker_count,
+        if bench_mode { "bench" } else { "default" }
+    );
+
     let mut worker_handles = Vec::new();
-    
+
     for worker_id in 0..worker_count {
-        let addr = addr;
         let cert = cert_file.clone();
         let key = key_file.clone();
-        
+        let worker_addr = if spread {
+            let mut a = addr;
+            a.set_port(addr.port() + worker_id as u16);
+            a
+        } else {
+            addr
+        };
+
         let handle = std::thread::Builder::new()
             .name(format!("worker-{}", worker_id))
             .spawn(move || {
-                // Each worker creates its own runtime on its own OS thread
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create Tokio runtime");
-                
+
                 rt.block_on(async move {
-                    // Create a separate QUIC runtime for this worker
-                    let runtime = match quiccrunch_core::transport::adapter::TquicRuntime::new(
+                    let options = if bench_mode {
+                        RuntimeOptions::benchmark(worker_id)
+                    } else {
+                        RuntimeOptions {
+                            worker_id,
+                            ..RuntimeOptions::default()
+                        }
+                    };
+
+                    if spread {
+                        log::info!(
+                            "Worker {} listening on {} (spread mode)",
+                            worker_id,
+                            worker_addr
+                        );
+                    }
+                    let runtime = match TquicRuntime::with_options(
                         true,
-                        addr,
+                        worker_addr,
                         Some(cert),
                         Some(key),
+                        options,
                     ) {
                         Ok(r) => Arc::new(r),
                         Err(e) => {
-                            log::error!("Worker {} failed to create QUIC runtime: {:?}", worker_id, e);
+                            log::error!("Worker {} failed to start: {:?}", worker_id, e);
                             return;
                         }
                     };
-                    
-                    log::info!("Worker {} started on thread {:?}", worker_id, std::thread::current().name());
-                    
-                    // Create a listener
-                    let mut listener = quiccrunch_core::transport::adapter::TquicListener {
+
+                    let mut listener = TquicListener {
                         runtime: runtime.clone(),
-                        bind_addr: addr,
+                        bind_addr: worker_addr,
                     };
-                    
-                    // Accept loop for this worker
+
+                    let accepted = Arc::new(AtomicU64::new(0));
+
                     loop {
                         match listener.accept().await {
                             Ok(connection) => {
-                                log::debug!("Worker {} accepted connection {}", worker_id, connection.conn_index);
-                                
-                                // Handle the connection
-                                let rt = runtime.clone();
-                                tokio::spawn(async move {
-                                    handle_connection(worker_id, connection, rt).await;
-                                });
+                                let n = accepted.fetch_add(1, Ordering::Relaxed) + 1;
+                                log::debug!(
+                                    "Worker {} accepted connection {} (total {})",
+                                    worker_id,
+                                    connection.conn_index,
+                                    n
+                                );
+                                tokio::spawn(handle_connection(worker_id, connection));
                             }
                             Err(e) => {
                                 log::error!("Worker {} accept error: {:?}", worker_id, e);
@@ -98,85 +141,78 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
             })
             .expect("Failed to spawn worker thread");
-        
+
         worker_handles.push(handle);
     }
-    
+
     log::info!("All {} workers started", worker_count);
-    
-    // Wait for all workers
+
     for handle in worker_handles {
         handle.join().expect("Worker thread panicked");
     }
-    
+
     Ok(())
 }
 
-async fn handle_connection(
-    worker_id: usize,
-    mut connection: quiccrunch_core::transport::adapter::TquicConnection,
-    _runtime: Arc<quiccrunch_core::transport::adapter::TquicRuntime>,
-) {
+async fn handle_connection(worker_id: usize, connection: TquicConnection) {
+    // One task per stream (not per message). Streams on the same connection are
+    // independent QUIC streams, so serialising them starves the pipeline.
     loop {
-        let mut stream = match connection.accept_stream().await {
+        let stream = match connection.accept_stream().await {
             Ok(s) => s,
             Err(e) => {
-                log::debug!("Worker {}: connection ended: {:?}", worker_id, e);
+                log::debug!(
+                    "Worker {}: connection {} ended: {:?}",
+                    worker_id,
+                    connection.conn_index,
+                    e
+                );
                 return;
             }
         };
-        
-        log::debug!("Worker {}: stream {} opened", worker_id, stream.stream_id);
-        
-        // Handle stream
-        let mut recv_buffer = Vec::new();
-        let mut message_count = 0u64;
-        
-        loop {
-            match stream.recv().await {
-                Ok(data) => {
-                    if data.is_empty() {
-                        break;
-                    }
-                    
-                    recv_buffer.extend_from_slice(&data);
-                    
-                    // Process complete messages
-                    while recv_buffer.len() >= 4 {
-                        let msg_len = u32::from_be_bytes([
-                            recv_buffer[0], recv_buffer[1],
-                            recv_buffer[2], recv_buffer[3]
-                        ]) as usize;
-                        
-                        if recv_buffer.len() < 4 + msg_len {
-                            break;
-                        }
-                        
-                        let msg_data = &recv_buffer[4..4 + msg_len];
-                        message_count += 1;
-                        
-                        // Echo back
-                        let mut response = Vec::with_capacity(4 + msg_len);
-                        response.extend_from_slice(&(msg_len as u32).to_be_bytes());
-                        response.extend_from_slice(msg_data);
-                        let response = bytes::Bytes::from(response);
-                        
-                        if let Err(e) = stream.send_bytes(response, false).await {
-                            log::error!("Worker {}: send error: {}", worker_id, e);
-                            break;
-                        }
-                        
-                        recv_buffer.drain(..4 + msg_len);
-                    }
+
+        tokio::spawn(handle_stream(worker_id, stream));
+    }
+}
+
+async fn handle_stream(worker_id: usize, stream: TquicStream) {
+    let mut bytes = 0u64;
+    loop {
+        match stream.recv().await {
+            Ok(data) => {
+                if data.is_empty() {
+                    log::debug!(
+                        "Worker {}: stream {} EOF after {} bytes",
+                        worker_id,
+                        stream.stream_id,
+                        bytes
+                    );
+                    break;
                 }
-                Err(e) => {
-                    log::debug!("Worker {}: recv error: {}", worker_id, e);
+                bytes += data.len() as u64;
+                // Echo the chunk as-is: no per-message parse or allocation.
+                if let Err(e) = stream.send_bytes(bytes::Bytes::from(data), false).await {
+                    log::debug!("Worker {}: send error: {}", worker_id, e);
                     break;
                 }
             }
+            Err(e) => {
+                log::debug!(
+                    "Worker {}: stream {} recv error after {} bytes: {}",
+                    worker_id,
+                    stream.stream_id,
+                    bytes,
+                    e
+                );
+                break;
+            }
         }
-        
-        let _ = stream.close().await;
-        log::debug!("Worker {}: stream {} done ({} messages)", worker_id, stream.stream_id, message_count);
     }
+    log::debug!(
+        "Worker {}: stream {} done ({} bytes)",
+        worker_id,
+        stream.stream_id,
+        bytes
+    );
+    let _ = stream.close().await;
 }
