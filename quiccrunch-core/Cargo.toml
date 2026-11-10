@@ -32,7 +32,9 @@ capnp = "0.23.0"
 futures = "0.3.30"
 bytes = "1.5.0"
 thiserror = "1.0.56"
-tracing = "0.1.40"
+# release_max_level_info compiles debug!/trace! call sites out of release
+# binaries. Benchmark runs must never pay for per-packet logging.
+tracing = { version = "0.1.40", features = ["release_max_level_info"] }
 async-trait = "0.1.77"
 mio = { version = "1.0.4", features = ["net", "os-poll"] }
 rcgen = "0.12.1"
@@ -78,7 +80,7 @@ tracing-opentelemetry = { version = "0.22", optional = true }
 
 # Dependencies for examples
 env_logger = "0.11"
-log = "0.4"
+log = { version = "0.4", features = ["release_max_level_info"] }
 
 # System monitoring for performance analysis
 sysinfo = { version = "0.30", optional = true }

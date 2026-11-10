@@ -368,10 +368,15 @@ impl ConfigManager {
                 break;
             }
             
-            current = current
-                .as_object_mut()
-                .and_then(|obj| obj.get_mut(*part))
-                .unwrap();
+            // Create intermediate objects instead of panicking on a missing
+            // path segment.
+            let obj = match current.as_object_mut() {
+                Some(obj) => obj,
+                None => return,
+            };
+            current = obj
+                .entry(part.to_string())
+                .or_insert_with(|| serde_json::json!({}));
         }
     }
 

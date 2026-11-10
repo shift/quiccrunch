@@ -11,16 +11,19 @@ A high-performance RPC framework built on QUIC transport with multi-worker archi
 - **Hardware-accelerated TLS** — AES-NI, AVX, SHA-NI with automatic feature detection
 - **Cap'n Proto serialization** — zero-copy message encoding/decoding
 - **Built-in RPC framework** — service reflection, auth, rate limiting, metrics
-- **30,000+ msg/s** on 4 cores with sub-50μs tail latency
+- Measured throughput and true percentiles (see [`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md)); tail latency is dominated by pipeline queueing, not transport RTT
 
 ## Performance
 
-| Workers | Throughput | p99 Latency |
-|---------|-----------|-------------|
-| 1 | 5,000 msg/s | 194 μs |
-| **4** | **31,629 msg/s** | **32 μs** |
+QuicCrunch is measured with an instrumented benchmark that timestamps every
+request and reports true RTT, end-to-end latency and completed-response
+throughput. Reproduce with `scripts/bench.sh`; the numbers, methodology,
+hardware and known limits are in [`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md).
 
-Benchmarked with 1024B messages, 16 concurrent connections, pipeline depth 1800.
+The previous table (5,000 msg/s / 194 µs and 31,629 msg/s / 32 µs) was
+arithmetic, not measurement: `p99` was `1 / throughput`, individual requests
+were never timed, and throughput counted sends regardless of completions. Those
+numbers have been withdrawn.
 
 ## Getting Started
 
