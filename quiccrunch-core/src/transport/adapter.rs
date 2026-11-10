@@ -576,6 +576,12 @@ pub struct RuntimeOptions {
     pub initial_max_stream_data: u64,
     /// ACK every N ack-eliciting packets; 1 minimises RTT at the cost of ACKs.
     pub ack_eliciting_threshold: u64,
+    /// Verify the server certificate chain and name on the client. Defaults to
+    /// `false` to preserve the historical (insecure) behaviour; production and
+    /// comparison runs must set this to `true`.
+    pub verify_server_cert: bool,
+    /// PEM file with the trust anchors used when `verify_server_cert` is set.
+    pub ca_cert_file: Option<String>,
 }
 
 impl Default for RuntimeOptions {
@@ -590,6 +596,8 @@ impl Default for RuntimeOptions {
             initial_max_data: 32 * 1024 * 1024,
             initial_max_stream_data: 8 * 1024 * 1024,
             ack_eliciting_threshold: 2,
+            verify_server_cert: false,
+            ca_cert_file: None,
         }
     }
 }
@@ -608,6 +616,8 @@ impl RuntimeOptions {
             initial_max_data: 64 * 1024 * 1024,
             initial_max_stream_data: 16 * 1024 * 1024,
             ack_eliciting_threshold: 1,
+            verify_server_cert: false,
+            ca_cert_file: None,
         }
     }
 
@@ -672,11 +682,23 @@ impl TquicAdapter {
 
             quic_config.set_tls_config(tls_config);
         } else {
-            let tls_config =
+            let mut tls_config =
                 TlsConfig::new_client_config(vec![b"h3".to_vec(), b"http/0.9".to_vec()], false)
                     .map_err(|e| {
                         TransportError::ConfigError(format!("TLS config failed: {:?}", e))
                     })?;
+
+            if options.verify_server_cert {
+                tls_config.set_verify(true);
+                if let Some(ca_file) = options.ca_cert_file.as_ref() {
+                    tls_config.set_ca_certs(ca_file).map_err(|e| {
+                        TransportError::ConfigError(format!(
+                            "Failed to load CA certificates from {}: {:?}",
+                            ca_file, e
+                        ))
+                    })?;
+                }
+            }
 
             quic_config.set_tls_config(tls_config);
         }
