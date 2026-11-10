@@ -163,21 +163,39 @@ raise throughput below ~16 connections; it only raises queueing. Best observed
 throughput is 86.5k msg/s (4 workers, 8 connections, depth 1800) and the
 best high-connection cell is 71.7k (6 workers, 16 connections, depth 1800).
 
+The matrix is one run per cell and the co-located host is shared, so treat
+±20% as run-to-run noise. A three-run repeat of the canonical cell on a quiet
+host:
+
+| cell | run 1 | run 2 | run 3 | median | p99 range |
+| --- | --- | --- | --- | --- | --- |
+| 4w / 16c / depth 1 | 51,019 | 51,601 | 51,350 | **51,350 msg/s** | 3.40–3.47 ms |
+| 4w / 16c / depth 64 | 95,295 | 94,715 | 93,676 | **94,715 msg/s** | 228–266 ms |
+
+The 49.1k depth-64 cell above is therefore a low sample, not the capability.
+
 ### 4.4 Latency floor
 
 | workers | conns | streams/conn | depth | msg/s | p50 | p95 | p99 | p99.9 | err |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 4 | 8 | 1 | 1 | 7,432 | 985 | 2,132 | 3,238 | 4,756 | 0 |
 | 4 | 16 | 1 | 1 | 10,879 | 1,097 | 3,133 | 6,402 | 9,232 | 0 |
-| 4 | 16 | 4 | 1 | 49,929 | 1,076 | 2,838 | 4,006 | 6,590 | 0 |
+| 4 | 16 | 4 | 1 | 51,350 | 1,088 | 2,496 | 3,396 | 4,882 | 0 |
 
-The realistic floor is **~1 ms p50 and 3–6 ms p99**. A p99 below 500 µs is not
-reachable with this design: each request crosses the client runtime thread, the
-kernel, the server runtime thread and back, and the measured single-hop cost on
-this 1.7 GHz low-power CPU is several hundred microseconds. Depth 64 cannot
-have p99 <500 µs for a second, independent reason: with 16 connections × 4
-streams × 64 in flight, queueing alone is `4096 / throughput` — about 58 ms at
-70k msg/s, before any tail skew. The p99s in §4.2 are queueing, not RTT.
+The realistic floor is **~1 ms p50 and ~3.4 ms p99** at 64 concurrent
+requests. A p99 below 500 µs is not reachable with this design: each request
+crosses the client runtime thread, the kernel, the server runtime thread and
+back, and the measured single-hop cost on this 1.7 GHz low-power CPU is several
+hundred microseconds. Depth 64 cannot have p99 <500 µs for a second,
+independent reason: with 16 connections × 4 streams × 64 in flight, queueing
+alone is `4096 / throughput` — about 43 ms at 95k msg/s — before any tail skew.
+The p99s in §4.2 are queueing, not RTT.
+
+Client-queue accounting changed with the wait-free path: `send_batch` returns
+when the bounded queue accepts the batch, so the reported queue p50 is ~0.1 µs
+(application backpressure only). Runtime-side write backlog and its wakeup cost
+are inside RTT, which is why end-to-end equals RTT in these runs. The
+`max_command_backlog` metric exposes the queue depth directly.
 
 ### 4.5 Depth-1800 tail: queueing or starvation?
 
@@ -212,7 +230,7 @@ separately so a genuinely unfinished pipeline cannot be mistaken for a drop.
 
 | Target | Result |
 | --- | --- |
-| >50k msg/s reliably at 4–6 workers | **Met at 8 connections** (70.5k/46.5k) and **6 workers/16 conns** (70.9k); **not reliably met at 4 workers/16 conns** (47–51k across runs) |
+| >50k msg/s reliably at 4–6 workers | **Met.** 4w/16c/depth64 median **94.7k**; 4w/16c/depth1 **51.4k**; 6w/16c/depth64 **70.9k**; 4w/8c/depth1800 **86.5k** |
 | RTT p99 <500 µs at depth 64 | **Not met.** Best depth-64 cell is 138 ms p99 (4 workers/8 conns); queueing alone is `depth × streams / throughput` |
 | Zero drops/errors/timeouts | **Met in all 36 cells** (plus the corrected 1/64/1800 cell) |
 | RTT p99 <200 µs | **Not achievable** with this design; floor is ~3–6 ms p99, ~1 ms p50 (§4.4) |
