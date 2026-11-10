@@ -309,7 +309,10 @@ async fn stream_worker(
     // A watchdog bounds the phase: a stream that cannot make progress must not
     // prevent the measurement gate from opening for everybody else.
     let warm_end = Instant::now() + cfg.warmup;
-    let warm_budget = cfg.warmup + Duration::from_secs(10);
+    // Deep pipelines (e.g. 64 conns x 4 streams x 1800) take tens of seconds
+    // to enqueue through the bounded write queue. The watchdog only exists to
+    // catch a genuinely wedged stream, so give it generous headroom.
+    let warm_budget = cfg.warmup + Duration::from_secs(120);
     match tokio::time::timeout(
         warm_budget,
         pump(
@@ -376,7 +379,7 @@ async fn stream_worker(
                 req.written = Some(start);
             }
             let phase_end = start + cfg.duration;
-            let budget = cfg.duration + Duration::from_secs(10);
+            let budget = cfg.duration + Duration::from_secs(120);
             match tokio::time::timeout(
                 budget,
                 pump(
@@ -711,7 +714,7 @@ async fn run(cfg: BenchConfig) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Wait for every stream to finish warm-up and park at the gate.
-    let ready_wait = tokio::time::timeout(Duration::from_secs(120), async {
+    let ready_wait = tokio::time::timeout(Duration::from_secs(300), async {
         while ready.load(Ordering::Acquire) < total_streams {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -851,7 +854,7 @@ async fn run(cfg: BenchConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     if cfg.json {
         println!(
-            "{{\"workers\":{},\"connections\":{},\"streams_per_conn\":{},\"pipeline_depth\":{},\"msg_size\":{},\"duration_s\":{:.3},\"completed\":{},\"throughput_msg_s\":{:.1},\"rtt_p50_us\":{:.1},\"rtt_p95_us\":{:.1},\"rtt_p99_us\":{:.1},\"rtt_p999_us\":{:.1},\"e2e_p50_us\":{:.1},\"e2e_p99_us\":{:.1},\"queue_p50_us\":{:.1},\"errors\":{},\"send_errors\":{},\"recv_errors\":{},\"fin_errors\":{},\"timeouts\":{},\"cutoff\":{}}}",
+            "{{\"workers\":{},\"connections\":{},\"streams_per_conn\":{},\"pipeline_depth\":{},\"msg_size\":{},\"duration_s\":{:.3},\"completed\":{},\"throughput_msg_s\":{:.1},\"rtt_p50_us\":{:.1},\"rtt_p95_us\":{:.1},\"rtt_p99_us\":{:.1},\"rtt_p999_us\":{:.1},\"rtt_max_us\":{:.1},\"e2e_p50_us\":{:.1},\"e2e_p95_us\":{:.1},\"e2e_p99_us\":{:.1},\"e2e_p999_us\":{:.1},\"queue_p50_us\":{:.1},\"errors\":{},\"send_errors\":{},\"recv_errors\":{},\"fin_errors\":{},\"timeouts\":{},\"cutoff\":{}}}",
             cfg.workers,
             cfg.connections,
             cfg.streams_per_conn,
@@ -864,8 +867,11 @@ async fn run(cfg: BenchConfig) -> Result<(), Box<dyn std::error::Error>> {
             percentile_us(&rtt_hist, 0.95),
             percentile_us(&rtt_hist, 0.99),
             percentile_us(&rtt_hist, 0.999),
+            rtt_hist.max() as f64 / 1000.0,
             percentile_us(&e2e_hist, 0.50),
+            percentile_us(&e2e_hist, 0.95),
             percentile_us(&e2e_hist, 0.99),
+            percentile_us(&e2e_hist, 0.999),
             percentile_us(&queue_hist, 0.50),
             errors,
             totals.send_errors,

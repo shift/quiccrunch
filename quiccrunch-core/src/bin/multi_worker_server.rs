@@ -120,6 +120,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let accepted = Arc::new(AtomicU64::new(0));
 
+                    if std::env::var_os("QC_METRICS").is_some() {
+                        let metrics = runtime.metrics();
+                        let accepted = accepted.clone();
+                        std::thread::spawn(move || loop {
+                            std::thread::sleep(std::time::Duration::from_secs(5));
+                            let s = metrics.snapshot();
+                            println!(
+                                "METRICS worker={} conns={} writes={} batches={} write_err={} \
+                                 flow_blocked={} partial={} pkt_rx={} pkt_tx={} cmd_backlog_max={} poll={}",
+                                worker_id,
+                                accepted.load(Ordering::Relaxed),
+                                s.writes,
+                                s.write_batches,
+                                s.write_errors,
+                                s.flow_blocked,
+                                s.partial_writes,
+                                s.packets_received,
+                                s.packets_sent,
+                                s.max_command_backlog,
+                                s.poll_calls
+                            );
+                        });
+                    }
+
                     loop {
                         match listener.accept().await {
                             Ok(connection) => {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
@@ -16,6 +17,63 @@ use crate::error::TransportError;
 use crate::transport::messages::WorkerConfig;
 
 const MAX_BUF_SIZE: usize = 65536;
+
+/// Per-worker counters. Cheap enough to update on every batch (not every
+/// packet) and intended to make saturation, skew and flow-control starvation
+/// visible instead of inferring them from latency alone.
+#[derive(Debug, Default)]
+pub struct RuntimeMetrics {
+    pub commands: AtomicU64,
+    pub write_batches: AtomicU64,
+    pub writes: AtomicU64,
+    pub bytes_written: AtomicU64,
+    pub write_errors: AtomicU64,
+    pub partial_writes: AtomicU64,
+    pub flow_blocked: AtomicU64,
+    pub packets_sent: AtomicU64,
+    pub bytes_sent: AtomicU64,
+    pub packets_received: AtomicU64,
+    pub bytes_received: AtomicU64,
+    pub poll_calls: AtomicU64,
+    pub max_command_backlog: AtomicU64,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct RuntimeMetricsSnapshot {
+    pub commands: u64,
+    pub write_batches: u64,
+    pub writes: u64,
+    pub bytes_written: u64,
+    pub write_errors: u64,
+    pub partial_writes: u64,
+    pub flow_blocked: u64,
+    pub packets_sent: u64,
+    pub bytes_sent: u64,
+    pub packets_received: u64,
+    pub bytes_received: u64,
+    pub poll_calls: u64,
+    pub max_command_backlog: u64,
+}
+
+impl RuntimeMetrics {
+    pub fn snapshot(&self) -> RuntimeMetricsSnapshot {
+        RuntimeMetricsSnapshot {
+            commands: self.commands.load(Ordering::Relaxed),
+            write_batches: self.write_batches.load(Ordering::Relaxed),
+            writes: self.writes.load(Ordering::Relaxed),
+            bytes_written: self.bytes_written.load(Ordering::Relaxed),
+            write_errors: self.write_errors.load(Ordering::Relaxed),
+            partial_writes: self.partial_writes.load(Ordering::Relaxed),
+            flow_blocked: self.flow_blocked.load(Ordering::Relaxed),
+            packets_sent: self.packets_sent.load(Ordering::Relaxed),
+            bytes_sent: self.bytes_sent.load(Ordering::Relaxed),
+            packets_received: self.packets_received.load(Ordering::Relaxed),
+            bytes_received: self.bytes_received.load(Ordering::Relaxed),
+            poll_calls: self.poll_calls.load(Ordering::Relaxed),
+            max_command_backlog: self.max_command_backlog.load(Ordering::Relaxed),
+        }
+    }
+}
 
 /// Pre-allocated buffer pool for common message sizes
 /// Reduces allocation overhead by reusing buffers
@@ -84,10 +142,19 @@ impl BufferPool {
 pub struct QuicSocket {
     socket: Arc<Mutex<mio::net::UdpSocket>>,
     local_addr: SocketAddr,
+    metrics: Arc<RuntimeMetrics>,
 }
 
 impl QuicSocket {
     pub fn new(local: &SocketAddr, registry: &mio::Registry) -> Result<Self, TransportError> {
+        Self::with_metrics(local, registry, Arc::new(RuntimeMetrics::default()))
+    }
+
+    pub fn with_metrics(
+        local: &SocketAddr,
+        registry: &mio::Registry,
+        metrics: Arc<RuntimeMetrics>,
+    ) -> Result<Self, TransportError> {
         // Create socket with SO_REUSEPORT for multi-runtime support
         let socket = socket2::Socket::new(
             socket2::Domain::IPV4,
@@ -124,6 +191,7 @@ impl QuicSocket {
         Ok(Self {
             socket: Arc::new(Mutex::new(socket)),
             local_addr,
+            metrics,
         })
     }
 
@@ -164,6 +232,13 @@ impl tquic::PacketSendHandler for QuicSocket {
             trace!("written {} bytes", pkt.len());
             count += 1;
         }
+        self.metrics
+            .packets_sent
+            .fetch_add(count as u64, Ordering::Relaxed);
+        self.metrics.bytes_sent.fetch_add(
+            pkts.iter().map(|(p, _)| p.len() as u64).sum(),
+            Ordering::Relaxed,
+        );
         Ok(count)
     }
 }
@@ -181,22 +256,50 @@ struct ConnectionState {
 /// cause of the benchmark's lost completions and 5 s receive timeouts. We
 /// therefore drain the stream into this buffer inside the callback and either
 /// hand it to a parked reader immediately or keep it until one arrives.
+pub type PushItem = Result<(Vec<u8>, bool), TransportError>;
+pub type PushSender = mpsc::UnboundedSender<PushItem>;
+pub type PushReceiver = mpsc::UnboundedReceiver<PushItem>;
 type StreamWaiter = oneshot::Sender<Result<(Vec<u8>, bool), TransportError>>;
+type PendingStreamAccept = oneshot::Sender<Result<(u64, PushReceiver), TransportError>>;
 
+/// Per-stream receive state.
+///
+/// The transport handler drains tQUIC into `data` inside `on_stream_readable`
+/// and pushes it straight to the owning task through `push`. The task never
+/// sends a read request, so the common path is one wakeup instead of a command
+/// plus oneshot round trip. `waiters` remains for the legacy `stream_read()`
+/// command.
 #[derive(Default)]
 struct StreamBuf {
     data: Vec<u8>,
     fin: bool,
     closed: bool,
     errored: bool,
+    push: Option<PushSender>,
+    push_terminal: bool,
     waiters: Vec<StreamWaiter>,
 }
 
 impl StreamBuf {
-    /// Deliver buffered bytes to parked readers. Reads are stream-ordered, so
-    /// each reader receives a distinct byte range. Once the stream is terminal,
-    /// any remaining readers observe EOF instead of hanging.
     fn deliver(&mut self) {
+        let terminal = self.fin || self.closed;
+        if self.data.is_empty() && !terminal {
+            return;
+        }
+        if let Some(tx) = &self.push {
+            if self.push_terminal {
+                return;
+            }
+            let data = std::mem::take(&mut self.data);
+            if tx.send(Ok((data, terminal))).is_err() {
+                self.push = None;
+            } else if terminal {
+                self.push_terminal = true;
+            }
+            return;
+        }
+
+        // Legacy reader path: one waiter per ordered byte range.
         loop {
             let has_payload = !self.data.is_empty();
             let terminal = self.fin || self.closed;
@@ -215,14 +318,37 @@ impl StreamBuf {
         }
     }
 
+    fn attach_push(&mut self, tx: PushSender) {
+        self.push = Some(tx);
+    }
+
     fn fail(&mut self, msg: &str) {
         debug!("stream read failed: {}", msg);
         self.errored = true;
         self.closed = true;
+        if let Some(tx) = self.push.take() {
+            let _ = tx.send(Err(TransportError::StreamError(msg.to_string())));
+            self.push_terminal = true;
+        }
         for waiter in self.waiters.drain(..) {
             let _ = waiter.send(Err(TransportError::StreamError(msg.to_string())));
         }
     }
+}
+
+/// Register a push reader for `(conn, stream)` and deliver anything already
+/// buffered before returning.
+fn make_push(
+    stream_bufs: &Arc<Mutex<HashMap<(u64, u64), StreamBuf>>>,
+    conn_index: u64,
+    stream_id: u64,
+) -> PushReceiver {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut bufs = stream_bufs.lock().unwrap();
+    let buf = bufs.entry((conn_index, stream_id)).or_default();
+    buf.attach_push(tx);
+    buf.deliver();
+    rx
 }
 
 fn read_stream_available(conn: &mut tquic::Connection, stream_id: u64, buf: &mut StreamBuf) {
@@ -423,6 +549,7 @@ pub struct TquicAdapter {
     event_rx: mpsc::UnboundedReceiver<TquicEvent>,
     stream_bufs: Arc<Mutex<HashMap<(u64, u64), StreamBuf>>>,
     waker: Arc<Waker>,
+    metrics: Arc<RuntimeMetrics>,
     running: bool,
     poll_events: mio::Events,
 }
@@ -562,7 +689,12 @@ impl TquicAdapter {
 
         let bind_addr = config.bind_addr;
 
-        let sock = Rc::new(QuicSocket::new(&bind_addr, registry)?);
+        let metrics = Arc::new(RuntimeMetrics::default());
+        let sock = Rc::new(QuicSocket::with_metrics(
+            &bind_addr,
+            registry,
+            metrics.clone(),
+        )?);
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let stream_bufs: Arc<Mutex<HashMap<(u64, u64), StreamBuf>>> =
@@ -584,6 +716,7 @@ impl TquicAdapter {
             event_rx,
             stream_bufs,
             waker,
+            metrics,
             running: false,
             poll_events: mio::Events::with_capacity(1024),
         })
@@ -591,6 +724,10 @@ impl TquicAdapter {
 
     pub fn waker(&self) -> Arc<Waker> {
         self.waker.clone()
+    }
+
+    pub fn metrics(&self) -> Arc<RuntimeMetrics> {
+        self.metrics.clone()
     }
 
     fn recv_packets(&mut self) {
@@ -603,6 +740,12 @@ impl TquicAdapter {
                 .recv_from(&mut self.recv_buf)
             {
                 Ok((len, from)) => {
+                    self.metrics
+                        .packets_received
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.metrics
+                        .bytes_received
+                        .fetch_add(len as u64, Ordering::Relaxed);
                     let pkt_buf = &mut self.recv_buf[..len];
                     let pkt_info = PacketInfo {
                         src: from,
@@ -667,6 +810,12 @@ impl TquicAdapter {
                 }
             };
             trace!("socket recv {} bytes from {:?}", len, remote);
+            self.metrics
+                .packets_received
+                .fetch_add(1, Ordering::Relaxed);
+            self.metrics
+                .bytes_received
+                .fetch_add(len as u64, Ordering::Relaxed);
 
             let pkt_buf = &mut self.recv_buf[..len];
             let pkt_info = PacketInfo {
@@ -736,11 +885,19 @@ enum RuntimeCommand {
     },
     AcceptStream {
         conn_index: u64,
-        resp: oneshot::Sender<Result<u64, TransportError>>,
+        resp: oneshot::Sender<Result<(u64, PushReceiver), TransportError>>,
     },
     OpenStream {
         conn_index: u64,
-        resp: oneshot::Sender<Result<u64, TransportError>>,
+        resp: oneshot::Sender<Result<(u64, PushReceiver), TransportError>>,
+    },
+    /// Fire-and-forget batch write. The caller only waits for queue capacity,
+    /// never for the runtime thread to execute it. Write errors are pushed to
+    /// the stream's reader.
+    StreamWriteBatchAsync {
+        conn_index: u64,
+        stream_id: u64,
+        messages: Vec<(bytes::Bytes, bool)>,
     },
     StreamWrite {
         conn_index: u64,
@@ -768,10 +925,11 @@ enum RuntimeCommand {
 }
 
 pub struct TquicRuntime {
-    cmd_tx: mpsc::UnboundedSender<RuntimeCommand>,
+    cmd_tx: mpsc::Sender<RuntimeCommand>,
     thread_handle: Option<thread::JoinHandle<()>>,
     waker: Arc<Waker>,
     wake_pending: Arc<std::sync::atomic::AtomicBool>,
+    metrics: Arc<RuntimeMetrics>,
 }
 
 impl std::fmt::Debug for TquicRuntime {
@@ -808,6 +966,7 @@ fn write_stream_all(
     stream_id: u64,
     data: bytes::Bytes,
     fin: bool,
+    metrics: &RuntimeMetrics,
 ) -> Result<usize, TransportError> {
     if fin {
         trace!(
@@ -827,6 +986,7 @@ fn write_stream_all(
             .stream_write(stream_id, data, true)
             .map_err(|e| TransportError::StreamError(format!("Stream write failed: {:?}", e)))?;
         if written != total {
+            metrics.flow_blocked.fetch_add(1, Ordering::Relaxed);
             return Err(TransportError::StreamError(format!(
                 "Partial FIN write: {}/{}",
                 written, total
@@ -836,16 +996,22 @@ fn write_stream_all(
     }
 
     let mut off = 0usize;
+    let mut iterations = 0;
     while off < total {
+        iterations += 1;
         let written = conn
             .stream_write(stream_id, data.slice(off..), false)
             .map_err(|e| TransportError::StreamError(format!("Stream write failed: {:?}", e)))?;
         if written == 0 {
+            metrics.flow_blocked.fetch_add(1, Ordering::Relaxed);
             return Err(TransportError::StreamError(
                 "Stream write made no progress (flow control blocked)".into(),
             ));
         }
         off += written;
+    }
+    if iterations > 1 {
+        metrics.partial_writes.fetch_add(1, Ordering::Relaxed);
     }
     Ok(off)
 }
@@ -873,10 +1039,13 @@ impl TquicRuntime {
         key_file: Option<String>,
         options: RuntimeOptions,
     ) -> Result<Self, TransportError> {
-        let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<RuntimeCommand>();
+        // Bounded queue: backpressure instead of unbounded memory growth when
+        // producers outrun the runtime thread.
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<RuntimeCommand>(2048);
         let wake_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let wake_pending_thread = wake_pending.clone();
-        let (waker_tx, waker_rx) = std::sync::mpsc::sync_channel::<Arc<Waker>>(1);
+        let (waker_tx, waker_rx) =
+            std::sync::mpsc::sync_channel::<(Arc<Waker>, Arc<RuntimeMetrics>)>(1);
 
         let thread_handle = thread::spawn(move || {
             pin_current_thread_to_cpu(options.worker_id);
@@ -898,17 +1067,14 @@ impl TquicRuntime {
 
             let mut adapter =
                 TquicAdapter::with_options(config, options).expect("Failed to create TquicAdapter");
-            let _ = waker_tx.send(adapter.waker());
+            let _ = waker_tx.send((adapter.waker(), adapter.metrics()));
 
             let stream_bufs = adapter.stream_bufs.clone();
             let mut pending_accepts: Vec<
                 oneshot::Sender<Result<(u64, SocketAddr), TransportError>>,
             > = Vec::new();
             let mut incoming_connections: Vec<(u64, SocketAddr)> = Vec::new();
-            let mut pending_stream_accepts: HashMap<
-                u64,
-                Vec<oneshot::Sender<Result<u64, TransportError>>>,
-            > = HashMap::new();
+            let mut pending_stream_accepts: HashMap<u64, Vec<PendingStreamAccept>> = HashMap::new();
             let mut incoming_streams: HashMap<u64, Vec<u64>> = HashMap::new();
             let mut next_stream_ids: HashMap<u64, u64> = HashMap::new();
             let mut pending_connects: HashMap<
@@ -929,6 +1095,7 @@ impl TquicRuntime {
                 wake_pending_thread.store(false, std::sync::atomic::Ordering::Release);
 
                 while let Ok(cmd) = cmd_rx.try_recv() {
+                    adapter.metrics.commands.fetch_add(1, Ordering::Relaxed);
                     match cmd {
                         RuntimeCommand::Connect {
                             server_name,
@@ -952,7 +1119,8 @@ impl TquicRuntime {
                         RuntimeCommand::AcceptStream { conn_index, resp } => {
                             if let Some(streams) = incoming_streams.get_mut(&conn_index) {
                                 if let Some(stream_id) = streams.pop() {
-                                    let _ = resp.send(Ok(stream_id));
+                                    let rx = make_push(&stream_bufs, conn_index, stream_id);
+                                    let _ = resp.send(Ok((stream_id, rx)));
                                 } else {
                                     pending_stream_accepts
                                         .entry(conn_index)
@@ -980,7 +1148,8 @@ impl TquicRuntime {
                                 Ok(()) => {
                                     let current_id = *stream_id;
                                     *stream_id += 4;
-                                    let _ = resp.send(Ok(current_id));
+                                    let rx = make_push(&stream_bufs, conn_index, current_id);
+                                    let _ = resp.send(Ok((current_id, rx)));
                                 }
                                 Err(e) => {
                                     let _ = resp.send(Err(TransportError::StreamError(format!(
@@ -1003,8 +1172,54 @@ impl TquicRuntime {
                                 .ok_or_else(|| {
                                     TransportError::ConnectionFailed("Connection not found".into())
                                 })
-                                .and_then(|conn| write_stream_all(conn, stream_id, data, fin));
+                                .and_then(|conn| {
+                                    write_stream_all(conn, stream_id, data, fin, &adapter.metrics)
+                                });
                             let _ = resp.send(result);
+                        }
+                        RuntimeCommand::StreamWriteBatchAsync {
+                            conn_index,
+                            stream_id,
+                            messages,
+                        } => {
+                            adapter
+                                .metrics
+                                .write_batches
+                                .fetch_add(1, Ordering::Relaxed);
+                            adapter
+                                .metrics
+                                .writes
+                                .fetch_add(messages.len() as u64, Ordering::Relaxed);
+                            let bytes: u64 = messages.iter().map(|(d, _)| d.len() as u64).sum();
+                            adapter
+                                .metrics
+                                .bytes_written
+                                .fetch_add(bytes, Ordering::Relaxed);
+                            let result = adapter
+                                .endpoint
+                                .conn_get_mut(conn_index)
+                                .ok_or_else(|| {
+                                    TransportError::ConnectionFailed("Connection not found".into())
+                                })
+                                .and_then(|conn| {
+                                    for (data, fin) in messages {
+                                        write_stream_all(
+                                            conn,
+                                            stream_id,
+                                            data,
+                                            fin,
+                                            &adapter.metrics,
+                                        )?;
+                                    }
+                                    Ok(())
+                                });
+                            if let Err(e) = result {
+                                adapter.metrics.write_errors.fetch_add(1, Ordering::Relaxed);
+                                let mut bufs = stream_bufs.lock().unwrap();
+                                if let Some(buf) = bufs.get_mut(&(conn_index, stream_id)) {
+                                    buf.fail(&format!("write failed: {:?}", e));
+                                }
+                            }
                         }
                         RuntimeCommand::StreamWriteBatch {
                             conn_index,
@@ -1021,8 +1236,13 @@ impl TquicRuntime {
                                 .and_then(|conn| {
                                     let mut total_written = 0;
                                     for (data, fin) in messages {
-                                        total_written +=
-                                            write_stream_all(conn, stream_id, data, fin)?;
+                                        total_written += write_stream_all(
+                                            conn,
+                                            stream_id,
+                                            data,
+                                            fin,
+                                            &adapter.metrics,
+                                        )?;
                                     }
                                     Ok(total_written)
                                 });
@@ -1079,7 +1299,8 @@ impl TquicRuntime {
                         Ok(TquicEvent::StreamCreated { index, stream_id }) => {
                             if let Some(waiters) = pending_stream_accepts.get_mut(&index) {
                                 if let Some(waiter) = waiters.pop() {
-                                    let _ = waiter.send(Ok(stream_id));
+                                    let rx = make_push(&stream_bufs, index, stream_id);
+                                    let _ = waiter.send(Ok((stream_id, rx)));
                                 } else {
                                     incoming_streams.entry(index).or_default().push(stream_id);
                                 }
@@ -1135,6 +1356,16 @@ impl TquicRuntime {
                     break;
                 }
 
+                adapter.metrics.poll_calls.fetch_add(1, Ordering::Relaxed);
+                let backlog = cmd_rx.len() as u64;
+                let prev = adapter.metrics.max_command_backlog.load(Ordering::Relaxed);
+                if backlog > prev {
+                    adapter
+                        .metrics
+                        .max_command_backlog
+                        .store(backlog, Ordering::Relaxed);
+                }
+
                 // Sleep in the kernel until a packet arrives or a command
                 // wakes us. This replaces the previous busy-poll loop plus a
                 // 1 ms condvar nap, which alone imposed a ~1-2 ms latency floor.
@@ -1167,7 +1398,7 @@ impl TquicRuntime {
             }
         });
 
-        let waker = waker_rx.recv().map_err(|_| {
+        let (waker, metrics) = waker_rx.recv().map_err(|_| {
             TransportError::ConnectionFailed("Runtime thread failed to start".into())
         })?;
 
@@ -1176,21 +1407,36 @@ impl TquicRuntime {
             thread_handle: Some(thread_handle),
             waker,
             wake_pending,
+            metrics,
         })
     }
 
     /// Enqueue a command and wake the runtime thread at most once per batch.
-    fn send_command(&self, cmd: RuntimeCommand) -> Result<(), TransportError> {
+    /// The bounded queue provides backpressure; `send` awaits capacity rather
+    /// than growing memory without bound.
+    async fn send_command(&self, cmd: RuntimeCommand) -> Result<(), TransportError> {
+        // Wake before waiting for queue capacity: when the queue is full the
+        // runtime is the only party that can free a slot, and it may be parked
+        // in poll(2) with no socket event pending.
+        self.wake();
         self.cmd_tx
             .send(cmd)
-            .map_err(|_| TransportError::ConnectionFailed("Runtime stopped".into()))?;
+            .await
+            .map_err(|_| TransportError::ConnectionFailed("Runtime stopped".into()))
+    }
+
+    fn wake(&self) {
         if !self
             .wake_pending
             .swap(true, std::sync::atomic::Ordering::AcqRel)
         {
             let _ = self.waker.wake();
         }
-        Ok(())
+    }
+
+    /// Per-worker counters for diagnostics. Cheap to clone.
+    pub fn metrics(&self) -> Arc<RuntimeMetrics> {
+        self.metrics.clone()
     }
 
     pub async fn connect(
@@ -1203,7 +1449,8 @@ impl TquicRuntime {
             server_name: server_name.to_string(),
             server_addr,
             resp: resp_tx,
-        })?;
+        })
+        .await?;
 
         resp_rx
             .await
@@ -1212,31 +1459,40 @@ impl TquicRuntime {
 
     pub async fn accept(&self) -> Result<(u64, SocketAddr), TransportError> {
         let (resp_tx, resp_rx) = oneshot::channel();
-        self.send_command(RuntimeCommand::Accept { resp: resp_tx })?;
+        self.send_command(RuntimeCommand::Accept { resp: resp_tx })
+            .await?;
 
         resp_rx
             .await
             .map_err(|_| TransportError::ConnectionFailed("Runtime stopped".into()))?
     }
 
-    pub async fn accept_stream(&self, conn_index: u64) -> Result<u64, TransportError> {
+    pub async fn accept_stream(
+        &self,
+        conn_index: u64,
+    ) -> Result<(u64, PushReceiver), TransportError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.send_command(RuntimeCommand::AcceptStream {
             conn_index,
             resp: resp_tx,
-        })?;
+        })
+        .await?;
 
         resp_rx
             .await
             .map_err(|_| TransportError::StreamError("Runtime stopped".into()))?
     }
 
-    pub async fn open_stream(&self, conn_index: u64) -> Result<u64, TransportError> {
+    pub async fn open_stream(
+        &self,
+        conn_index: u64,
+    ) -> Result<(u64, PushReceiver), TransportError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.send_command(RuntimeCommand::OpenStream {
             conn_index,
             resp: resp_tx,
-        })?;
+        })
+        .await?;
 
         resp_rx
             .await
@@ -1257,7 +1513,8 @@ impl TquicRuntime {
             data,
             fin,
             resp: resp_tx,
-        })?;
+        })
+        .await?;
 
         resp_rx
             .await
@@ -1278,11 +1535,28 @@ impl TquicRuntime {
             stream_id,
             messages,
             resp: resp_tx,
-        })?;
+        })
+        .await?;
 
         resp_rx
             .await
             .map_err(|_| TransportError::StreamError("Runtime stopped".into()))?
+    }
+
+    /// Enqueue a batch without waiting for the runtime to execute it. The only
+    /// wait is bounded-queue capacity, which is the backpressure signal.
+    pub async fn stream_write_batch_async(
+        &self,
+        conn_index: u64,
+        stream_id: u64,
+        messages: Vec<(bytes::Bytes, bool)>,
+    ) -> Result<(), TransportError> {
+        self.send_command(RuntimeCommand::StreamWriteBatchAsync {
+            conn_index,
+            stream_id,
+            messages,
+        })
+        .await
     }
 
     pub async fn stream_read(
@@ -1295,7 +1569,8 @@ impl TquicRuntime {
             conn_index,
             stream_id,
             resp: resp_tx,
-        })?;
+        })
+        .await?;
 
         resp_rx
             .await
@@ -1307,7 +1582,8 @@ impl TquicRuntime {
         self.send_command(RuntimeCommand::CloseConnection {
             conn_index,
             resp: resp_tx,
-        })?;
+        })
+        .await?;
 
         resp_rx
             .await
@@ -1315,7 +1591,7 @@ impl TquicRuntime {
     }
 
     pub fn shutdown(&mut self) {
-        let _ = self.send_command(RuntimeCommand::Shutdown);
+        let _ = self.cmd_tx.try_send(RuntimeCommand::Shutdown);
         if let Some(handle) = self.thread_handle.take() {
             let _ = handle.join();
         }
@@ -1446,23 +1722,23 @@ pub struct TquicConnection {
 
 impl TquicConnection {
     pub async fn open_stream(&self) -> Result<TquicStream, TransportError> {
-        let stream_id = self.runtime.open_stream(self.conn_index).await?;
-
-        Ok(TquicStream {
-            conn_index: self.conn_index,
+        let (stream_id, read_rx) = self.runtime.open_stream(self.conn_index).await?;
+        Ok(TquicStream::with_reader(
+            self.conn_index,
             stream_id,
-            runtime: self.runtime.clone(),
-        })
+            self.runtime.clone(),
+            read_rx,
+        ))
     }
 
     pub async fn accept_stream(&self) -> Result<TquicStream, TransportError> {
-        let stream_id = self.runtime.accept_stream(self.conn_index).await?;
-
-        Ok(TquicStream {
-            conn_index: self.conn_index,
+        let (stream_id, read_rx) = self.runtime.accept_stream(self.conn_index).await?;
+        Ok(TquicStream::with_reader(
+            self.conn_index,
             stream_id,
-            runtime: self.runtime.clone(),
-        })
+            self.runtime.clone(),
+            read_rx,
+        ))
     }
 
     pub async fn close(&self) -> Result<(), TransportError> {
@@ -1535,6 +1811,9 @@ pub struct TquicStream {
     pub conn_index: u64,
     pub stream_id: u64,
     runtime: Arc<TquicRuntime>,
+    /// Push-based reader. `None` falls back to the legacy request/oneshot
+    /// `stream_read` command (kept for manually constructed streams).
+    read_rx: tokio::sync::Mutex<Option<PushReceiver>>,
 }
 
 impl TquicStream {
@@ -1543,6 +1822,21 @@ impl TquicStream {
             conn_index,
             stream_id,
             runtime,
+            read_rx: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    fn with_reader(
+        conn_index: u64,
+        stream_id: u64,
+        runtime: Arc<TquicRuntime>,
+        read_rx: PushReceiver,
+    ) -> Self {
+        Self {
+            conn_index,
+            stream_id,
+            runtime,
+            read_rx: tokio::sync::Mutex::new(Some(read_rx)),
         }
     }
 
@@ -1560,33 +1854,29 @@ impl TquicStream {
         Ok(())
     }
 
-    /// Send data with zero-copy using bytes::Bytes
-    /// This avoids the copy that happens with send() when you already have Bytes
+    /// Send data with zero-copy using bytes::Bytes.
+    ///
+    /// This uses the fire-and-forget path: it waits only for bounded-queue
+    /// capacity, not for the runtime thread to execute the write. A write
+    /// failure is delivered to this stream's reader as an error.
     pub async fn send_bytes(&self, data: bytes::Bytes, fin: bool) -> Result<(), TransportError> {
         self.runtime
-            .stream_write(self.conn_index, self.stream_id, data, fin)
-            .await?;
-        Ok(())
+            .stream_write_batch_async(self.conn_index, self.stream_id, vec![(data, fin)])
+            .await
     }
 
-    /// Batch send multiple messages in a single channel command
-    /// This reduces context switches from 3N to 3 for N messages
+    /// Batch send multiple messages in a single queue operation.
     pub async fn send_batch(
         &self,
         messages: Vec<(bytes::Bytes, bool)>,
     ) -> Result<(), TransportError> {
         self.runtime
-            .stream_write_batch(self.conn_index, self.stream_id, messages)
-            .await?;
-        Ok(())
+            .stream_write_batch_async(self.conn_index, self.stream_id, messages)
+            .await
     }
 
     pub async fn receive(&self, _max_length: usize) -> Result<Vec<u8>, TransportError> {
-        let (data, _fin) = self
-            .runtime
-            .stream_read(self.conn_index, self.stream_id)
-            .await?;
-        Ok(data)
+        self.recv().await
     }
 
     pub async fn close(&self) -> Result<(), TransportError> {
@@ -1597,11 +1887,24 @@ impl TquicStream {
     }
 
     pub async fn recv(&self) -> Result<Vec<u8>, TransportError> {
-        let (data, _fin) = self
-            .runtime
-            .stream_read(self.conn_index, self.stream_id)
-            .await?;
-        Ok(data)
+        let mut guard = self.read_rx.lock().await;
+        match guard.as_mut() {
+            Some(rx) => match rx.recv().await {
+                Some(Ok((data, _fin))) => Ok(data),
+                Some(Err(e)) => Err(e),
+                None => Err(TransportError::StreamError(
+                    "stream reader closed".to_string(),
+                )),
+            },
+            None => {
+                // Legacy fallback for streams not created via the runtime.
+                let (data, _fin) = self
+                    .runtime
+                    .stream_read(self.conn_index, self.stream_id)
+                    .await?;
+                Ok(data)
+            }
+        }
     }
 }
 
@@ -1641,10 +1944,13 @@ impl tokio::io::AsyncWrite for TquicStream {
 
 impl Clone for TquicStream {
     fn clone(&self) -> Self {
+        // The push receiver is single-consumer; clones use the legacy command
+        // path rather than silently stealing bytes from the original reader.
         Self {
             conn_index: self.conn_index,
             stream_id: self.stream_id,
             runtime: self.runtime.clone(),
+            read_rx: tokio::sync::Mutex::new(None),
         }
     }
 }

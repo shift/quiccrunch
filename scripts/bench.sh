@@ -37,6 +37,8 @@ if ! [[ "$SIZE" =~ ^[0-9]+$ ]]; then SIZE=1024; fi
 DURATION="${DURATION:-10}"
 WARMUP="${WARMUP:-3}"
 RUNS="${RUNS:-1}"
+CLIENT_RUNTIMES="${CLIENT_RUNTIMES:-8}"
+TOKIO_THREADS="${TOKIO_THREADS:-2}"
 BASE_PORT="${BASE_PORT:-4600}"
 export RUST_LOG="${RUST_LOG:-warn}"
 TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
@@ -62,14 +64,15 @@ if [[ ! -x "$BIN/multi_worker_server" || ! -x "$BIN/pipelined_benchmark" ]]; the
   cargo build --release --bin multi_worker_server --bin pipelined_benchmark
 fi
 
-printf '%-3s %-5s %-9s %-10s %-8s %-8s %-8s %-8s %-6s %-6s %s\n' \
-  "w" "conns" "depth" "msg/s" "p50us" "p95us" "p99us" "maxus" "err" "timeout" "distribution"
+printf '%-3s %-5s %-9s %-10s %-8s %-8s %-8s %-9s %-9s %-6s %-7s %-8s %s\n' \
+  "w" "conns" "depth" "msg/s" "p50us" "p95us" "p99us" "p999us" "maxus" "err" "timeout" "cutoff" "distribution"
 
 run_cell() {
   local workers="$1" conns="$2" depth="$3" port="$4"
   local server_args=( "$BIN/multi_worker_server" "127.0.0.1:$port" "$CERT" "$KEY" "$workers" --bench )
   local client_args=( "$BIN/pipelined_benchmark" "127.0.0.1:$port" "$DURATION" "$conns" "$STREAMS" "$depth" "$SIZE"
-                      --warmup "$WARMUP" --workers "$workers" --json )
+                      --warmup "$WARMUP" --workers "$workers" --json
+                      --client-runtimes "$CLIENT_RUNTIMES" --tokio-threads "$TOKIO_THREADS" )
   if [[ "$MODE" == "spread" ]]; then
     server_args+=( --spread )
     client_args+=( --spread "$workers" )
@@ -88,7 +91,7 @@ run_cell() {
 
   local out rc
   set +e
-  out=$(RUST_LOG="$RUST_LOG" timeout $((WARMUP + DURATION + 90)) "${client_args[@]}" 2>&1)
+  out=$(RUST_LOG="$RUST_LOG" timeout $((WARMUP + DURATION + 300)) "${client_args[@]}" 2>&1)
   rc=$?
   set -e
 
@@ -105,8 +108,8 @@ run_cell() {
   # Fall back to grep if jq is unavailable.
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$json" | jq -r --arg w "$workers" --arg c "$conns" --arg d "$depth" --arg mode "$MODE" \
-      '[$w,$c,$d,(.throughput_msg_s|floor),.rtt_p50_us,.rtt_p95_us,.rtt_p99_us,((.rtt_p999_us*2)|floor/2),.errors,.timeouts,$mode] | @tsv' \
-      | awk -F'\t' '{printf "%-3s %-5s %-9s %-10s %-8.0f %-8.0f %-8.0f %-8.0f %-6s %-6s %s\n",$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11}'
+      '[$w,$c,$d,(.throughput_msg_s|floor),.rtt_p50_us,.rtt_p95_us,.rtt_p99_us,.rtt_p999_us,.rtt_max_us,.errors,.timeouts,.cutoff,$mode] | @tsv' \
+      | awk -F'\t' '{printf "%-3s %-5s %-9s %-10s %-8.0f %-8.0f %-8.0f %-9.0f %-9.0f %-6s %-7s %-8s %s\n",$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13}'
   else
     printf '%s\n' "$json"
   fi
