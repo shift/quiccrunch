@@ -64,6 +64,7 @@ pub mod config;
 //pub mod server;
 pub mod rpc;
 pub mod production;
+pub mod raft;
 
 // Interceptor/Middleware Framework for RPC
 #[cfg(feature = "auth")]
@@ -172,6 +173,10 @@ pub mod schema {
 
     pub mod rpc_capnp {
         include!(concat!(env!("OUT_DIR"), "/schema/rpc_capnp.rs"));
+    }
+
+    pub mod raft_capnp {
+        include!(concat!(env!("OUT_DIR"), "/schema/raft_capnp.rs"));
     }
 
     // Re-export types
