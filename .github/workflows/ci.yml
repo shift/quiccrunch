@@ -19,14 +19,27 @@ concurrency:
 permissions:
   contents: read
 
+# Jobs that compile the workspace run inside `nix develop`. The dev shell is
+# the single source of truth for the toolchain (Rust 1.89.0, see
+# rust-toolchain.toml) and for the native build dependencies the build script
+# needs (capnp, protoc, clang, cmake, openssl). Installing those from apt is
+# both a source of drift and fragile: on 2026-11-11 every build job failed
+# because the Ubuntu mirrors stopped resolving, and the failure looked like a
+# source-code problem. Nix also guarantees cloud and local use the same
+# compiler, so clippy/rustdoc cannot disagree.
+
 jobs:
   fmt:
     name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the same version as rust-toolchain.toml / `nix develop`.
+      # Do not use the floating `stable` ref: it silently changes the rustfmt
+      # and clippy lint sets between local runs and CI.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.89.0"
           components: rustfmt
       - run: cargo fmt --all -- --check
 
@@ -35,50 +48,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: cachix/install-nix-action@v31
         with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang pkg-config libssl-dev
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test (stable)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang pkg-config libssl-dev
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
       - name: Build all targets
-        run: cargo build --workspace --all-targets
+        run: nix develop -c cargo build --workspace --all-targets
       - name: Run tests
-        run: cargo test --workspace --no-fail-fast
+        run: nix develop -c cargo test --workspace --no-fail-fast
       # quiccrunch-core's doctests are disabled because they document a
       # high-level API that is currently commented out. See
       # docs/known-issues/doctests-high-level-api.md. This still exercises the
       # doctests of the other workspace crates.
       - name: Run doctests (excluding quiccrunch-core)
-        run: cargo test --doc --workspace --exclude quiccrunch-core
+        run: nix develop -c cargo test --doc --workspace --exclude quiccrunch-core
 
   no-default-features:
     name: Build (no default features)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang pkg-config libssl-dev
-      - run: cargo build --workspace --no-default-features
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - run: nix develop -c cargo build --workspace --no-default-features
 
   # Optional manual run so beta drift does not break every PR.
   test-beta:
@@ -93,7 +98,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang pkg-config libssl-dev
+          sudo apt-get install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace --no-fail-fast
 
@@ -132,23 +137,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang pkg-config libssl-dev
-      - run: cargo bench --workspace
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - run: nix develop -c cargo bench --workspace
 
   docs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang pkg-config libssl-dev
-      - run: cargo doc --workspace --no-deps
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - run: nix develop -c cargo doc --workspace --no-deps

@@ -60,6 +60,18 @@ mod stream_splitter; // Stream splitting for concurrent RPC operations
                      //pub mod metrics;
                      //pub mod power;
 pub mod config;
+// Peer identity is derived from the certificate chain the TLS stack verified,
+// so the module only exists when TLS is enabled.
+#[cfg(feature = "tls")]
+pub mod identity;
+
+// Asking for the tQUIC backend without TLS would silently produce a server
+// that cannot authenticate its peers. Fail the build instead.
+#[cfg(all(feature = "backend-tquic", not(feature = "tls")))]
+compile_error!(
+    "feature `backend-tquic` requires `tls`: the tQUIC transport derives peer \
+     identity from the certificate chain verified during the TLS handshake"
+);
 //pub mod client;
 //pub mod server;
 pub mod messaging;

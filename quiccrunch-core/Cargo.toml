@@ -44,6 +44,8 @@ tracing = { version = "0.1.40", features = ["release_max_level_info"] }
 async-trait = "0.1.77"
 mio = { version = "1.0.4", features = ["net", "os-poll"] }
 rcgen = "0.12.1"
+# Only needed by `identity`, which parses the verified peer certificate chain.
+x509-parser = { version = "0.18", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 parking_lot = "0.12"
@@ -150,7 +152,9 @@ tonic-build = "0.12"
 
 
 [features]
-backend-tquic = ["dep:tquic"]
+# The tQUIC transport always negotiates TLS and derives the peer identity from
+# the certificate chain BoringSSL verified, so it requires `tls`.
+backend-tquic = ["dep:tquic", "tls"]
 backend-alt = []
 
 # Comparison feature for gRPC
@@ -196,21 +200,9 @@ telemetry = [
 
 auth = ["dep:jsonwebtoken"]
 
-tls = []
+tls = ["dep:x509-parser"]
 visualization = ["plotters"]
 
-# PERFORMANCE OPTIMIZATION PROFILES
-[profile.release]
-opt-level = 3                    # Maximum optimization
-lto = true                       # Link-time optimization
-codegen-units = 1               # Better optimization (slower compile)
-panic = "abort"                  # Smaller binaries, faster panics
-overflow-checks = false          # Disable overflow checks in release
-
-[profile.bench]
-inherits = "release"
-debug = true                     # Keep debug info for profiling
-
-[profile.dev]
-opt-level = 1                    # Some optimization for development
-overflow-checks = true           # Keep safety checks in development
+# Cargo profiles are defined once in the workspace root Cargo.toml. Profiles in
+# a non-root package are silently ignored (cargo warns "profiles for the non
+# root package will be ignored"), so do not add them here.

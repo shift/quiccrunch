@@ -397,6 +397,10 @@ impl Interceptor for CircuitBreakerInterceptor {
 // Authentication and Authorization module
 #[cfg(feature = "auth")]
 pub mod auth;
+// SPIFFE enforcement needs both an interceptor chain (`auth`) and verified TLS
+// peer identities (`tls`).
+#[cfg(feature = "tls")]
+pub mod identity;
 #[cfg(feature = "auth")]
 pub use self::auth::{
     create_auth_interceptor, create_rbac_auth_interceptor, AuthConfig, AuthInterceptor,

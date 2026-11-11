@@ -14,9 +14,35 @@ use tokio::sync::{mpsc, oneshot};
 use tquic::{Config, Connection, Endpoint, PacketInfo, TlsConfig, TransportHandler};
 
 use crate::error::TransportError;
+use crate::identity::{peer_identity_from_chain, PeerIdentity};
 use crate::transport::messages::WorkerConfig;
 
 const MAX_BUF_SIZE: usize = 65536;
+
+/// Load PEM trust anchors into a TLS config, refusing a path that does not
+/// exist. tQUIC's `set_ca_certs` treats a non-file path as a *directory* and
+/// BoringSSL accepts a missing directory with an empty trust store, which would
+/// silently turn verification into a failure at handshake time rather than a
+/// configuration error. Fail at startup instead.
+fn load_trust_anchors(
+    tls_config: &mut TlsConfig,
+    path: &str,
+    description: &str,
+) -> Result<(), TransportError> {
+    let p = std::path::Path::new(path);
+    if !p.exists() {
+        return Err(TransportError::ConfigError(format!(
+            "{} does not exist: {}",
+            description, path
+        )));
+    }
+    tls_config.set_ca_certs(path).map_err(|e| {
+        TransportError::ConfigError(format!(
+            "Failed to load {} from {}: {:?}",
+            description, path, e
+        ))
+    })
+}
 
 /// Per-worker counters. Cheap enough to update on every batch (not every
 /// packet) and intended to make saturation, skew and flow-control starvation
@@ -36,6 +62,16 @@ pub struct RuntimeMetrics {
     pub bytes_received: AtomicU64,
     pub poll_calls: AtomicU64,
     pub max_command_backlog: AtomicU64,
+    /// Connections where the client certificate chain and SPIFFE SAN were
+    /// verified successfully.
+    pub mtls_handshakes: AtomicU64,
+    /// Connections rejected after (or during) the handshake because the client
+    /// certificate was missing, untrusted, expired, or carried an invalid or
+    /// out-of-domain SPIFFE SAN.
+    pub mtls_rejections: AtomicU64,
+    /// True when this runtime was configured as a server with a client CA and
+    /// therefore requires/verifies client certificates.
+    pub mtls_enabled: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -53,6 +89,9 @@ pub struct RuntimeMetricsSnapshot {
     pub bytes_received: u64,
     pub poll_calls: u64,
     pub max_command_backlog: u64,
+    pub mtls_handshakes: u64,
+    pub mtls_rejections: u64,
+    pub mtls_enabled: bool,
 }
 
 impl RuntimeMetrics {
@@ -71,6 +110,9 @@ impl RuntimeMetrics {
             bytes_received: self.bytes_received.load(Ordering::Relaxed),
             poll_calls: self.poll_calls.load(Ordering::Relaxed),
             max_command_backlog: self.max_command_backlog.load(Ordering::Relaxed),
+            mtls_handshakes: self.mtls_handshakes.load(Ordering::Relaxed),
+            mtls_rejections: self.mtls_rejections.load(Ordering::Relaxed),
+            mtls_enabled: self.mtls_enabled.load(Ordering::Relaxed),
         }
     }
 }
@@ -246,6 +288,7 @@ impl tquic::PacketSendHandler for QuicSocket {
 #[derive(Default)]
 struct ConnectionState {
     established: bool,
+    rejected: bool,
 }
 
 /// Per-stream receive state.
@@ -389,17 +432,35 @@ struct TquicHandler {
     connections: Arc<Mutex<HashMap<u64, ConnectionState>>>,
     stream_bufs: Arc<Mutex<HashMap<(u64, u64), StreamBuf>>>,
     event_tx: mpsc::UnboundedSender<TquicEvent>,
+    /// Server-side policy: require a verified client certificate with a SPIFFE
+    /// SAN in `trust_domain`. `None` means one-way TLS (mTLS off).
+    peer_identity_policy: Option<PeerIdentityPolicy>,
+    /// Whether an unauthenticated one-way TLS peer chain may be exposed as an
+    /// identity. True only when the local TLS stack verified the peer chain.
+    verify_peer_chain: bool,
+    metrics: Arc<RuntimeMetrics>,
+}
+
+#[derive(Debug, Clone)]
+struct PeerIdentityPolicy {
+    trust_domain: String,
 }
 
 impl TquicHandler {
     fn new(
         event_tx: mpsc::UnboundedSender<TquicEvent>,
         stream_bufs: Arc<Mutex<HashMap<(u64, u64), StreamBuf>>>,
+        peer_identity_policy: Option<PeerIdentityPolicy>,
+        verify_peer_chain: bool,
+        metrics: Arc<RuntimeMetrics>,
     ) -> Self {
         Self {
             connections: Arc::new(Mutex::new(HashMap::new())),
             stream_bufs,
             event_tx,
+            peer_identity_policy,
+            verify_peer_chain,
+            metrics,
         }
     }
 }
@@ -407,12 +468,36 @@ impl TquicHandler {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 enum TquicEvent {
-    ConnectionEstablished { index: u64, remote: SocketAddr },
-    ConnectionClosed { index: u64 },
-    StreamCreated { index: u64, stream_id: u64 },
-    StreamReadable { index: u64, stream_id: u64 },
-    StreamWritable { index: u64, stream_id: u64 },
-    StreamClosed { index: u64, stream_id: u64 },
+    ConnectionEstablished {
+        index: u64,
+        remote: SocketAddr,
+        identity: Option<PeerIdentity>,
+    },
+    /// A connection reached `on_conn_established` but was rejected by the
+    /// application identity policy (missing/invalid/out-of-domain SPIFFE SAN).
+    ConnectionRejected {
+        index: u64,
+        reason: String,
+    },
+    ConnectionClosed {
+        index: u64,
+    },
+    StreamCreated {
+        index: u64,
+        stream_id: u64,
+    },
+    StreamReadable {
+        index: u64,
+        stream_id: u64,
+    },
+    StreamWritable {
+        index: u64,
+        stream_id: u64,
+    },
+    StreamClosed {
+        index: u64,
+        stream_id: u64,
+    },
 }
 
 impl TransportHandler for TquicHandler {
@@ -427,6 +512,74 @@ impl TransportHandler for TquicHandler {
         debug!("{} connection established", conn.trace_id());
         let index = conn.index().unwrap();
 
+        // The certificate chain has already been validated by BoringSSL. Only
+        // here do we turn it into a workload identity and apply the SPIFFE
+        // policy. A failure closes the connection before it is reported as
+        // established to the runtime, so no application data can flow.
+        let chain = conn.peer_cert_chain();
+        let identity = match (&self.peer_identity_policy, chain.as_deref()) {
+            (Some(policy), Some(chain)) if !chain.is_empty() => {
+                match peer_identity_from_chain(chain, Some(&policy.trust_domain)) {
+                    Ok(identity) => {
+                        self.metrics.mtls_handshakes.fetch_add(1, Ordering::Relaxed);
+                        info!(
+                            "verified mTLS peer {} on connection {}",
+                            identity.spiffe_id(),
+                            index
+                        );
+                        Some(identity)
+                    }
+                    Err(e) => {
+                        self.metrics.mtls_rejections.fetch_add(1, Ordering::Relaxed);
+                        let reason = format!("peer identity rejected: {e}");
+                        warn!("connection {}: {}", index, reason);
+                        if let Some(state) = self.connections.lock().unwrap().get_mut(&index) {
+                            state.rejected = true;
+                        }
+                        let _ = conn.close(true, 0x100, reason.as_bytes());
+                        let _ = self
+                            .event_tx
+                            .send(TquicEvent::ConnectionRejected { index, reason });
+                        return;
+                    }
+                }
+            }
+            (Some(_), _) => {
+                // Fail closed. In normal operation the TLS handshake already
+                // failed because SSL_VERIFY_FAIL_IF_NO_PEER_CERT is set, but a
+                // defence-in-depth check here means a future TLS backend that
+                // only requests certificates cannot create an unauthenticated
+                // session.
+                self.metrics.mtls_rejections.fetch_add(1, Ordering::Relaxed);
+                let reason = "client certificate required but not presented".to_string();
+                warn!("connection {}: {}", index, reason);
+                if let Some(state) = self.connections.lock().unwrap().get_mut(&index) {
+                    state.rejected = true;
+                }
+                let _ = conn.close(true, 0x101, reason.as_bytes());
+                let _ = self
+                    .event_tx
+                    .send(TquicEvent::ConnectionRejected { index, reason });
+                return;
+            }
+            (None, Some(chain)) if !chain.is_empty() && self.verify_peer_chain => {
+                // One-way TLS server: a client certificate was not requested,
+                // but if one is present try to expose its identity. Parse
+                // failures are not fatal because mTLS is explicitly off.
+                match peer_identity_from_chain(chain, None) {
+                    Ok(identity) => Some(identity),
+                    Err(e) => {
+                        debug!(
+                            "connection {}: peer certificate has no usable SPIFFE SAN: {}",
+                            index, e
+                        );
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
         let mut conns = self.connections.lock().unwrap();
         if let Some(state) = conns.get_mut(&index) {
             state.established = true;
@@ -438,9 +591,11 @@ impl TransportHandler for TquicHandler {
             .map(|p| p.remote)
             .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 0)));
 
-        let _ = self
-            .event_tx
-            .send(TquicEvent::ConnectionEstablished { index, remote });
+        let _ = self.event_tx.send(TquicEvent::ConnectionEstablished {
+            index,
+            remote,
+            identity,
+        });
     }
 
     fn on_conn_closed(&mut self, conn: &mut Connection) {
@@ -454,6 +609,22 @@ impl TransportHandler for TquicHandler {
         let index = conn.index().unwrap();
 
         let mut conns = self.connections.lock().unwrap();
+        if self.peer_identity_policy.is_some() {
+            if let Some(state) = conns.get(&index) {
+                if !state.established && !state.rejected {
+                    // The connection ended before a verified client identity
+                    // was established: handshake failure, missing client cert,
+                    // untrusted/expired cert, or a timeout. Count it as a
+                    // rejection once, in addition to the application-level
+                    // SAN rejections handled in on_conn_established.
+                    self.metrics.mtls_rejections.fetch_add(1, Ordering::Relaxed);
+                    debug!(
+                        "connection {} closed before mTLS identity was established",
+                        index
+                    );
+                }
+            }
+        }
         conns.remove(&index);
         drop(conns);
 
@@ -587,6 +758,19 @@ pub struct RuntimeOptions {
     /// PEM file with the trust anchors used when `verify_server_cert` is set.
     /// When unset, the platform trust store is used.
     pub ca_cert_file: Option<String>,
+    /// Client certificate (PEM, leaf + intermediates) presented to the server.
+    /// Requires `client_key_file`.
+    pub client_cert_file: Option<String>,
+    /// Client private key (PEM) matching `client_cert_file`.
+    pub client_key_file: Option<String>,
+    /// Server-side trust anchors (PEM file or directory) used to verify client
+    /// certificates. When set, the server requests a client certificate and
+    /// fails the handshake if none is presented: mTLS is required. When unset,
+    /// the server uses one-way TLS.
+    pub client_ca_file: Option<String>,
+    /// SPIFFE trust domain that peer identities must belong to. Required when
+    /// `client_ca_file` is set on a server.
+    pub trust_domain: Option<String>,
 }
 
 impl Default for RuntimeOptions {
@@ -603,6 +787,10 @@ impl Default for RuntimeOptions {
             ack_eliciting_threshold: 2,
             verify_server_cert: true,
             ca_cert_file: None,
+            client_cert_file: None,
+            client_key_file: None,
+            client_ca_file: None,
+            trust_domain: None,
         }
     }
 }
@@ -623,6 +811,10 @@ impl RuntimeOptions {
             ack_eliciting_threshold: 1,
             verify_server_cert: true,
             ca_cert_file: None,
+            client_cert_file: None,
+            client_key_file: None,
+            client_ca_file: None,
+            trust_domain: None,
         }
     }
 
@@ -667,66 +859,139 @@ impl TquicAdapter {
         quic_config.set_ack_eliciting_threshold(options.ack_eliciting_threshold);
         quic_config.set_send_batch_size(64);
 
-        if config.is_server {
-            let cert_file = config
-                .cert_file
-                .as_ref()
-                .ok_or_else(|| TransportError::ConfigError("Server requires cert_file".into()))?;
-            let key_file = config
-                .key_file
-                .as_ref()
-                .ok_or_else(|| TransportError::ConfigError("Server requires key_file".into()))?;
+        let client_verify = !config.is_server && options.verify_server_cert && config.verify_cert;
+        let peer_identity_policy =
+            if config.is_server {
+                let cert_file = config.cert_file.as_ref().ok_or_else(|| {
+                    TransportError::ConfigError("Server requires cert_file".into())
+                })?;
+                let key_file = config.key_file.as_ref().ok_or_else(|| {
+                    TransportError::ConfigError("Server requires key_file".into())
+                })?;
 
-            let tls_config = TlsConfig::new_server_config(
-                cert_file,
-                key_file,
-                vec![b"h3".to_vec(), b"http/0.9".to_vec()],
-                true,
-            )
-            .map_err(|e| TransportError::ConfigError(format!("TLS config failed: {:?}", e)))?;
+                let mut tls_config = TlsConfig::new_server_config(
+                    cert_file,
+                    key_file,
+                    vec![b"h3".to_vec(), b"http/0.9".to_vec()],
+                    false,
+                )
+                .map_err(|e| TransportError::ConfigError(format!("TLS config failed: {:?}", e)))?;
 
-            quic_config.set_tls_config(tls_config);
-        } else {
-            // Two independent switches can disable verification: the runtime
-            // option (used by TquicRuntime clients) and WorkerConfig::verify_cert
-            // (used by callers constructing TquicAdapter directly). Both must
-            // opt out; either one being false wins, so a caller cannot
-            // accidentally re-enable a deliberately insecure test transport.
-            let verify = options.verify_server_cert && config.verify_cert;
-            let ca_file = options
-                .ca_cert_file
-                .as_ref()
-                .or(config.ca_cert_file.as_ref());
+                let client_ca = options
+                    .client_ca_file
+                    .as_ref()
+                    .or(config.client_ca_file.as_ref());
+                let trust_domain = options
+                    .trust_domain
+                    .as_ref()
+                    .or(config.trust_domain.as_ref());
 
-            let mut tls_config =
-                TlsConfig::new_client_config(vec![b"h3".to_vec(), b"http/0.9".to_vec()], false)
-                    .map_err(|e| {
-                        TransportError::ConfigError(format!("TLS config failed: {:?}", e))
+                let peer_identity_policy = if let Some(ca_file) = client_ca {
+                    let trust_domain = trust_domain.ok_or_else(|| {
+                        TransportError::ConfigError(
+                            "mTLS requires RuntimeOptions::trust_domain when client_ca_file is set"
+                                .into(),
+                        )
                     })?;
+                    load_trust_anchors(&mut tls_config, ca_file, "client CA certificates")?;
+                    // SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT: request a
+                    // client certificate and make a missing/invalid one a fatal
+                    // handshake error.
+                    tls_config.set_verify_client_cert(true);
+                    info!(
+                        "tQUIC server mTLS ENABLED: client CA={}, trust domain={}",
+                        ca_file, trust_domain
+                    );
+                    Some(PeerIdentityPolicy {
+                        trust_domain: trust_domain.clone(),
+                    })
+                } else {
+                    warn!(
+                        "tQUIC server TLS is ONE-WAY: no client_ca_file configured, so client \
+                     certificates are neither requested nor verified and mTLS is OFF"
+                    );
+                    None
+                };
 
-            if verify {
-                tls_config.set_verify(true);
-                // With no explicit CA file the BoringSSL context keeps the
-                // platform trust store loaded in Context::new().
-                if let Some(ca_file) = ca_file {
-                    tls_config.set_ca_certs(ca_file).map_err(|e| {
-                        TransportError::ConfigError(format!(
-                            "Failed to load CA certificates from {}: {:?}",
-                            ca_file, e
-                        ))
-                    })?;
-                }
+                quic_config.set_tls_config(tls_config);
+
+                peer_identity_policy
             } else {
-                warn!(
-                    "tQUIC client TLS server-certificate verification is DISABLED \
+                // Two independent switches can disable verification: the runtime
+                // option (used by TquicRuntime clients) and WorkerConfig::verify_cert
+                // (used by callers constructing TquicAdapter directly). Both must
+                // opt out; either one being false wins, so a caller cannot
+                // accidentally re-enable a deliberately insecure test transport.
+                let verify = client_verify;
+                let ca_file = options
+                    .ca_cert_file
+                    .as_ref()
+                    .or(config.ca_cert_file.as_ref());
+
+                let mut tls_config =
+                    TlsConfig::new_client_config(vec![b"h3".to_vec(), b"http/0.9".to_vec()], false)
+                        .map_err(|e| {
+                            TransportError::ConfigError(format!("TLS config failed: {:?}", e))
+                        })?;
+
+                // Present a client certificate when configured. This is what makes
+                // the server's mTLS policy usable end-to-end.
+                let client_cert = options
+                    .client_cert_file
+                    .as_ref()
+                    .or(config.client_cert_file.as_ref());
+                let client_key = options
+                    .client_key_file
+                    .as_ref()
+                    .or(config.client_key_file.as_ref());
+                match (client_cert, client_key) {
+                    (Some(cert), Some(key)) => {
+                        tls_config.set_certificate_file(cert).map_err(|e| {
+                            TransportError::ConfigError(format!(
+                                "Failed to load client certificate from {}: {:?}",
+                                cert, e
+                            ))
+                        })?;
+                        tls_config.set_private_key_file(key).map_err(|e| {
+                            TransportError::ConfigError(format!(
+                                "Failed to load client private key from {}: {:?}",
+                                key, e
+                            ))
+                        })?;
+                    }
+                    (Some(_), None) => {
+                        return Err(TransportError::ConfigError(
+                            "client_cert_file is set but client_key_file is missing".into(),
+                        ))
+                    }
+                    (None, Some(_)) => {
+                        return Err(TransportError::ConfigError(
+                            "client_key_file is set but client_cert_file is missing".into(),
+                        ))
+                    }
+                    (None, None) => {}
+                }
+
+                if verify {
+                    tls_config.set_verify(true);
+                    // With no explicit CA file the BoringSSL context keeps the
+                    // platform trust store loaded in Context::new().
+                    if let Some(ca_file) = ca_file {
+                        load_trust_anchors(&mut tls_config, ca_file, "CA certificates")?;
+                    }
+                } else {
+                    warn!(
+                        "tQUIC client TLS server-certificate verification is DISABLED \
                      (verify_server_cert={}, WorkerConfig::verify_cert={}); \
                      this is only acceptable for loopback self-signed test certificates",
-                    options.verify_server_cert, config.verify_cert
-                );
-            }
+                        options.verify_server_cert, config.verify_cert
+                    );
+                }
 
-            quic_config.set_tls_config(tls_config);
-        }
+                quic_config.set_tls_config(tls_config);
+
+                None
+            };
 
         let poll = mio::Poll::new()?;
         let registry = poll.registry();
@@ -737,6 +1002,10 @@ impl TquicAdapter {
         let bind_addr = config.bind_addr;
 
         let metrics = Arc::new(RuntimeMetrics::default());
+        metrics.mtls_enabled.store(
+            config.is_server && peer_identity_policy.is_some(),
+            Ordering::Relaxed,
+        );
         let sock = Rc::new(QuicSocket::with_metrics(
             &bind_addr,
             registry,
@@ -746,7 +1015,18 @@ impl TquicAdapter {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let stream_bufs: Arc<Mutex<HashMap<(u64, u64), StreamBuf>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let handlers = TquicHandler::new(event_tx, stream_bufs.clone());
+        let verify_peer_chain = if config.is_server {
+            peer_identity_policy.is_some()
+        } else {
+            client_verify
+        };
+        let handlers = TquicHandler::new(
+            event_tx,
+            stream_bufs.clone(),
+            peer_identity_policy,
+            verify_peer_chain,
+            metrics.clone(),
+        );
 
         let endpoint = Endpoint::new(
             Box::new(quic_config),
@@ -921,14 +1201,21 @@ impl TquicAdapter {
     }
 }
 
+/// A connected/established QUIC connection plus its verified peer identity.
+type Connected = (u64, Option<PeerIdentity>);
+type ConnectResponse = oneshot::Sender<Result<Connected, TransportError>>;
+/// An accepted connection: index, remote address, verified peer identity.
+type Accepted = (u64, SocketAddr, Option<PeerIdentity>);
+type AcceptResponse = oneshot::Sender<Result<Accepted, TransportError>>;
+
 enum RuntimeCommand {
     Connect {
         server_name: String,
         server_addr: SocketAddr,
-        resp: oneshot::Sender<Result<u64, TransportError>>,
+        resp: ConnectResponse,
     },
     Accept {
-        resp: oneshot::Sender<Result<(u64, SocketAddr), TransportError>>,
+        resp: AcceptResponse,
     },
     AcceptStream {
         conn_index: u64,
@@ -1109,7 +1396,11 @@ impl TquicRuntime {
                 enable_early_data: false,
                 application_protocols: vec![b"h3".to_vec(), b"http/0.9".to_vec()],
                 verify_cert: true,
-                ca_cert_file: None,
+                ca_cert_file: options.ca_cert_file.clone(),
+                client_cert_file: options.client_cert_file.clone(),
+                client_key_file: options.client_key_file.clone(),
+                client_ca_file: options.client_ca_file.clone(),
+                trust_domain: options.trust_domain.clone(),
             };
 
             let mut adapter =
@@ -1117,17 +1408,12 @@ impl TquicRuntime {
             let _ = waker_tx.send((adapter.waker(), adapter.metrics()));
 
             let stream_bufs = adapter.stream_bufs.clone();
-            let mut pending_accepts: Vec<
-                oneshot::Sender<Result<(u64, SocketAddr), TransportError>>,
-            > = Vec::new();
-            let mut incoming_connections: Vec<(u64, SocketAddr)> = Vec::new();
+            let mut pending_accepts: Vec<AcceptResponse> = Vec::new();
+            let mut incoming_connections: Vec<Accepted> = Vec::new();
             let mut pending_stream_accepts: HashMap<u64, Vec<PendingStreamAccept>> = HashMap::new();
             let mut incoming_streams: HashMap<u64, Vec<u64>> = HashMap::new();
             let mut next_stream_ids: HashMap<u64, u64> = HashMap::new();
-            let mut pending_connects: HashMap<
-                u64,
-                (Instant, oneshot::Sender<Result<u64, TransportError>>),
-            > = HashMap::new();
+            let mut pending_connects: HashMap<u64, (Instant, ConnectResponse)> = HashMap::new();
 
             info!(
                 "TquicRuntime thread started on {} (worker {})",
@@ -1157,8 +1443,9 @@ impl TquicRuntime {
                             }
                         },
                         RuntimeCommand::Accept { resp } => {
-                            if let Some((conn_index, remote)) = incoming_connections.pop() {
-                                let _ = resp.send(Ok((conn_index, remote)));
+                            if let Some((conn_index, remote, identity)) = incoming_connections.pop()
+                            {
+                                let _ = resp.send(Ok((conn_index, remote, identity)));
                             } else {
                                 pending_accepts.push(resp);
                             }
@@ -1334,13 +1621,26 @@ impl TquicRuntime {
                 // here directly becomes receiver latency.
                 loop {
                     match adapter.event_rx.try_recv() {
-                        Ok(TquicEvent::ConnectionEstablished { index, remote }) => {
+                        Ok(TquicEvent::ConnectionEstablished {
+                            index,
+                            remote,
+                            identity,
+                        }) => {
                             if let Some((_start, resp)) = pending_connects.remove(&index) {
-                                let _ = resp.send(Ok(index));
+                                let _ = resp.send(Ok((index, identity)));
                             } else if let Some(waiter) = pending_accepts.pop() {
-                                let _ = waiter.send(Ok((index, remote)));
+                                let _ = waiter.send(Ok((index, remote, identity)));
                             } else {
-                                incoming_connections.push((index, remote));
+                                incoming_connections.push((index, remote, identity));
+                            }
+                        }
+                        Ok(TquicEvent::ConnectionRejected { index, reason }) => {
+                            warn!("runtime: connection {} rejected: {}", index, reason);
+                            if let Some((_start, resp)) = pending_connects.remove(&index) {
+                                let _ = resp.send(Err(TransportError::ConnectionFailed(format!(
+                                    "connection rejected by peer identity policy: {}",
+                                    reason
+                                ))));
                             }
                         }
                         Ok(TquicEvent::StreamCreated { index, stream_id }) => {
@@ -1491,6 +1791,19 @@ impl TquicRuntime {
         server_name: &str,
         server_addr: SocketAddr,
     ) -> Result<u64, TransportError> {
+        Ok(self
+            .connect_with_identity(server_name, server_addr)
+            .await?
+            .0)
+    }
+
+    /// Connect and also return the identity extracted from the verified server
+    /// certificate, if it has a SPIFFE SAN.
+    pub async fn connect_with_identity(
+        &self,
+        server_name: &str,
+        server_addr: SocketAddr,
+    ) -> Result<(u64, Option<PeerIdentity>), TransportError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.send_command(RuntimeCommand::Connect {
             server_name: server_name.to_string(),
@@ -1505,6 +1818,14 @@ impl TquicRuntime {
     }
 
     pub async fn accept(&self) -> Result<(u64, SocketAddr), TransportError> {
+        let (index, remote, _identity) = self.accept_with_identity().await?;
+        Ok((index, remote))
+    }
+
+    /// Accept a connection and return the verified peer identity (if any).
+    pub async fn accept_with_identity(
+        &self,
+    ) -> Result<(u64, SocketAddr, Option<PeerIdentity>), TransportError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.send_command(RuntimeCommand::Accept { resp: resp_tx })
             .await?;
@@ -1697,11 +2018,15 @@ impl TquicClient {
             .map(str::to_string)
             .unwrap_or_else(|| server_addr.ip().to_string());
 
-        let conn_index = self.runtime.connect(&server_name, server_addr).await?;
+        let (conn_index, peer_identity) = self
+            .runtime
+            .connect_with_identity(&server_name, server_addr)
+            .await?;
 
         Ok(TquicConnection {
             conn_index,
             runtime: self.runtime.clone(),
+            peer_identity,
         })
     }
 }
@@ -1719,12 +2044,28 @@ impl TquicServer {
         key_file: String,
         _worker_count: Option<usize>,
     ) -> Result<Self, TransportError> {
-        let runtime = TquicRuntime::new(true, bind_addr, Some(cert_file), Some(key_file))?;
+        Self::with_options(bind_addr, cert_file, key_file, RuntimeOptions::default()).await
+    }
+
+    /// Start a server with explicit mTLS/identity configuration.
+    pub async fn with_options(
+        bind_addr: SocketAddr,
+        cert_file: String,
+        key_file: String,
+        options: RuntimeOptions,
+    ) -> Result<Self, TransportError> {
+        let runtime =
+            TquicRuntime::with_options(true, bind_addr, Some(cert_file), Some(key_file), options)?;
 
         Ok(TquicServer {
             runtime: Arc::new(runtime),
             bind_addr,
         })
+    }
+
+    /// Runtime counters, including mTLS handshake and rejection counts.
+    pub fn metrics(&self) -> Arc<RuntimeMetrics> {
+        self.runtime.metrics()
     }
 
     pub async fn listen(&self, _addr: &str) -> Result<TquicListener, TransportError> {
@@ -1751,12 +2092,26 @@ impl TquicListener {
     }
 
     pub async fn accept(&mut self) -> Result<TquicConnection, TransportError> {
-        let (conn_index, _remote) = self.runtime.accept().await?;
+        let (conn_index, _remote, peer_identity) = self.runtime.accept_with_identity().await?;
 
         Ok(TquicConnection {
             conn_index,
             runtime: self.runtime.clone(),
+            peer_identity,
         })
+    }
+
+    /// Accept a connection and expose the verified SPIFFE identity directly.
+    pub async fn accept_with_identity(
+        &mut self,
+    ) -> Result<(TquicConnection, Option<PeerIdentity>), TransportError> {
+        let (conn_index, _remote, peer_identity) = self.runtime.accept_with_identity().await?;
+        let connection = TquicConnection {
+            conn_index,
+            runtime: self.runtime.clone(),
+            peer_identity: peer_identity.clone(),
+        };
+        Ok((connection, peer_identity))
     }
 }
 
@@ -1767,15 +2122,16 @@ impl crate::transport::Listener for TquicListener {
     async fn accept(
         &mut self,
     ) -> Result<Self::Connection, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let (conn_index, _remote) = self
+        let (conn_index, _remote, peer_identity) = self
             .runtime
-            .accept()
+            .accept_with_identity()
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
         Ok(TquicConnection {
             conn_index,
             runtime: self.runtime.clone(),
+            peer_identity,
         })
     }
 }
@@ -1783,9 +2139,23 @@ impl crate::transport::Listener for TquicListener {
 pub struct TquicConnection {
     pub conn_index: u64,
     runtime: Arc<TquicRuntime>,
+    peer_identity: Option<PeerIdentity>,
 }
 
 impl TquicConnection {
+    /// The verified peer SPIFFE identity, if the peer certificate carried a
+    /// valid `spiffe://` URI SAN.
+    pub fn peer_identity(&self) -> Option<&PeerIdentity> {
+        self.peer_identity.as_ref()
+    }
+
+    /// The peer SPIFFE ID as a string, if present.
+    pub fn peer_spiffe_id(&self) -> Option<String> {
+        self.peer_identity
+            .as_ref()
+            .map(|id| id.spiffe_id().to_string())
+    }
+
     pub async fn open_stream(&self) -> Result<TquicStream, TransportError> {
         let (stream_id, read_rx) = self.runtime.open_stream(self.conn_index).await?;
         Ok(TquicStream::with_reader(

@@ -30,6 +30,10 @@ fn create_worker_config(worker_id: usize, port: u16) -> WorkerConfig {
         max_udp_payload_size: 1350,
         enable_early_data: false,
         application_protocols: vec![b"h3".to_vec()],
+        client_cert_file: None,
+        client_key_file: None,
+        client_ca_file: None,
+        trust_domain: None,
     }
 }
 

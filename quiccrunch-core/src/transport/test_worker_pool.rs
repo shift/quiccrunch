@@ -26,6 +26,10 @@ mod tests {
             application_protocols: vec![b"quic-crunch".to_vec()],
             verify_cert: true,
             ca_cert_file: None,
+            client_cert_file: None,
+            client_key_file: None,
+            client_ca_file: None,
+            trust_domain: None,
         }
     }
 
