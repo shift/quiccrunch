@@ -17,7 +17,9 @@ rustflags = [
     "-C", "target-cpu=native",
     "-C", "target-feature=+avx2,+fma,+sse4.2",
     "-C", "codegen-units=16",      # More units for parallel dev builds
-    "-C", "incremental=on",        # Enable incremental compilation
+                                   # (Cargo enables incremental; do not pass
+                                   # `-C incremental=on` here: rustc reads it
+                                   # as a directory path and writes ./on)
 ]
 
 # Environment variables for consistent builds
