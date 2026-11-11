@@ -1,0 +1,103 @@
+name: Bug report
+description: Report a defect in the transport, RPC layer, CLI, or benchmark harness.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. QuicCrunch is an experimental prototype, so please
+        include enough detail to reproduce the problem exactly.
+
+        **Do not report security vulnerabilities here.** Follow
+        [SECURITY.md](https://github.com/shift/quiccrunch/blob/main/SECURITY.md)
+        instead.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: A clear description of the defect and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, config, and inputs. Include the branch or commit.
+      placeholder: |
+        1. git checkout <commit>
+        2. nix develop -c cargo run --release --bin multi_worker_server -- ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include the full error output, panic message, or benchmark summary line.
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - transport adapter (tQUIC)
+        - multi-worker server / SO_REUSEPORT
+        - RPC types (service, codegen, reflection)
+        - auth / JWT / RBAC
+        - rate limiting / DDoS protection
+        - Raft RPC
+        - benchmark harness (pipelined_benchmark, scripts/bench.sh)
+        - comparison harness (tonic vs QUIC)
+        - CLI
+        - build / CI / Nix
+        - documentation
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit or branch
+      description: Output of `git rev-parse HEAD` or the branch name.
+      placeholder: 88989bd
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, kernel, CPU, Rust toolchain, and whether you used the Nix shell.
+      placeholder: |
+        OS: Linux 6.18.36
+        CPU: Intel Core i5-8400T
+        rustc: 1.89.0 (via nix develop)
+        mode: release
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go to SECURITY.md).
+          required: true
+        - label: I am not running benchmarks with `RUST_LOG=debug` and reporting the result as a defect.
+          required: false

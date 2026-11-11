@@ -1,66 +1,164 @@
 # QuicCrunch
 
-A high-performance RPC framework built on QUIC transport with multi-worker architecture for extreme throughput.
+Experimental QUIC RPC transport and benchmark harness, built to evaluate whether
+QUIC is a better backend messaging layer than tonic/gRPC for the distri-kv
+control plane.
 
 [![CI](https://github.com/shift/quiccrunch/actions/workflows/ci.yml/badge.svg)](https://github.com/shift/quiccrunch/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](#license)
+![status: experimental](https://img.shields.io/badge/status-experimental-orange.svg)
 
-## Highlights
+## Project status
 
-- **Multi-worker QUIC server** — true parallelism across CPU cores via SO_REUSEPORT
-- **Hardware-accelerated TLS** — AES-NI, AVX, SHA-NI with automatic feature detection
-- **Cap'n Proto serialization** — zero-copy message encoding/decoding
-- **Built-in RPC framework** — service reflection, auth, rate limiting, metrics
-- Measured throughput and true percentiles (see [`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md)); tail latency is dominated by pipeline queueing, not transport RTT
+**This is a prototype.** It is not production software, it has no API or wire
+stability promise, and it should not be deployed. The transport, the instrumented
+benchmark and the tonic comparison harness are real and reproducible; most of the
+surrounding framework is not finished.
+
+QuicCrunch exists to answer one question with measurements: does QUIC give a
+control-plane RPC anything that tonic/gRPC does not? The answer so far, on this
+hardware and for this RPC shape, is no.
+
+### What is implemented and working
+
+- Multi-worker QUIC server: one `TquicRuntime` event loop per worker on a
+  dedicated OS thread, workers sharing a UDP socket via `SO_REUSEPORT`.
+- Async client/server adapter over tQUIC 1.6
+  (`quiccrunch-core::transport::adapter`), with push-based stream reads and a
+  batched, wait-free send path.
+- A versioned Raft RPC contract over Cap'n Proto
+  (`quiccrunch-core/schema/raft.capnp`, see [`docs/RAFT_RPC.md`](docs/RAFT_RPC.md)),
+  exercised by QUIC end-to-end tests.
+- An instrumented benchmark that timestamps every request at enqueue, write
+  hand-off and response, and reports completed-response throughput and true RTT
+  percentiles (`quiccrunch-core/src/bin/pipelined_benchmark.rs`).
+
+### What the measurements show
+
+- **~51k msg/s** (median of three runs) at 4 workers / 16 connections / pipeline
+  depth 1, with zero errors and zero watchdog timeouts; RTT p50 **~1.1 ms** and
+  p99 **~3.4 ms** in that cell.
+- Pipeline depth does not raise throughput below ~16 connections; it mostly
+  raises queueing. The depth-64 and depth-1800 cells are queueing-dominated and
+  must not be read as transport latency.
+- Against tonic, with the same 1 KiB echo RPC and the same client
+  instrumentation, **tonic wins bulk throughput: 1.5×–2.9× at pipeline depth
+  1800**, and at depth 64 from 16 connections up. The only clear QuicCrunch win
+  is 1 connection at depth 1 (+17% throughput, p99 184 µs vs 340 µs).
+
+Sources: [`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md) for
+methodology, hardware and the full 36-cell matrix;
+[`docs/GRPC_VS_QUICCRUNCH.md`](docs/GRPC_VS_QUICCRUNCH.md) for the head-to-head.
+
+### What is not done
+
+- **mTLS and workload identity.** `main` provides one-way TLS: the client
+  verifies the server certificate, the server does not request or verify client
+  certificates. Peer-certificate support (SPIFFE identity) is in
+  [PR #6](https://github.com/shift/quiccrunch/pull/6), which carries a vendored
+  tQUIC patch.
+- **Raft RPC comparison.** The Raft RPC surface exists, but it has not been
+  benchmarked against a tonic equivalent.
+- **Backend messaging contract.** The versioned messaging prototype is draft
+  [PR #2](https://github.com/shift/quiccrunch/pull/2).
+- **Network realism.** No packet loss, WAN delay, connection migration or
+  CPU-cost-per-byte measurement. The comparison matrix is loopback (plus an
+  injected fixed delay) and the path is lossless, so QUIC loss recovery never
+  runs.
+- **RPC serialization.** The generic `rpc` request/response envelope is a
+  hand-written length-prefixed binary format; Cap'n Proto is used by the Raft RPC
+  schema. The benchmark echo path is raw bytes, so serialization is not on the
+  measured path.
+- **Authentication.** The JWT/RBAC interceptor exists behind the non-default
+  `auth` feature, but that feature does not compile on `main`. It is excluded
+  from the default build and from CI. See
+  [`docs/known-issues/auth-feature-does-not-build.md`](docs/known-issues/auth-feature-does-not-build.md).
+- **Operational hardening.** No CRL/OCSP, no CA rotation without a restart, no
+  retransmit/loss counters in the per-worker metrics. See
+  [`SECURITY.md`](SECURITY.md).
+
+### Deliberately out of scope
+
+- Production deployment, API stability and a release cadence.
+- Replacing tonic in distri-kv's control plane — the measurements argue against
+  it.
+- Kernel bypass (DPDK/AF_XDP) and eBPF reuseport steering.
+- Sharding each worker into multiple event loops.
+- A full RPC framework: codegen, discovery and the high-level client/server API
+  are partly commented out in `quiccrunch-core` (see
+  [`docs/known-issues/doctests-high-level-api.md`](docs/known-issues/doctests-high-level-api.md)).
 
 ## Performance
 
-QuicCrunch is measured with an instrumented benchmark that timestamps every
-request and reports true RTT, end-to-end latency and completed-response
-throughput. Reproduce with `scripts/bench.sh`; the numbers, methodology,
-hardware and known limits are in [`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md).
+Every number below was produced by `scripts/bench.sh` on the hardware listed in
+[`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md). Nothing here is
+derived from send counts or from `1 / throughput`.
 
-The previous table (5,000 msg/s / 194 µs and 31,629 msg/s / 32 µs) was
-arithmetic, not measurement: `p99` was `1 / throughput`, individual requests
-were never timed, and throughput counted sends regardless of completions. Those
-numbers have been withdrawn.
+| Canonical cell (4 workers, 16 conns, 4 streams/conn, 1 KiB) | Throughput | RTT p50 | RTT p99 | Errors |
+| --- | --- | --- | --- | --- |
+| Pipeline depth 1 | 51,350 msg/s | 1,088 µs | 3,396 µs | 0 |
 
-## Getting Started
+The matrix is one run per cell on a shared host, so treat ±20% as run-to-run
+noise. Depth-64 and depth-1800 numbers, the worker-scaling summary, the error
+analysis and the reproduction commands are all in
+[`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md).
+
+**Withdrawn claims.** An earlier README advertised 5,000 msg/s / 194 µs and
+31,629 msg/s / 32 µs. Those were arithmetic, not measurement: `p99` was
+`1 / throughput`, individual requests were never timed, and throughput counted
+sends regardless of completions. They have been withdrawn; the only remaining
+mention is the correction note in
+[`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md).
+
+## Getting started
 
 ### Prerequisites
 
-- Rust 1.75+ (stable recommended)
-- Linux (SO_REUSEPORT support required for multi-worker)
-- cmake, clang, pkg-config, libssl-dev
+- Linux (`SO_REUSEPORT` is required for the multi-worker server).
+- Nix with flakes enabled, **or** stable Rust plus `cmake`, `clang`,
+  `pkg-config` and OpenSSL headers.
+- The flake and CI track the latest stable Rust. No MSRV is declared; the
+  published measurements used rustc 1.89.0.
 
 ### Build
 
 ```bash
-# With Nix (recommended)
-nix develop --command bash -c "cargo build --release"
+# With Nix (recommended: provides the toolchain and native dependencies)
+nix develop -c cargo build --release
 
-# With Cargo
+# With Cargo, if the native dependencies above are already installed
 cargo build --release
 ```
 
-### Run the Server
+### Run the server
 
 ```bash
-# Generate test certs (for development only)
+# Development-only loopback certificate
 openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
   -days 365 -nodes -subj '/CN=localhost'
 
-# Start multi-worker server
-cargo run --bin multi_worker_server -- \
-  127.0.0.1:4433 cert.pem key.pem 4
+# Usage: multi_worker_server [addr] [cert] [key] [workers] [--bench]
+cargo run --release --bin multi_worker_server -- \
+  127.0.0.1:4433 cert.pem key.pem 4 --bench
 ```
 
-### Run a Benchmark
+`--bench` selects pacing-free, deep-window transport settings for same-host
+measurement. Without it, the production defaults apply. The binary also accepts
+`--spread` (worker `w` listens on `port + w`) and defaults to
+`quiccrunch-core/tests/certs/{cert,key}.pem` when no paths are given.
+
+### Run a benchmark
 
 ```bash
-cargo run --bin pipelined_benchmark -- \
-  127.0.0.1:4433 1800 1800 16 1024 4
+# Full matrix, including server startup and certificate generation
+nix develop -c bash scripts/bench.sh
+
+# One cell: address, seconds, connections, streams/conn, depth, payload bytes
+cargo run --release --bin pipelined_benchmark -- 127.0.0.1:4433 10 16 4 1 1024
 ```
+
+`scripts/bench.sh` documents the environment variables (`WORKERS`, `CONNS`,
+`DEPTHS`, `MODE`, `DURATION`, `RUNS`, ...) in its header.
 
 ## Architecture
 
@@ -76,94 +174,117 @@ cargo run --bin pipelined_benchmark -- \
 └─────────────────────────────────────────────────────────┘
 ```
 
-Each worker runs its own `TquicRuntime` on a dedicated OS thread. The kernel distributes incoming UDP packets across workers via SO_REUSEPORT — no load balancer required.
+Each worker runs its own `TquicRuntime` on a dedicated OS thread. The kernel
+distributes incoming UDP packets across workers via `SO_REUSEPORT`; there is no
+load balancer. The kernel's 4-tuple hash is uneven for small connection counts
+(10 / 4 / 2 / 0 connections across 4 workers was observed), which is why the
+benchmark has a `--spread` mode with exact distribution. See
+[`docs/PERFORMANCE_RELEASE.md` §3](docs/PERFORMANCE_RELEASE.md).
 
-## Usage
+## Library API
 
-### Define an RPC Service
+These snippets are copied from
+[`quiccrunch-core/examples/rpc_api.rs`](quiccrunch-core/examples/rpc_api.rs),
+which CI builds, so they track the code. They exercise the `rpc` module; the
+measured path is the transport adapter, not this layer.
+
+### Define an RPC service
 
 ```rust
-use quiccrunch_core::rpc::service::{ServiceDefinition, MethodDefinition, StreamingType};
+use quiccrunch_core::rpc::service::{MethodDefinition, ServiceDefinition, StreamingType};
 
-let mut service = ServiceDefinition::new(1, "Calculator");
-service.add_method(MethodDefinition {
-    id: 1,
-    name: "Add".to_string(),
-    streaming_type: StreamingType::Unary,
-    request_schema: None,
-    response_schema: None,
-});
+fn define_service() -> ServiceDefinition {
+    let mut service = ServiceDefinition::new(1, "Calculator");
+    service.add_method(MethodDefinition {
+        id: 1,
+        name: "Add".to_string(),
+        streaming_type: StreamingType::Unary,
+        request_schema: None,
+        response_schema: None,
+    });
+    service
+}
 ```
 
-### Authentication
+### Rate limiting
 
 ```rust
-use quiccrunch_core::interceptor::auth::AuthInterceptor;
+use quiccrunch_core::rpc::rate_limit::{DdosProtectionConfig, RateLimitInterceptor};
 
-let auth = AuthInterceptor::with_secret("secret-key".to_string());
-let token = auth.generate_token(
-    "user123",
-    vec!["admin".to_string()],
-    vec!["read".to_string(), "write".to_string()],
-    HashMap::new(),
-)?;
-let claims = auth.verify_token(&token)?;
+async fn check_rate_limit() -> Result<(), Box<dyn std::error::Error>> {
+    let rate_limiter = RateLimitInterceptor::new(
+        1000, // requests per second
+        5000, // burst capacity
+        DdosProtectionConfig::default(),
+    );
+    rate_limiter
+        .check_rate_limit("client1", "my_service", 1024)
+        .await?;
+    Ok(())
+}
 ```
 
-### Rate Limiting
+### Prometheus metrics
 
 ```rust
-use quiccrunch_core::rpc::rate_limit::{RateLimitInterceptor, DdosProtectionConfig};
-
-let rate_limiter = RateLimitInterceptor::new(
-    1000,  // requests per second
-    5000,  // burst capacity
-    DdosProtectionConfig::default(),
-);
-rate_limiter.check_rate_limit("client1", "my_service", 1024).await?;
-```
-
-### Prometheus Metrics
-
-```rust
+use std::time::Duration;
 use quiccrunch_core::rpc::metrics::RpcMetrics;
 
-let metrics = RpcMetrics::new();
-metrics.record_request("my_service", "my_method", duration).await;
-let prometheus = metrics.to_prometheus().await;
+async fn collect_metrics() -> String {
+    let metrics = RpcMetrics::new();
+    metrics
+        .record_request("my_service", "my_method", Duration::from_millis(2))
+        .await;
+    metrics.to_prometheus().await
+}
 ```
 
-## Workspace Crates
+## Workspace layout
 
-| Crate | Description |
-|-------|-------------|
-| `quiccrunch-core` | Core library — transport, RPC, crypto, metrics |
-| `quiccrunch-cli` | Command-line client |
-| `quiccrunch-macros` | Procedural macros for RPC codegen |
-| `quiccrunch-ffi` | C FFI bindings |
+| Crate / directory | State | Description |
+| --- | --- | --- |
+| `quiccrunch-core` | workspace member | Transport adapter, RPC types, Raft RPC, benchmark binaries |
+| `quiccrunch-macros` | workspace member | Procedural macros for RPC codegen |
+| `quiccrunch-cli` | workspace member | `quiccrunch` CLI for schema-driven codegen and ad-hoc RPC calls |
+| `comparison` | workspace member | tonic vs QuicCrunch benchmark harness |
+| `quiccrunch-ffi` | excluded from the workspace | Legacy C FFI; targets the disabled high-level API |
+| `quiccrunch-security` | not a workspace member | Separate security crate; not built or tested by CI |
 
-## Features
+## Feature status
 
-- **Transport**: QUIC via tQUIC backend, multi-stream multiplexing
-- **Serialization**: Cap'n Proto with SIMD-accelerated parsing (AVX2)
-- **Security**: JWT auth (HS256/RS256), RBAC, TLS 1.3 with hardware acceleration
-- **Observability**: OpenTelemetry/Prometheus metrics, structured logging with correlation IDs
-- **Resilience**: Token bucket rate limiting, DDoS protection with auto-blocking
-- **Production**: Health checks (`/health/live`, `/health/ready`), graceful shutdown
+| Area | State |
+| --- | --- |
+| Transport | tQUIC 1.6 over QUIC v1, one-way TLS (server authentication only) |
+| Serialization | Cap'n Proto for the Raft RPC schema; hand-written framing for the generic `rpc` envelope |
+| Auth | JWT/RBAC code exists behind the non-default `auth` feature, which does not currently compile (see known issues) |
+| Rate limiting | Token bucket plus DDoS auto-blocking in `rpc::rate_limit` |
+| Observability | Prometheus text exposition in `rpc::metrics`; `tracing` logging; structured logger with correlation IDs in `production` |
+| Health and shutdown | Helpers in the `production` module; not wired into the benchmark binaries |
+| TLS acceleration | BoringSSL (via tQUIC) selects AES-NI/AVX at runtime; the in-tree `crypto_accel` module is not exported |
+
+## Documentation
+
+- [`docs/README.md`](docs/README.md) — index of every document, with how current each one is.
+- [`docs/PERFORMANCE_RELEASE.md`](docs/PERFORMANCE_RELEASE.md) — measured performance and methodology.
+- [`docs/GRPC_VS_QUICCRUNCH.md`](docs/GRPC_VS_QUICCRUNCH.md) — tonic head-to-head and recommendation.
+- [`docs/RAFT_RPC.md`](docs/RAFT_RPC.md) — Raft RPC contract.
+- [`comparison/README.md`](comparison/README.md) — comparison harness and reproduction.
+- [`docs/known-issues/`](docs/known-issues/) — known gaps and their status.
+
+## Security
+
+The TLS defaults, the explicit opt-outs and the remaining gaps (no client
+certificates, no CRL/OCSP, no CA rotation without restart) are documented in
+[`SECURITY.md`](SECURITY.md) and [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Contributing
 
-Contributions are welcome! Please open an issue first to discuss what you'd like to change.
-
-```bash
-# Run the full test suite
-cargo test --all-features
-
-# Check formatting and lints
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features
-```
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the build, the exact local gate
+(format, clippy with `-D warnings`, tests, `cargo audit`), commit style and PR
+expectations. This project follows the
+[Contributor Covenant 2.1](CODE_OF_CONDUCT.md).
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT License](LICENSE-MIT) at your option.
