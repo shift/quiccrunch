@@ -84,6 +84,21 @@ practice (a QUIC handshake without a TLS config cannot succeed), but it should
 be wired up and tested separately before anyone relies on `AsyncTquicClient`
 for security decisions.
 
+## Revocation and trust-anchor rotation
+
+Both are unimplemented, and callers must plan around them:
+
+* **No CRL or OCSP.** A certificate that verified at handshake time remains
+  trusted for the lifetime of the connection. There is no online revocation
+  check and no reload hook for a revocation list. Revoking a peer means
+  removing its CA from the trust anchor and restarting the client.
+* **No CA rotation without a restart.** `RuntimeOptions::ca_cert_file` (or
+  `WorkerConfig::ca_cert_file`) is read once when the client is constructed.
+  Replacing the PEM on disk does not affect running clients. `CertificateRotator`
+  in `src/production.rs` is a standalone helper; no binary wires it to the
+  adapter's trust anchor.
+* The policy and disclosure process are in [`../SECURITY.md`](../SECURITY.md).
+
 ## Tests
 
 `quiccrunch-core/src/transport/adapter.rs` contains:

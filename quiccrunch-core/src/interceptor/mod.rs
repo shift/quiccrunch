@@ -3,14 +3,7 @@
 //! Provides a flexible middleware/interceptor system for RPC requests/responses.
 
 use crate::rpc::retry::{CircuitBreaker, RetryableError};
-use crate::{RpcContext, RpcError, RpcResult};
 use async_trait::async_trait;
-use bytes::Bytes;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
-use std::time::{Duration, SystemTime};
 
 /// Interceptor trait for request/response processing
 ///
@@ -20,6 +13,7 @@ use std::time::{Duration, SystemTime};
 /// Interceptors are executed in order of registration for requests,
 /// and in reverse order for responses (like middleware stack).
 #[async_trait]
+#[allow(unused_variables)]
 pub trait Interceptor: Send + Sync {
     /// Called before sending a request
     /// Returns Ok(()) to continue, or Err to short-circuit and return an error
@@ -376,7 +370,7 @@ impl Interceptor for CircuitBreakerInterceptor {
         _context: &mut crate::rpc::RpcContext,
         _response: &mut bytes::Bytes,
     ) -> crate::RpcResult<()> {
-        self.circuit_breaker.record_success().await;
+        self.circuit_breaker.record_success();
         Ok(())
     }
 
@@ -394,7 +388,7 @@ impl Interceptor for CircuitBreakerInterceptor {
                 | RetryableError::ServiceUnavailable
                 | RetryableError::InternalError
         ) {
-            self.circuit_breaker.record_failure().await;
+            self.circuit_breaker.record_failure();
         }
         Ok(())
     }
