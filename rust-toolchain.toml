@@ -1,0 +1,11 @@
+# Single source of truth for the Rust toolchain used locally and in CI.
+#
+# The version matches the toolchain supplied by `nix develop` (flake.nix uses
+# rust-overlay's stable.latest, pinned by flake.lock). CI installs this exact
+# version instead of floating `stable` so clippy and rustdoc apply the same
+# lint set in the cloud as on a developer machine.
+#
+# Keep in sync with `.github/workflows/ci.yml` if either side changes.
+[toolchain]
+channel = "1.89.0"
+components = ["clippy", "rustfmt"]
