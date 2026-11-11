@@ -14,7 +14,7 @@ resolver = "2"
 [workspace.dependencies]
 # Shared dependencies for all workspace members
 tokio = { version = "1.35.1", features = ["full"] }
-capnp = "0.27.3"
+capnp = { version = "0.27.3", features = ["unaligned"] }
 futures = "0.3.30"
 bytes = "1.5.0"
 thiserror = "1.0.56"
