@@ -1,5 +1,5 @@
 use quiccrunch_core::transport::adapter::{RuntimeOptions, TquicClient};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         connection.conn_index
     );
 
-    let mut stream = connection.open_stream().await?;
+    let stream = connection.open_stream().await?;
     log::info!("Stream opened: stream_id={}", stream.stream_id);
 
     let messages: Vec<String> = (1..=message_count)

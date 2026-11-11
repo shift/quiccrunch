@@ -1,29 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ClientConfig {
     pub transport: QuicTransportSettings,
 }
 
-impl Default for ClientConfig {
-    fn default() -> Self {
-        Self {
-            transport: QuicTransportSettings::default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ServerConfig {
     pub transport: QuicTransportSettings,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            transport: QuicTransportSettings::default(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -284,6 +268,7 @@ impl BenchmarkConfigs {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn verify_consistency(
         config1: &StandardizedBenchmarkConfig,
         config2: &StandardizedBenchmarkConfig,

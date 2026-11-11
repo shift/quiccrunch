@@ -92,8 +92,9 @@ impl TestTls {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Role {
+    #[default]
     Follower,
     Candidate,
     Leader,
@@ -116,12 +117,6 @@ struct Inner {
     vote_delay: Duration,
     redirect_append: bool,
     fail_snapshot_once: bool,
-}
-
-impl Default for Role {
-    fn default() -> Self {
-        Role::Follower
-    }
 }
 
 pub struct TestNode {

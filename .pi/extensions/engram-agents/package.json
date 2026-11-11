@@ -1,7 +1,0 @@
-{
-  "name": "pi-extension-engram-agents",
-  "private": true,
-  "dependencies": {
-    "@sinclair/typebox": "^0.34.49"
-  }
-}

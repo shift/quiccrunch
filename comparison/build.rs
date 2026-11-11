@@ -3,6 +3,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .build_client(true)
         .bytes(["."])
-        .compile(&["proto/echo.proto"], &["proto"])?;
+        .compile_protos(&["proto/echo.proto"], &["proto"])?;
     Ok(())
 }

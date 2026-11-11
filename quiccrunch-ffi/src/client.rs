@@ -1,11 +1,11 @@
-use std::os::raw::{c_char, c_void};
-use std::sync::Arc;
-use std::collections::HashMap;
+use crate::error::QuicError;
+use crate::runtime::FfiRuntime;
+use crate::types::{c_str_to_str, QuicCallback, QuicMessage, QuicTlsConfig};
 use bytes::Bytes;
 use quiccrunch_core::{QuicClient as CoreClient, QuicConnection as CoreConnection};
-use crate::error::QuicError;
-use crate::types::{QuicCallback, QuicTlsConfig, QuicMessage, c_str_to_str};
-use crate::runtime::FfiRuntime;
+use std::collections::HashMap;
+use std::os::raw::{c_char, c_void};
+use std::sync::Arc;
 
 /// Internal client handle structure
 pub struct QuicClientInternal {
@@ -22,25 +22,26 @@ impl QuicClientInternal {
             next_connection_id: 1,
         }
     }
-    
+
     fn add_connection(&mut self, conn: CoreConnection) -> u32 {
         let id = self.next_connection_id;
         self.next_connection_id += 1;
-        self.connections.insert(id, Arc::new(tokio::sync::Mutex::new(conn)));
+        self.connections
+            .insert(id, Arc::new(tokio::sync::Mutex::new(conn)));
         id
     }
-    
+
     fn get_connection(&self, id: u32) -> Option<Arc<tokio::sync::Mutex<CoreConnection>>> {
         self.connections.get(&id).cloned()
     }
-    
+
     fn remove_connection(&mut self, id: u32) -> bool {
         self.connections.remove(&id).is_some()
     }
 }
 
 /// Create a new QUIC client
-/// 
+///
 /// Returns a handle to the client, or null on error.
 /// The handle must be freed with quiccrunch_client_free().
 #[no_mangle]
@@ -50,21 +51,21 @@ pub extern "C" fn quiccrunch_client_new() -> *mut crate::types::QuicTransportHan
 }
 
 /// Create a new QUIC client with TLS configuration
-/// 
+///
 /// # Arguments
 /// * `tls_config` - TLS configuration for the client
-/// 
+///
 /// Returns a handle to the client, or null on error.
 #[no_mangle]
 pub extern "C" fn quiccrunch_client_new_with_tls(
-    tls_config: *const QuicTlsConfig
+    tls_config: *const QuicTlsConfig,
 ) -> *mut crate::types::QuicTransportHandle {
     if tls_config.is_null() {
         return std::ptr::null_mut();
     }
-    
+
     let _tls_config = unsafe { &*tls_config };
-    
+
     // For now, just create a basic client
     // TODO: Implement actual TLS configuration
     let client_internal = Box::new(QuicClientInternal::new());
@@ -72,7 +73,7 @@ pub extern "C" fn quiccrunch_client_new_with_tls(
 }
 
 /// Free a QUIC client handle
-/// 
+///
 /// # Safety
 /// The handle must have been created by quiccrunch_client_new() and
 /// must not be used after calling this function.
@@ -84,25 +85,25 @@ pub unsafe extern "C" fn quiccrunch_client_free(handle: *mut crate::types::QuicT
 }
 
 /// Initialize the client (creates the underlying transport)
-/// 
+///
 /// This must be called before connecting to servers.
-/// 
+///
 /// # Arguments
 /// * `handle` - Client handle
-/// 
+///
 /// Returns QuicError::Success on success, error code on failure.
 #[no_mangle]
 pub extern "C" fn quiccrunch_client_init(
-    handle: *mut crate::types::QuicTransportHandle
+    handle: *mut crate::types::QuicTransportHandle,
 ) -> QuicError {
     if handle.is_null() {
         return QuicError::InvalidHandle;
     }
-    
+
     let client_internal = unsafe { &mut *(handle as *mut QuicClientInternal) };
-    
+
     let result = FfiRuntime::block_on(CoreClient::new());
-    
+
     match result {
         Ok(client) => {
             client_internal.client = Some(client);
@@ -113,13 +114,13 @@ pub extern "C" fn quiccrunch_client_init(
 }
 
 /// Connect to a server asynchronously
-/// 
+///
 /// # Arguments
 /// * `handle` - Client handle
 /// * `address` - Server address (e.g., "127.0.0.1:50051")
 /// * `callback` - Callback function to call when connection completes
 /// * `user_data` - User data to pass to callback
-/// 
+///
 /// The callback will be called with:
 /// - user_data: The user_data parameter
 /// - error: QuicError::Success on success, error code on failure  
@@ -134,19 +135,19 @@ pub extern "C" fn quiccrunch_client_connect_async(
     if handle.is_null() || address.is_null() {
         return QuicError::InvalidHandle;
     }
-    
+
     let address_str = match c_str_to_str(address) {
         Ok(s) => s.to_string(),
         Err(e) => return e,
     };
-    
+
     let client_internal = unsafe { &mut *(handle as *mut QuicClientInternal) };
-    
+
     let client = match &client_internal.client {
         Some(c) => c.clone(),
         None => return QuicError::InvalidHandle,
     };
-    
+
     // We need to move the client_internal reference to capture the connection
     // This is tricky with the current approach - let's use a simpler method for now
     FfiRuntime::spawn_with_callback(
@@ -158,17 +159,17 @@ pub extern "C" fn quiccrunch_client_connect_async(
         callback,
         user_data,
     );
-    
+
     QuicError::Success
 }
 
 /// Connect to a server synchronously (blocks until connected)
-/// 
+///
 /// # Arguments
 /// * `handle` - Client handle
 /// * `address` - Server address (e.g., "127.0.0.1:50051")
 /// * `connection_id` - Output parameter for connection ID
-/// 
+///
 /// Returns QuicError::Success on success, error code on failure.
 #[no_mangle]
 pub extern "C" fn quiccrunch_client_connect(
@@ -179,22 +180,22 @@ pub extern "C" fn quiccrunch_client_connect(
     if handle.is_null() || address.is_null() {
         return QuicError::InvalidHandle;
     }
-    
+
     let address_str = match c_str_to_str(address) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    
+
     let client_internal = unsafe { &mut *(handle as *mut QuicClientInternal) };
-    
+
     let client = match &client_internal.client {
         Some(c) => c.clone(),
         None => return QuicError::InvalidHandle,
     };
 
-    let result: Result<CoreConnection, crate::error::QuicError> = FfiRuntime::block_on(async move {
-        client.connect(address_str).await.map_err(|e| e.into())
-    });
+    let result: Result<CoreConnection, crate::error::QuicError> = FfiRuntime::block_on(
+        async move { client.connect(address_str).await.map_err(|e| e.into()) },
+    );
 
     match result {
         Ok(connection) => {
@@ -202,7 +203,9 @@ pub extern "C" fn quiccrunch_client_connect(
             let client_internal = unsafe { &mut *(handle as *mut QuicClientInternal) };
             let id = client_internal.add_connection(connection);
             if !connection_id.is_null() {
-                unsafe { *connection_id = id; }
+                unsafe {
+                    *connection_id = id;
+                }
             }
             QuicError::Success
         }
@@ -211,11 +214,11 @@ pub extern "C" fn quiccrunch_client_connect(
 }
 
 /// Disconnect from a server
-/// 
+///
 /// # Arguments
 /// * `handle` - Client handle
 /// * `connection_id` - Connection ID to disconnect
-/// 
+///
 /// Returns QuicError::Success on success, error code on failure.
 #[no_mangle]
 pub extern "C" fn quiccrunch_client_disconnect(
@@ -225,9 +228,9 @@ pub extern "C" fn quiccrunch_client_disconnect(
     if handle.is_null() {
         return QuicError::InvalidHandle;
     }
-    
+
     let client_internal = unsafe { &mut *(handle as *mut QuicClientInternal) };
-    
+
     if client_internal.remove_connection(connection_id) {
         QuicError::Success
     } else {
@@ -236,12 +239,12 @@ pub extern "C" fn quiccrunch_client_disconnect(
 }
 
 /// Send a message on a connection
-/// 
+///
 /// # Arguments
 /// * `handle` - Client handle
 /// * `connection_id` - Connection ID
 /// * `message` - Message to send
-/// 
+///
 /// Returns QuicError::Success on success, error code on failure.
 #[no_mangle]
 pub extern "C" fn quiccrunch_client_send_message(
@@ -252,24 +255,24 @@ pub extern "C" fn quiccrunch_client_send_message(
     if handle.is_null() || message.is_null() {
         return QuicError::InvalidHandle;
     }
-    
+
     let client_internal = unsafe { &*(handle as *mut QuicClientInternal) };
     let message = unsafe { &*message };
-    
+
     let connection = match client_internal.get_connection(connection_id) {
         Some(conn) => conn,
         None => return QuicError::InvalidArgument,
     };
-    
+
     let data = crate::types::message_to_bytes(message).to_vec();
-    
+
     let result: Result<(), crate::error::QuicError> = FfiRuntime::block_on(async move {
         let mut connection = connection.lock().await;
         let mut stream = connection.open_stream().await?;
         stream.send_message(Bytes::from(data)).await?;
         Ok(())
     });
-    
+
     match result {
         Ok(()) => QuicError::Success,
         Err(err) => err.into(),
@@ -277,10 +280,10 @@ pub extern "C" fn quiccrunch_client_send_message(
 }
 
 /// Get the number of active connections
-/// 
+///
 /// # Arguments
 /// * `handle` - Client handle
-/// 
+///
 /// Returns the number of active connections, or 0 if handle is invalid.
 #[no_mangle]
 pub extern "C" fn quiccrunch_client_connection_count(
@@ -289,7 +292,7 @@ pub extern "C" fn quiccrunch_client_connection_count(
     if handle.is_null() {
         return 0;
     }
-    
+
     let client_internal = unsafe { &*(handle as *mut QuicClientInternal) };
     client_internal.connections.len() as u32
 }

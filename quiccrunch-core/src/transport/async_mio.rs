@@ -62,6 +62,12 @@ pub struct AsyncRegistry {
     // This is just a compatibility layer
 }
 
+impl Default for AsyncRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AsyncRegistry {
     pub fn new() -> Self {
         AsyncRegistry {}

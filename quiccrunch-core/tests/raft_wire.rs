@@ -102,8 +102,10 @@ fn oversized_frames_are_rejected_before_writing() {
     let err = decode_request(&frame).unwrap_err();
     assert_eq!(err.code, ErrorCode::FrameTooLarge);
 
-    let mut too_many = AppendEntriesRequest::default();
-    too_many.entries = (0..=MAX_ENTRIES as u64).map(|i| entry(i, b"x")).collect();
+    let too_many = AppendEntriesRequest {
+        entries: (0..=MAX_ENTRIES as u64).map(|i| entry(i, b"x")).collect(),
+        ..AppendEntriesRequest::default()
+    };
     let err = encode_append_entries(&too_many).unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidRequest);
 }

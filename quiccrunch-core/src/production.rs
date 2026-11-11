@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{RwLock, broadcast, watch};
 use tokio::signal;
+use tokio::sync::{broadcast, RwLock};
 
 /// Health status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -41,10 +41,10 @@ pub struct HealthCheckResult {
 pub trait HealthCheck: Send + Sync {
     /// Check liveness (is the server running?)
     async fn check_liveness(&self) -> HealthCheckResult;
-    
+
     /// Check readiness (can the server handle requests?)
     async fn check_readiness(&self) -> HealthCheckResult;
-    
+
     /// Check specific component health
     async fn check_component(&self, component: &str) -> Option<HealthCheckResult>;
 }
@@ -68,7 +68,8 @@ impl ServerHealthCheck {
     }
 
     pub fn set_shutting_down(&self, shutting_down: bool) {
-        self.is_shutting_down.store(shutting_down, std::sync::atomic::Ordering::Relaxed);
+        self.is_shutting_down
+            .store(shutting_down, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub async fn increment_connections(&self) {
@@ -105,20 +106,43 @@ impl HealthCheck for ServerHealthCheck {
             .as_secs();
 
         let connections = *self.connections.read().await;
-        let is_shutting_down = self.is_shutting_down.load(std::sync::atomic::Ordering::Relaxed);
+        let is_shutting_down = self
+            .is_shutting_down
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         let (status, message) = if is_shutting_down {
-            (HealthStatus::Unhealthy, Some("Server is shutting down".to_string()))
+            (
+                HealthStatus::Unhealthy,
+                Some("Server is shutting down".to_string()),
+            )
         } else if connections >= self.max_connections {
-            (HealthStatus::Degraded, Some(format!("Max connections reached: {}/{}", connections, self.max_connections)))
+            (
+                HealthStatus::Degraded,
+                Some(format!(
+                    "Max connections reached: {}/{}",
+                    connections, self.max_connections
+                )),
+            )
         } else {
-            (HealthStatus::Healthy, Some(format!("Connections: {}/{}", connections, self.max_connections)))
+            (
+                HealthStatus::Healthy,
+                Some(format!(
+                    "Connections: {}/{}",
+                    connections, self.max_connections
+                )),
+            )
         };
 
         let mut details = HashMap::new();
         details.insert("connections".to_string(), serde_json::json!(connections));
-        details.insert("max_connections".to_string(), serde_json::json!(self.max_connections));
-        details.insert("uptime_seconds".to_string(), serde_json::json!(self.start_time.elapsed().as_secs()));
+        details.insert(
+            "max_connections".to_string(),
+            serde_json::json!(self.max_connections),
+        );
+        details.insert(
+            "uptime_seconds".to_string(),
+            serde_json::json!(self.start_time.elapsed().as_secs()),
+        );
 
         HealthCheckResult {
             status,
@@ -151,7 +175,7 @@ pub struct ShutdownManager {
 impl ShutdownManager {
     pub fn new(drain_timeout: Duration) -> Self {
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        
+
         Self {
             shutdown_tx,
             _shutdown_rx: shutdown_rx,
@@ -165,16 +189,16 @@ impl ShutdownManager {
     pub async fn start_signal_handler(&self) {
         let shutdown_tx = self.shutdown_tx.clone();
         let is_shutting_down = self.is_shutting_down.clone();
-        
+
         tokio::spawn(async move {
             // Wait for Ctrl+C
             let ctrl_c = signal::ctrl_c();
-            
+
             #[cfg(unix)]
             {
                 let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
                     .expect("Failed to install SIGTERM handler");
-                
+
                 tokio::select! {
                     _ = ctrl_c => {
                         log::info!("Received Ctrl+C, initiating graceful shutdown");
@@ -184,13 +208,13 @@ impl ShutdownManager {
                     }
                 }
             }
-            
+
             #[cfg(not(unix))]
             {
                 ctrl_c.await.ok();
                 log::info!("Received Ctrl+C, initiating graceful shutdown");
             }
-            
+
             is_shutting_down.store(true, std::sync::atomic::Ordering::Relaxed);
             let _ = shutdown_tx.send(());
         });
@@ -204,28 +228,35 @@ impl ShutdownManager {
 
     /// Check if shutting down
     pub fn is_shutting_down(&self) -> bool {
-        self.is_shutting_down.load(std::sync::atomic::Ordering::Relaxed)
+        self.is_shutting_down
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Start draining connections
     pub async fn start_drain(&self) {
-        log::info!("Starting connection drain with timeout: {:?}", self.drain_timeout);
-        
+        log::info!(
+            "Starting connection drain with timeout: {:?}",
+            self.drain_timeout
+        );
+
         let start = Instant::now();
         let active_connections = self.active_connections.clone();
-        
+
         loop {
             let connections = *active_connections.read().await;
             if connections == 0 {
                 log::info!("All connections drained");
                 break;
             }
-            
+
             if start.elapsed() >= self.drain_timeout {
-                log::warn!("Drain timeout reached with {} active connections", connections);
+                log::warn!(
+                    "Drain timeout reached with {} active connections",
+                    connections
+                );
                 break;
             }
-            
+
             log::debug!("Waiting for {} connections to drain...", connections);
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -252,20 +283,26 @@ impl ShutdownManager {
 /// Configuration management
 pub struct ConfigManager {
     config: Arc<RwLock<serde_json::Value>>,
+    /// Source path retained for configuration reload support.
+    #[allow(dead_code)]
     config_path: Option<String>,
 }
 
 impl ConfigManager {
     pub fn new() -> Self {
         Self {
-            config: Arc::new(RwLock::new(serde_json::Value::Object(serde_json::Map::new()))),
+            config: Arc::new(RwLock::new(serde_json::Value::Object(
+                serde_json::Map::new(),
+            ))),
             config_path: None,
         }
     }
 
     pub fn with_config_path(path: String) -> Self {
         Self {
-            config: Arc::new(RwLock::new(serde_json::Value::Object(serde_json::Map::new()))),
+            config: Arc::new(RwLock::new(serde_json::Value::Object(
+                serde_json::Map::new(),
+            ))),
             config_path: Some(path),
         }
     }
@@ -274,10 +311,10 @@ impl ConfigManager {
     pub async fn load_from_json(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let content = tokio::fs::read_to_string(path).await?;
         let config: serde_json::Value = serde_json::from_str(&content)?;
-        
+
         let mut current_config = self.config.write().await;
         *current_config = config;
-        
+
         Ok(())
     }
 
@@ -285,10 +322,10 @@ impl ConfigManager {
     pub async fn load_from_toml(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let content = tokio::fs::read_to_string(path).await?;
         let config: serde_json::Value = toml::from_str(&content)?;
-        
+
         let mut current_config = self.config.write().await;
         *current_config = config;
-        
+
         Ok(())
     }
 
@@ -296,10 +333,10 @@ impl ConfigManager {
     pub async fn load_from_yaml(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let content = tokio::fs::read_to_string(path).await?;
         let config: serde_json::Value = serde_yaml::from_str(&content)?;
-        
+
         let mut current_config = self.config.write().await;
         *current_config = config;
-        
+
         Ok(())
     }
 
@@ -321,7 +358,7 @@ impl ConfigManager {
     pub async fn load_from_env(&self, prefix: &str) {
         let mut config = self.config.write().await;
         let obj = config.as_object_mut().unwrap();
-        
+
         for (key, value) in std::env::vars() {
             if key.starts_with(prefix) {
                 let config_key = key
@@ -329,7 +366,7 @@ impl ConfigManager {
                     .unwrap_or(&key)
                     .to_lowercase()
                     .replace('_', ".");
-                
+
                 // Try to parse as JSON value
                 if let Ok(json_value) = serde_json::from_str(&format!("\"{}\"", value)) {
                     obj.insert(config_key, json_value);
@@ -343,14 +380,14 @@ impl ConfigManager {
         let config = self.config.read().await;
         let parts: Vec<&str> = key.split('.').collect();
         let mut current = &*config;
-        
+
         for part in parts {
             match current.get(part) {
                 Some(value) => current = value,
                 None => return None,
             }
         }
-        
+
         Some(current.clone())
     }
 
@@ -359,7 +396,7 @@ impl ConfigManager {
         let mut config = self.config.write().await;
         let parts: Vec<&str> = key.split('.').collect();
         let mut current = &mut *config;
-        
+
         for (i, part) in parts.iter().enumerate() {
             if i == parts.len() - 1 {
                 if let Some(obj) = current.as_object_mut() {
@@ -367,7 +404,7 @@ impl ConfigManager {
                 }
                 break;
             }
-            
+
             // Create intermediate objects instead of panicking on a missing
             // path segment.
             let obj = match current.as_object_mut() {
@@ -438,13 +475,18 @@ impl StructuredLogger {
     }
 
     /// Log a message with correlation ID
-    pub async fn log(&self, level: log::Level, message: &str, context: HashMap<String, serde_json::Value>) {
+    pub async fn log(
+        &self,
+        level: log::Level,
+        message: &str,
+        context: HashMap<String, serde_json::Value>,
+    ) {
         let correlation_id = self.get_correlation_id().await;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        
+
         let mut log_entry = serde_json::json!({
             "timestamp": timestamp,
             "service": self.service_name,
@@ -470,15 +512,22 @@ impl StructuredLogger {
     }
 
     /// Log a request
-    pub async fn log_request(&self, method: &str, path: &str, headers: &HashMap<String, String>, body_size: usize) {
+    pub async fn log_request(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &HashMap<String, String>,
+        body_size: usize,
+    ) {
         let mut context = HashMap::new();
         context.insert("type".to_string(), serde_json::json!("request"));
         context.insert("method".to_string(), serde_json::json!(method));
         context.insert("path".to_string(), serde_json::json!(path));
         context.insert("body_size".to_string(), serde_json::json!(body_size));
         context.insert("headers".to_string(), serde_json::json!(headers));
-        
-        self.log(log::Level::Info, "Incoming request", context).await;
+
+        self.log(log::Level::Info, "Incoming request", context)
+            .await;
     }
 
     /// Log a response
@@ -489,8 +538,9 @@ impl StructuredLogger {
         context.insert("path".to_string(), serde_json::json!(path));
         context.insert("body_size".to_string(), serde_json::json!(body_size));
         context.insert("duration_ms".to_string(), serde_json::json!(duration_ms));
-        
-        self.log(log::Level::Info, "Outgoing response", context).await;
+
+        self.log(log::Level::Info, "Outgoing response", context)
+            .await;
     }
 
     /// Log an error
@@ -500,7 +550,7 @@ impl StructuredLogger {
         context.insert("error".to_string(), serde_json::json!(error));
         context.insert("path".to_string(), serde_json::json!(path));
         context.insert("status".to_string(), serde_json::json!(status));
-        
+
         self.log(log::Level::Error, "Request error", context).await;
     }
 }
@@ -537,28 +587,32 @@ impl CertificateRotator {
         let check_interval = self.check_interval;
         let last_check = self.last_check.clone();
         let on_rotation = self.on_rotation.clone();
-        
+
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(check_interval).await;
-                
+
                 let mut last = last_check.write().await;
                 if last.elapsed() >= check_interval {
                     // Check if certificates have been modified
-                    if let (Ok(cert_meta), Ok(key_meta)) = (
+                    if let (Ok(_cert_meta), Ok(_key_meta)) = (
                         tokio::fs::metadata(&cert_path).await,
                         tokio::fs::metadata(&key_path).await,
                     ) {
-                        log::debug!("Checking certificate rotation: cert={}, key={}", cert_path, key_path);
-                        
+                        log::debug!(
+                            "Checking certificate rotation: cert={}, key={}",
+                            cert_path,
+                            key_path
+                        );
+
                         // In a real implementation, we would check modification times
                         // and reload certificates if needed
-                        
+
                         if let Some(callback) = &on_rotation {
                             callback();
                         }
                     }
-                    
+
                     *last = Instant::now();
                 }
             }
@@ -570,16 +624,16 @@ impl CertificateRotator {
 pub struct ProductionServer {
     health_check: Arc<ServerHealthCheck>,
     shutdown_manager: Arc<ShutdownManager>,
+    /// Retained for runtime configuration access.
+    #[allow(dead_code)]
     config_manager: Arc<ConfigManager>,
+    /// Retained for structured production logging.
+    #[allow(dead_code)]
     logger: Arc<StructuredLogger>,
 }
 
 impl ProductionServer {
-    pub fn new(
-        service_name: String,
-        max_connections: usize,
-        drain_timeout: Duration,
-    ) -> Self {
+    pub fn new(service_name: String, max_connections: usize, drain_timeout: Duration) -> Self {
         Self {
             health_check: Arc::new(ServerHealthCheck::new(max_connections)),
             shutdown_manager: Arc::new(ShutdownManager::new(drain_timeout)),
@@ -592,25 +646,25 @@ impl ProductionServer {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Start shutdown signal handler
         self.shutdown_manager.start_signal_handler().await;
-        
+
         log::info!("Production server started");
-        
+
         Ok(())
     }
 
     /// Wait for shutdown signal and drain connections
     pub async fn shutdown(&self) {
         log::info!("Initiating graceful shutdown");
-        
+
         // Mark as shutting down
         self.health_check.set_shutting_down(true);
-        
+
         // Wait for shutdown signal
         self.shutdown_manager.wait_for_shutdown().await;
-        
+
         // Start draining connections
         self.shutdown_manager.start_drain().await;
-        
+
         log::info!("Graceful shutdown complete");
     }
 
@@ -663,27 +717,21 @@ pub async fn handle_health_endpoint(
             };
             (status, serde_json::to_value(result).unwrap_or_default())
         }
-        _ => {
-            (
-                404,
-                serde_json::json!({"error": "Not found"}),
-            )
-        }
+        _ => (404, serde_json::json!({"error": "Not found"})),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
 
     #[tokio::test]
     async fn test_health_check() {
         let health_check = ServerHealthCheck::new(100);
-        
+
         let liveness = health_check.check_liveness().await;
         assert_eq!(liveness.status, HealthStatus::Healthy);
-        
+
         let readiness = health_check.check_readiness().await;
         assert_eq!(readiness.status, HealthStatus::Healthy);
     }
@@ -691,13 +739,17 @@ mod tests {
     #[tokio::test]
     async fn test_config_manager() {
         let config_manager = ConfigManager::new();
-        
-        config_manager.set("server.host", serde_json::json!("127.0.0.1")).await;
-        config_manager.set("server.port", serde_json::json!(8080)).await;
-        
+
+        config_manager
+            .set("server.host", serde_json::json!("127.0.0.1"))
+            .await;
+        config_manager
+            .set("server.port", serde_json::json!(8080))
+            .await;
+
         let host = config_manager.get("server.host").await;
         assert_eq!(host, Some(serde_json::json!("127.0.0.1")));
-        
+
         let port = config_manager.get("server.port").await;
         assert_eq!(port, Some(serde_json::json!(8080)));
     }
@@ -705,7 +757,7 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_manager() {
         let shutdown_manager = ShutdownManager::new(Duration::from_secs(30));
-        
+
         assert!(!shutdown_manager.is_shutting_down());
     }
 }

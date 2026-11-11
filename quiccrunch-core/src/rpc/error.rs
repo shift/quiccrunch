@@ -2,8 +2,8 @@
 //!
 //! Comprehensive error handling for QuicCrunch RPC operations.
 
-use thiserror::Error;
 use crate::TransportError;
+use thiserror::Error;
 
 /// Result type for RPC operations
 pub type RpcResult<T> = Result<T, RpcError>;
@@ -87,9 +87,9 @@ impl RpcError {
     pub fn from_error_code(code: u16, message: String) -> Self {
         match code {
             1 => RpcError::InvalidRequest { reason: message },
-            2 => RpcError::MethodNotFound { 
-                service: "unknown".to_string(), 
-                method: message 
+            2 => RpcError::MethodNotFound {
+                service: "unknown".to_string(),
+                method: message,
             },
             3 => RpcError::ServiceNotFound { service: message },
             4 => RpcError::Timeout { timeout_ms: 30000 },
@@ -99,7 +99,9 @@ impl RpcError {
             8 => RpcError::ResourceExhausted { resource: message },
             9 => RpcError::Unavailable { reason: message },
             10 => RpcError::InternalError { message },
-            _ => RpcError::InternalError { message: format!("Unknown error code: {}", code) },
+            _ => RpcError::InternalError {
+                message: format!("Unknown error code: {}", code),
+            },
         }
     }
 }

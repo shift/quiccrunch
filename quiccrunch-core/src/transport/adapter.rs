@@ -1720,6 +1720,11 @@ impl TquicServer {
             bind_addr: self.bind_addr,
         })
     }
+
+    /// Address the server is bound to.
+    pub fn local_addr(&self) -> Result<SocketAddr, TransportError> {
+        Ok(self.bind_addr)
+    }
 }
 
 pub struct TquicListener {

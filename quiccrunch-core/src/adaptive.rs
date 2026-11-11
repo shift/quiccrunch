@@ -1,3 +1,8 @@
+#[cfg(feature = "memory-pools")]
+use crate::memory::PooledBuffer;
+#[cfg(feature = "simd-optimizations")]
+use crate::simd;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OptimizationStrategy {
     /// Use standard allocator and standard copy (best for small buffers)
@@ -105,6 +110,10 @@ impl OptimizedBuffer {
             #[cfg(feature = "memory-pools")]
             OptimizedBuffer::Pooled(buffer) => buffer.as_mut_slice(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn len(&self) -> usize {

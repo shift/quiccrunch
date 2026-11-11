@@ -136,6 +136,11 @@ impl PooledBuffer {
         self.buffer.len()
     }
 
+    /// Returns true when the buffer is empty
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
     /// Get capacity
     pub fn capacity(&self) -> usize {
         self.buffer.capacity()
@@ -295,6 +300,12 @@ pub struct FastBuffer {
     len: usize,
 }
 
+impl Default for FastBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FastBuffer {
     #[inline(always)]
     pub fn new() -> Self {
@@ -335,6 +346,7 @@ impl FastBuffer {
     }
 
     #[inline(always)]
+    #[allow(clippy::result_unit_err)] // () is the deliberate internal overflow signal
     pub fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), ()> {
         if self.len + slice.len() > self.data.len() {
             return Err(()); // Buffer overflow
@@ -345,6 +357,7 @@ impl FastBuffer {
     }
 
     #[inline(always)]
+    #[allow(clippy::result_unit_err)] // () is the deliberate internal overflow signal
     pub fn push(&mut self, byte: u8) -> Result<(), ()> {
         if self.len >= self.data.len() {
             return Err(()); // Buffer overflow
@@ -356,7 +369,7 @@ impl FastBuffer {
 }
 
 thread_local! {
-    static FAST_BUFFER_POOL: RefCell<Vec<FastBuffer>> = RefCell::new(Vec::new());
+    static FAST_BUFFER_POOL: RefCell<Vec<FastBuffer>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Get a fast buffer from the thread-local pool
@@ -387,6 +400,12 @@ pub fn return_fast_buffer(buffer: FastBuffer) {
 /// Zero-allocation header parsing
 pub struct FastHeaderParser {
     buffer: FastBuffer,
+}
+
+impl Default for FastHeaderParser {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FastHeaderParser {
@@ -457,6 +476,12 @@ pub struct FastMetrics {
     bytes_sent: std::sync::atomic::AtomicU64,
     bytes_received: std::sync::atomic::AtomicU64,
     errors_count: std::sync::atomic::AtomicU64,
+}
+
+impl Default for FastMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FastMetrics {

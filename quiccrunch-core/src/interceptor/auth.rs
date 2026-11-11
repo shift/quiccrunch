@@ -11,9 +11,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use super::{Interceptor, InterceptorChain};
 use crate::rpc::error::{RpcError, RpcResult};
 use crate::rpc::service::RpcContext;
-use super::{Interceptor, InterceptorChain};
 
 /// Claims in a JWT token
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,21 +216,34 @@ impl AuthInterceptor {
 
         let header = Header::new(self.config.algorithm);
 
-        let token = match self.config.algorithm {
-            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
-                let secret = self.config.secret.as_ref()
-                    .ok_or_else(|| RpcError::Internal("Secret not configured".to_string()))?;
-                encode(&header, &claims, &EncodingKey::from_secret(secret.as_bytes()))
+        let token =
+            match self.config.algorithm {
+                Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
+                    let secret =
+                        self.config.secret.as_ref().ok_or_else(|| {
+                            RpcError::Internal("Secret not configured".to_string())
+                        })?;
+                    encode(
+                        &header,
+                        &claims,
+                        &EncodingKey::from_secret(secret.as_bytes()),
+                    )
+                }
+                Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
+                    let private_key = self.config.private_key.as_ref().ok_or_else(|| {
+                        RpcError::Internal("Private key not configured".to_string())
+                    })?;
+                    encode(
+                        &header,
+                        &claims,
+                        &EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
+                            RpcError::Internal(format!("Failed to encode RSA key: {}", e))
+                        })?,
+                    )
+                }
+                _ => return Err(RpcError::Internal("Unsupported algorithm".to_string())),
             }
-            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
-                let private_key = self.config.private_key.as_ref()
-                    .ok_or_else(|| RpcError::Internal("Private key not configured".to_string()))?;
-                encode(&header, &claims, &EncodingKey::from_rsa_pem(private_key.as_bytes())
-                    .map_err(|e| RpcError::Internal(format!("Failed to encode RSA key: {}", e)))?)
-            }
-            _ => return Err(RpcError::Internal("Unsupported algorithm".to_string())),
-        }
-        .map_err(|e| RpcError::Internal(format!("Failed to generate token: {}", e)))?;
+            .map_err(|e| RpcError::Internal(format!("Failed to generate token: {}", e)))?;
 
         Ok(token)
     }
@@ -247,21 +260,34 @@ impl AuthInterceptor {
             validation.set_audience(audiences);
         }
 
-        let token_data = match self.config.algorithm {
-            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
-                let secret = self.config.secret.as_ref()
-                    .ok_or_else(|| RpcError::Internal("Secret not configured".to_string()))?;
-                decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &validation)
+        let token_data =
+            match self.config.algorithm {
+                Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
+                    let secret =
+                        self.config.secret.as_ref().ok_or_else(|| {
+                            RpcError::Internal("Secret not configured".to_string())
+                        })?;
+                    decode::<Claims>(
+                        token,
+                        &DecodingKey::from_secret(secret.as_bytes()),
+                        &validation,
+                    )
+                }
+                Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
+                    let public_key = self.config.public_key.as_ref().ok_or_else(|| {
+                        RpcError::Internal("Public key not configured".to_string())
+                    })?;
+                    decode::<Claims>(
+                        token,
+                        &DecodingKey::from_rsa_pem(public_key.as_bytes()).map_err(|e| {
+                            RpcError::Internal(format!("Failed to decode RSA key: {}", e))
+                        })?,
+                        &validation,
+                    )
+                }
+                _ => return Err(RpcError::Internal("Unsupported algorithm".to_string())),
             }
-            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
-                let public_key = self.config.public_key.as_ref()
-                    .ok_or_else(|| RpcError::Internal("Public key not configured".to_string()))?;
-                decode::<Claims>(token, &DecodingKey::from_rsa_pem(public_key.as_bytes())
-                    .map_err(|e| RpcError::Internal(format!("Failed to decode RSA key: {}", e)))?, &validation)
-            }
-            _ => return Err(RpcError::Internal("Unsupported algorithm".to_string())),
-        }
-        .map_err(|e| RpcError::Unauthenticated)?;
+            .map_err(|e| RpcError::Unauthenticated)?;
 
         Ok(token_data.claims)
     }
@@ -289,7 +315,9 @@ impl AuthInterceptor {
     /// Extract token from request context
     fn extract_token(context: &RpcContext) -> Option<&str> {
         // Check for token in metadata
-        context.metadata.get("authorization")
+        context
+            .metadata
+            .get("authorization")
             .or_else(|| context.metadata.get("x-auth-token"))
             .map(|s| s.as_str())
     }
@@ -301,21 +329,26 @@ impl Interceptor for AuthInterceptor {
         // Check if authentication is required for this method
         let method_key = format!("{}.{}", context.service, context.method);
         let method_auth = self.method_auth.read().await;
-        let require_auth = method_auth.get(&method_key).copied().unwrap_or(self.config.require_auth);
+        let require_auth = method_auth
+            .get(&method_key)
+            .copied()
+            .unwrap_or(self.config.require_auth);
 
         if !require_auth {
             return Ok(());
         }
 
         // Extract token from context
-        let token = Self::extract_token(context)
-            .ok_or(RpcError::Unauthenticated)?;
+        let token = Self::extract_token(context).ok_or(RpcError::Unauthenticated)?;
 
         // Verify token
         let claims = self.verify_token(token)?;
 
         // Store claims in context for later use
-        context.extensions.insert("claims".to_string(), serde_json::to_value(&claims).unwrap_or_default());
+        context.extensions.insert(
+            "claims".to_string(),
+            serde_json::to_value(&claims).unwrap_or_default(),
+        );
 
         // Check role requirements
         let method_roles = self.method_roles.read().await;
@@ -330,7 +363,9 @@ impl Interceptor for AuthInterceptor {
         // Check permission requirements
         let method_permissions = self.method_permissions.read().await;
         if let Some(required_permissions) = method_permissions.get(&method_key) {
-            if !required_permissions.is_empty() && !Self::has_all_permissions(&claims, required_permissions) {
+            if !required_permissions.is_empty()
+                && !Self::has_all_permissions(&claims, required_permissions)
+            {
                 return Err(RpcError::PermissionDenied {
                     reason: format!("Required permissions: {:?}", required_permissions),
                 });
@@ -453,7 +488,9 @@ impl AuthInterceptorBuilder {
         }
 
         for (method, permissions) in self.method_permissions {
-            interceptor.set_method_permissions(&method, permissions).await;
+            interceptor
+                .set_method_permissions(&method, permissions)
+                .await;
         }
 
         interceptor
@@ -476,10 +513,7 @@ pub async fn create_auth_interceptor(secret: String) -> AuthInterceptor {
 }
 
 /// Convenience function to create an auth interceptor with RBAC
-pub async fn create_rbac_auth_interceptor(
-    secret: String,
-    roles: Vec<Role>,
-) -> AuthInterceptor {
+pub async fn create_rbac_auth_interceptor(secret: String, roles: Vec<Role>) -> AuthInterceptor {
     let mut builder = AuthInterceptorBuilder::new()
         .with_secret(secret)
         .with_require_auth(true);
@@ -504,12 +538,14 @@ mod tests {
         let mut custom_claims = HashMap::new();
         custom_claims.insert("org".to_string(), serde_json::json!("acme"));
 
-        let token = interceptor.generate_token(
-            "user123",
-            vec!["admin".to_string()],
-            vec!["read".to_string(), "write".to_string()],
-            custom_claims,
-        ).unwrap();
+        let token = interceptor
+            .generate_token(
+                "user123",
+                vec!["admin".to_string()],
+                vec!["read".to_string(), "write".to_string()],
+                custom_claims,
+            )
+            .unwrap();
 
         let claims = interceptor.verify_token(&token).unwrap();
         assert_eq!(claims.sub, "user123");

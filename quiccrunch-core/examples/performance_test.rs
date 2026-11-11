@@ -77,7 +77,7 @@ async fn test_connection_establishment() -> Result<(), Box<dyn std::error::Error
     }
 
     let server = TquicServer::new(bind_addr, cert_file, key_file, Some(2)).await?;
-    let addr = server.local_addr();
+    let addr = server.local_addr()?;
     let mut listener = server.listen(&addr.to_string()).await?;
 
     println!("Server listening on: {}", addr);
@@ -86,9 +86,9 @@ async fn test_connection_establishment() -> Result<(), Box<dyn std::error::Error
     let server_handle = tokio::spawn(async move {
         if let Ok(conn) = listener.accept().await {
             println!("Server: Connection accepted");
-            if let Ok(mut stream) = conn.accept_stream().await {
+            if let Ok(stream) = conn.accept_stream().await {
                 println!("Server: Stream accepted");
-                let mut data = vec![0u8; 1024];
+                let _data = vec![0u8; 1024];
                 loop {
                     match stream.receive(1024).await {
                         Ok(received) if !received.is_empty() => {
@@ -126,7 +126,7 @@ async fn test_connection_establishment() -> Result<(), Box<dyn std::error::Error
         })
         .await?;
         let connection = client.connect(&addr.to_string()).await?;
-        let mut stream = connection.open_stream().await?;
+        let stream = connection.open_stream().await?;
 
         // Send test message
         let test_data = b"Hello, Server!";
@@ -154,7 +154,7 @@ fn generate_test_certificates(
     cert_file: &str,
     key_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use rcgen::{Certificate, CertificateParams, KeyPair};
+    use rcgen::{Certificate, CertificateParams};
     use std::fs::File;
     use std::io::Write;
 
@@ -165,7 +165,7 @@ fn generate_test_certificates(
 
     let cert = Certificate::from_params(params)?;
     let cert_pem = cert.serialize_pem()?;
-    let key_pem = cert.serialize_private_key_pem()?;
+    let key_pem = cert.serialize_private_key_pem();
 
     let mut cert_file = File::create(cert_file)?;
     cert_file.write_all(cert_pem.as_bytes())?;

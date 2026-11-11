@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::rpc::error::{RpcResult, RpcError};
+use crate::rpc::error::{RpcError, RpcResult};
 
 /// Unique identifier for RPC requests
 pub type RequestId = u64;
@@ -209,16 +209,16 @@ impl ServiceRegistry {
             // Overall health - all services must be serving
             let services = self.services.read().await;
             let mut overall_status = HealthStatus::Serving;
-            
+
             for service in services.values() {
                 match service.health().await? {
                     HealthStatus::NotServing => return Ok(HealthStatus::NotServing),
                     HealthStatus::Unknown => overall_status = HealthStatus::Unknown,
-                    HealthStatus::Serving => {},
+                    HealthStatus::Serving => {}
                     HealthStatus::ServiceUnknown => overall_status = HealthStatus::Unknown,
                 }
             }
-            
+
             Ok(overall_status)
         }
     }

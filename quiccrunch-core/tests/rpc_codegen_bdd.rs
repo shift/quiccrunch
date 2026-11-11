@@ -3,12 +3,11 @@
 //! Testing macro expansion and generated code functionality
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use quiccrunch_core::{
     rpc::{RpcContext, RpcError, RpcResult, RpcService},
-    rpc_client, rpc_params, rpc_result, rpc_service,
+    rpc_params, rpc_result, rpc_service,
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -59,7 +58,7 @@ async fn test_bdd_scenario_generate_working_service_from_macro() {
 
     // Test that the wrapper implements RpcService
     let params = rpc_params!(a: 5, b: 3);
-    let result = wrapper.call(&context, params).await;
+    let result = wrapper.call(&context, "add", params).await;
 
     // And: method dispatch should route to correct functions
     assert!(result.is_ok(), "Service call should succeed");
@@ -97,7 +96,7 @@ async fn test_bdd_scenario_generated_client_calls_work_end_to_end() {
 
     // Then: the request should serialize correctly
     let params = rpc_params!(message: "Hello World".to_string());
-    let result = wrapper.call(&context, params).await;
+    let result = wrapper.call(&context, "echo", params).await;
 
     // And: the response should deserialize correctly
     assert!(result.is_ok(), "Service call should succeed");
@@ -152,12 +151,12 @@ async fn test_bdd_scenario_macro_handles_various_parameter_types() {
         optional: Some(true)
     );
 
-    let result = wrapper.call(&context, params).await;
+    let result = wrapper.call(&context, "process_data", params).await;
     assert!(result.is_ok(), "Complex service call should succeed");
 
     let response_bytes = result.unwrap();
     let response: bool = rpc_result!(response_bytes, bool).unwrap();
-    assert_eq!(response, true);
+    assert!(response);
 }
 
 /// BDD Scenario: Macro generates correct method listing
@@ -231,7 +230,7 @@ async fn test_bdd_scenario_macro_handles_errors_gracefully() {
 
     // Then: the error should be properly propagated
     let params = rpc_params!(a: 10, b: 0);
-    let result = wrapper.call(&context, params).await;
+    let result = wrapper.call(&context, "divide", params).await;
 
     assert!(result.is_err(), "Division by zero should return an error");
     match result.unwrap_err() {

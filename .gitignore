@@ -73,3 +73,6 @@ tquic-upstream/
 # Comparison harness: throwaway TLS material and scratch calibration output
 comparison/certs/
 comparison/results/matrix-calraw.csv
+
+# Agent tooling (not project source)
+.pi/

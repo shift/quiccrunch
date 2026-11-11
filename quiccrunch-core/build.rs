@@ -45,7 +45,7 @@ fn main() {
             .build_server(true)
             .build_client(true)
             .out_dir(&out_dir)
-            .compile(&["proto/benchmark.proto"], &["proto"])
+            .compile_protos(&["proto/benchmark.proto"], &["proto"])
             .expect("Failed to compile protobuf schema");
     }
 }

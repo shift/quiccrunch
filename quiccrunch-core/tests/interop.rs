@@ -1,5 +1,6 @@
 use std::process::{Command, Stdio};
 
+#[allow(dead_code)]
 fn run_example(args: &[&str], features: &[&str]) -> (i32, String, String) {
     let mut cmd = Command::new("cargo");
     cmd.arg("run");
@@ -24,5 +25,3 @@ fn run_example(args: &[&str], features: &[&str]) -> (i32, String, String) {
         String::from_utf8_lossy(&out.stderr).to_string(),
     )
 }
-
-

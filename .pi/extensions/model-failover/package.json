@@ -1,7 +1,0 @@
-{
-  "name": "pi-extension-model-failover",
-  "private": true,
-  "dependencies": {
-    "@mariozechner/pi-coding-agent": "workspace:*"
-  }
-}

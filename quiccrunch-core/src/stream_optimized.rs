@@ -265,12 +265,10 @@ impl OptimizedQuicStream {
     async fn receive_zero_copy(&mut self) -> crate::Result<Bytes> {
         match &mut self.inner {
             #[cfg(feature = "backend-tquic")]
-            StreamInner::Tquic { handle, .. } => {
-                handle
-                    .read(self.config.chunk_size)
-                    .await?
-                    .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into()))
-            }
+            StreamInner::Tquic { handle, .. } => handle
+                .read(self.config.chunk_size)
+                .await?
+                .ok_or_else(|| crate::TransportError::StreamError("Stream closed".into())),
         }
     }
 
@@ -407,10 +405,12 @@ mod tests {
 
     #[test]
     fn test_stats_calculation() {
-        let mut stats = StreamStats::default();
-        stats.messages_sent = 100;
-        stats.bytes_sent = 1_000_000;
-        stats.total_send_time_ns = 1_000_000_000; // 1 second
+        let stats = StreamStats {
+            messages_sent: 100,
+            bytes_sent: 1_000_000,
+            total_send_time_ns: 1_000_000_000, // 1 second
+            ..StreamStats::default()
+        };
 
         assert_eq!(stats.avg_send_latency_ns(), 10_000_000.0); // 10ms per message
         assert_eq!(stats.send_throughput_mbps(), 1.0); // 1 MB/s

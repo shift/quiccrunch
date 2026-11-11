@@ -1,11 +1,11 @@
 use crate::QuicStream;
 use std::io;
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
-use crate::transport::worker_pool::TquicWorkerPool;
 use crate::transport::messages::{TquicCommand as WorkerCommand, WorkerConfig};
+use crate::transport::worker_pool::TquicWorkerPool;
 
 /// Commands sent to the tQUIC bridge thread  
 #[derive(Debug)]
@@ -48,9 +48,9 @@ impl TquicAsyncBridge {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
         // Create a default worker configuration
         let base_config = WorkerConfig::default();
-        
+
         // Create worker pool with 4 workers (can be configurable)
-        let worker_count = num_cpus::get().min(8).max(2); // Between 2-8 workers
+        let worker_count = num_cpus::get().clamp(2, 8); // Between 2-8 workers
         let worker_pool = TquicWorkerPool::new(worker_count, base_config)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
@@ -61,7 +61,9 @@ impl TquicAsyncBridge {
 
     pub async fn shutdown(self) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         // Shutdown worker pool
-        self.worker_pool.shutdown(std::time::Duration::from_secs(5)).await
+        self.worker_pool
+            .shutdown(std::time::Duration::from_secs(5))
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         Ok(())
     }
@@ -70,6 +72,8 @@ impl TquicAsyncBridge {
 /// Handle for async communication with tQUIC listener
 #[derive(Debug)]
 pub struct TquicListenerHandle {
+    /// Retained for listener diagnostics/identification.
+    #[allow(dead_code)]
     listener_id: u64,
     worker_pool: Arc<TquicWorkerPool>,
 }
@@ -78,19 +82,24 @@ impl TquicListenerHandle {
     pub async fn accept(&mut self) -> Result<QuicStream, Box<dyn std::error::Error + Send + Sync>> {
         // Use worker pool to accept connection
         let (response_tx, response_rx) = oneshot::channel();
-        
-        let cmd = WorkerCommand::Accept { response: response_tx };
-        self.worker_pool.submit_command(cmd).await
+
+        let cmd = WorkerCommand::Accept {
+            response: response_tx,
+        };
+        self.worker_pool
+            .submit_command(cmd)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
-        let (connection_id, _remote_addr) = response_rx.await
-            .map_err(|_| Box::new(io::Error::new(io::ErrorKind::Other, "response channel closed")))?
+        let (connection_id, _remote_addr) = response_rx
+            .await
+            .map_err(|_| Box::new(io::Error::other("response channel closed")))?
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
         // Create a stream for the connection
         Ok(QuicStream::new_simple_tquic(
-            connection_id, 
-            0, // stream_id placeholder
+            connection_id,
+            0,           // stream_id placeholder
             1024 * 1024, // 1MB max message size
             self.worker_pool.clone(),
         ))
@@ -108,12 +117,14 @@ impl AsyncTquicClient {
         ca_cert: Option<String>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
         // Create a default worker configuration with optional CA cert
-        let mut base_config = WorkerConfig::default();
-        base_config.ca_cert_file = ca_cert;
-        base_config.verify_cert = true;
-        
+        let base_config = WorkerConfig {
+            ca_cert_file: ca_cert,
+            verify_cert: true,
+            ..WorkerConfig::default()
+        };
+
         // Create worker pool with optimal worker count
-        let worker_count = num_cpus::get().min(8).max(2);
+        let worker_count = num_cpus::get().clamp(2, 8);
         let worker_pool = TquicWorkerPool::new(worker_count, base_config)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
@@ -126,29 +137,33 @@ impl AsyncTquicClient {
         &self,
         addr: &str,
     ) -> Result<QuicStream, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let remote_addr: SocketAddr = addr.parse()
+        let remote_addr: SocketAddr = addr
+            .parse()
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
         // Use worker pool to connect
         let (response_tx, response_rx) = oneshot::channel();
-        
+
         let cmd = WorkerCommand::Connect {
             connection_id: 0, // Will be assigned by worker pool
             remote_addr,
             response: response_tx,
         };
-        
-        self.worker_pool.submit_command(cmd).await
+
+        self.worker_pool
+            .submit_command(cmd)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
-        let connection_id = response_rx.await
-            .map_err(|_| Box::new(io::Error::new(io::ErrorKind::Other, "response channel closed")))?
+        let connection_id = response_rx
+            .await
+            .map_err(|_| Box::new(io::Error::other("response channel closed")))?
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
         // Create a stream for the connection
         Ok(QuicStream::new_simple_tquic(
             connection_id,
-            0, // stream_id placeholder 
+            0,           // stream_id placeholder
             1024 * 1024, // 1MB max message size
             self.worker_pool.clone(),
         ))
@@ -159,8 +174,14 @@ impl AsyncTquicClient {
 #[derive(Debug)]
 pub struct AsyncTquicServer {
     worker_pool: Arc<TquicWorkerPool>,
+    /// Server bind address, retained for introspection.
+    #[allow(dead_code)]
     bind_addr: SocketAddr,
+    /// TLS certificate path, retained for introspection.
+    #[allow(dead_code)]
     cert_file: String,
+    /// TLS key path, retained for introspection.
+    #[allow(dead_code)]
     key_file: String,
 }
 
@@ -171,14 +192,16 @@ impl AsyncTquicServer {
         key_file: String,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
         // Create server configuration
-        let mut base_config = WorkerConfig::default();
-        base_config.is_server = true;
-        base_config.bind_addr = bind_addr;
-        base_config.cert_file = Some(cert_file.clone());
-        base_config.key_file = Some(key_file.clone());
-        
+        let base_config = WorkerConfig {
+            is_server: true,
+            bind_addr,
+            cert_file: Some(cert_file.clone()),
+            key_file: Some(key_file.clone()),
+            ..WorkerConfig::default()
+        };
+
         // Create worker pool for server
-        let worker_count = num_cpus::get().min(8).max(2);
+        let worker_count = num_cpus::get().clamp(2, 8);
         let worker_pool = TquicWorkerPool::new(worker_count, base_config)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
@@ -197,7 +220,7 @@ impl AsyncTquicServer {
         let listener_id = 1; // Placeholder - would be assigned by worker pool
 
         Ok(AsyncTquicListener {
-            handle: TquicListenerHandle { 
+            handle: TquicListenerHandle {
                 listener_id,
                 worker_pool: self.worker_pool.clone(),
             },

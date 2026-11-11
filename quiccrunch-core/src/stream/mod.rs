@@ -1,7 +1,6 @@
 // This file implements QUIC bidirectional stream logic for quiccrunch-core.
 // It provides abstractions for lock-free and tQUIC backends.
 
-
 /// A QUIC bidirectional stream for sending and receiving messages
 #[derive(Debug, Clone)]
 pub struct QuicStream {
@@ -32,7 +31,7 @@ impl QuicStream {
             let base_config = crate::transport::messages::WorkerConfig::default();
             let worker_pool = std::sync::Arc::new(
                 crate::transport::worker_pool::TquicWorkerPool::new(1, base_config)
-                    .expect("Failed to create default worker pool")
+                    .expect("Failed to create default worker pool"),
             );
             Self::new_simple_tquic(connection_id, stream_id, max_message_size, worker_pool)
         }
@@ -59,10 +58,7 @@ impl QuicStream {
     }
 
     #[cfg(feature = "lock-free-channels")]
-    pub fn new_lockfree(
-        handle: crate::lockfree::StreamHandle,
-        max_message_size: usize,
-    ) -> Self {
+    pub fn new_lockfree(handle: crate::lockfree::StreamHandle, max_message_size: usize) -> Self {
         Self {
             inner: StreamInner::LockFree { handle },
             max_message_size,
@@ -70,7 +66,12 @@ impl QuicStream {
     }
 
     /// Create a simple tQUIC stream with worker pool
-    pub fn new_simple_tquic(connection_id: u64, stream_id: u64, max_message_size: usize, worker_pool: std::sync::Arc<crate::transport::worker_pool::TquicWorkerPool>) -> Self {
+    pub fn new_simple_tquic(
+        connection_id: u64,
+        stream_id: u64,
+        max_message_size: usize,
+        worker_pool: std::sync::Arc<crate::transport::worker_pool::TquicWorkerPool>,
+    ) -> Self {
         Self {
             inner: StreamInner::TQuic {
                 worker_pool,
@@ -142,14 +143,16 @@ impl QuicStream {
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
                 let bytes = Bytes::copy_from_slice(data);
-                handle
-                    .write_tx
-                    .send(bytes)
-                    .await
-                    .map_err(|_| crate::TransportError::ConnectionFailed("Write channel closed".into()))?;
+                handle.write_tx.send(bytes).await.map_err(|_| {
+                    crate::TransportError::ConnectionFailed("Write channel closed".into())
+                })?;
                 Ok(())
             }
-            StreamInner::TQuic { worker_pool, stream_id, connection_id } => {
+            StreamInner::TQuic {
+                worker_pool,
+                stream_id,
+                connection_id,
+            } => {
                 let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                 let cmd = crate::transport::messages::TquicCommand::Send {
                     connection_id: *connection_id,
@@ -158,10 +161,12 @@ impl QuicStream {
                     fin: false,
                     response: response_tx,
                 };
-                worker_pool.submit_command(cmd).await
-                    .map_err(|_| crate::TransportError::ConnectionFailed("Worker pool command failed".into()))?;
-                response_rx.await
-                    .map_err(|_| crate::TransportError::ConnectionFailed("Response channel closed".into()))?
+                worker_pool.submit_command(cmd).await.map_err(|_| {
+                    crate::TransportError::ConnectionFailed("Worker pool command failed".into())
+                })?;
+                response_rx.await.map_err(|_| {
+                    crate::TransportError::ConnectionFailed("Response channel closed".into())
+                })?
             }
         }
     }
@@ -171,14 +176,16 @@ impl QuicStream {
         match &mut self.inner {
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
-                let bytes = handle
-                    .read_tx
-                    .recv()
-                    .await
-                    .ok_or_else(|| crate::TransportError::ConnectionFailed("Read channel closed".into()))?;
+                let bytes = handle.read_tx.recv().await.ok_or_else(|| {
+                    crate::TransportError::ConnectionFailed("Read channel closed".into())
+                })?;
                 Ok(bytes.to_vec())
             }
-            StreamInner::TQuic { worker_pool, stream_id, connection_id } => {
+            StreamInner::TQuic {
+                worker_pool,
+                stream_id,
+                connection_id,
+            } => {
                 let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                 let cmd = crate::transport::messages::TquicCommand::Receive {
                     connection_id: *connection_id,
@@ -186,10 +193,12 @@ impl QuicStream {
                     max_length: self.max_message_size,
                     response: response_tx,
                 };
-                worker_pool.submit_command(cmd).await
-                    .map_err(|_| crate::TransportError::ConnectionFailed("Worker pool command failed".into()))?;
-                response_rx.await
-                    .map_err(|_| crate::TransportError::ConnectionFailed("Response channel closed".into()))?
+                worker_pool.submit_command(cmd).await.map_err(|_| {
+                    crate::TransportError::ConnectionFailed("Worker pool command failed".into())
+                })?;
+                response_rx.await.map_err(|_| {
+                    crate::TransportError::ConnectionFailed("Response channel closed".into())
+                })?
             }
         }
     }
@@ -199,21 +208,24 @@ impl QuicStream {
         match &mut self.inner {
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { handle } => {
-                handle
-                    .close_tx
-                    .send(())
-                    .await
-                    .map_err(|_| crate::TransportError::ConnectionFailed("Close channel failed".into()))?;
+                handle.close_tx.send(()).await.map_err(|_| {
+                    crate::TransportError::ConnectionFailed("Close channel failed".into())
+                })?;
                 Ok(())
             }
-            StreamInner::TQuic { worker_pool, stream_id, connection_id } => {
+            StreamInner::TQuic {
+                worker_pool,
+                stream_id,
+                connection_id,
+            } => {
                 let cmd = crate::transport::messages::TquicCommand::CloseStream {
                     connection_id: *connection_id,
                     stream_id: *stream_id,
                     error_code: 0,
                 };
-                worker_pool.submit_command(cmd).await
-                    .map_err(|_| crate::TransportError::ConnectionFailed("Worker pool command failed".into()))?;
+                worker_pool.submit_command(cmd).await.map_err(|_| {
+                    crate::TransportError::ConnectionFailed("Worker pool command failed".into())
+                })?;
                 Ok(())
             }
         }
@@ -236,7 +248,7 @@ pub struct QuicStreamReader {
     _inner: StreamInner,
 }
 
-// Writer half of a split QuicStream  
+// Writer half of a split QuicStream
 pub struct QuicStreamWriter {
     _inner: StreamInner,
 }
@@ -244,22 +256,30 @@ pub struct QuicStreamWriter {
 impl crate::transport::Splittable for QuicStream {
     type Reader = QuicStreamReader;
     type Writer = QuicStreamWriter;
-    
+
     fn split(self) -> (Self::Reader, Self::Writer) {
         // For now, create simple wrapper structs
         // In a full implementation, these would properly split the stream
         let (worker_pool, stream_id, connection_id) = match &self.inner {
-            StreamInner::TQuic { worker_pool, stream_id, connection_id } => (worker_pool.clone(), *stream_id, *connection_id),
+            StreamInner::TQuic {
+                worker_pool,
+                stream_id,
+                connection_id,
+            } => (worker_pool.clone(), *stream_id, *connection_id),
             #[cfg(feature = "lock-free-channels")]
             StreamInner::LockFree { .. } => (
-                std::sync::Arc::new(crate::transport::worker_pool::TquicWorkerPool::new(1, crate::transport::messages::WorkerConfig::default()).unwrap()),
+                std::sync::Arc::new(
+                    crate::transport::worker_pool::TquicWorkerPool::new(
+                        1,
+                        crate::transport::messages::WorkerConfig::default(),
+                    )
+                    .unwrap(),
+                ),
                 0,
-                0
+                0,
             ),
         };
-        let reader = QuicStreamReader {
-            _inner: self.inner,
-        };
+        let reader = QuicStreamReader { _inner: self.inner };
         let writer = QuicStreamWriter {
             _inner: StreamInner::TQuic {
                 worker_pool,
@@ -274,8 +294,8 @@ impl crate::transport::Splittable for QuicStream {
 impl tokio::io::AsyncRead for QuicStream {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
+        _cx: &mut std::task::Context<'_>,
+        _buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         match &mut self.inner {
             #[cfg(feature = "lock-free-channels")]
@@ -294,7 +314,7 @@ impl tokio::io::AsyncRead for QuicStream {
 impl tokio::io::AsyncWrite for QuicStream {
     fn poll_write(
         mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
         match &mut self.inner {
@@ -312,14 +332,14 @@ impl tokio::io::AsyncWrite for QuicStream {
 
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
         std::task::Poll::Ready(Ok(()))
     }
 
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
         std::task::Poll::Ready(Ok(()))
     }

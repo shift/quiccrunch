@@ -42,14 +42,14 @@ async fn start_cluster(
         .map(|(id, addr)| RaftPeer::new(id as u64, addr.clone()))
         .collect();
     let mut running = Vec::new();
-    for id in 0..nodes {
+    for (id, addr) in addrs.iter().enumerate().take(nodes) {
         let others = all_peers
             .iter()
             .filter(|peer| peer.node_id != id as u64)
             .cloned()
             .collect();
-        let node = TestNode::new(id as u64, 0, addrs[id].clone(), others);
-        running.push(spawn_node(tls, &addrs[id], node, server_config.clone()).await);
+        let node = TestNode::new(id as u64, 0, addr.clone(), others);
+        running.push(spawn_node(tls, addr, node, server_config.clone()).await);
     }
     sleep(Duration::from_millis(100)).await;
     let transport = Arc::new(

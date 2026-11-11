@@ -21,7 +21,7 @@
 //! Node.js, Go, Java, C#, and other languages.
 //!
 //! ## Safety
-//! 
+//!
 //! All functions in this FFI are marked as `unsafe` externally since they deal with
 //! raw pointers and C-style memory management. However, the implementations are safe
 //! when used correctly according to the documented contracts.
@@ -38,21 +38,21 @@
 //! The FFI layer manages a tokio runtime internally to bridge async Rust code with
 //! synchronous C callbacks.
 
-pub mod error;
 pub mod client;
+pub mod error;
+pub mod runtime;
 pub mod server;
 pub mod types;
-pub mod runtime;
 
-pub use error::*;
 pub use client::*;
+pub use error::*;
+pub use runtime::*;
 pub use server::*;
 pub use types::*;
-pub use runtime::*;
 
-use std::os::raw::c_char;
-use std::ffi::CString;
 use once_cell::sync::Lazy;
+use std::ffi::CString;
+use std::os::raw::c_char;
 
 /// Global tokio runtime for handling async operations
 static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
@@ -64,18 +64,18 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 
 /// Initialize the QuicCrunch FFI library.
 /// This must be called before using any other FFI functions.
-/// 
+///
 /// Returns 0 on success, non-zero on error.
 #[no_mangle]
 pub extern "C" fn quiccrunch_init() -> QuicError {
     // Initialize tracing if not already done
     let _ = tracing_subscriber::fmt::try_init();
-    
+
     // Test that the runtime is working
     RUNTIME.block_on(async {
         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
     });
-    
+
     QuicError::Success
 }
 
@@ -91,7 +91,7 @@ pub extern "C" fn quiccrunch_shutdown() -> QuicError {
 }
 
 /// Free a string that was allocated by QuicCrunch FFI functions.
-/// 
+///
 /// # Safety
 /// The string pointer must have been returned by a QuicCrunch FFI function
 /// and must not be used after calling this function.

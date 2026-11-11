@@ -8,6 +8,8 @@ pub struct TquicStream {
     // For now, we'll use a channel-based approach to communicate with the worker thread
     connection_id: u64,
     stream_id: u64,
+    /// Reserved for the pending buffered-read implementation.
+    #[allow(dead_code)]
     read_buffer: Vec<u8>,
     write_buffer: Vec<u8>,
 }
@@ -35,7 +37,7 @@ impl AsyncRead for TquicStream {
     fn poll_read(
         self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
+        _buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         // For now, return empty data
         // TODO: Implement actual tQUIC stream reading via worker pool

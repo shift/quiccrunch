@@ -1,21 +1,21 @@
 //! QuicCrunch RPC Framework
-//! 
+//!
 //! High-level RPC abstraction built on top of QUIC transport with Cap'n Proto serialization.
-//! 
+//!
 //! This module provides a complete RPC framework supporting:
 //! - Unary RPCs (request/response)
 //! - Server streaming RPCs (request/stream of responses)  
 //! - Client streaming RPCs (stream of requests/response)
 //! - Bidirectional streaming RPCs (stream of requests/stream of responses)
-//! 
+//!
 //! # Quick Start
-//! 
+//!
 //! ## Defining an RPC Service
-//! 
+//!
 //! ```rust
 //! use quiccrunch_macros::rpc_service;
 //! use quiccrunch_core::rpc::{RpcContext, RpcResult, RpcStreamSink, RpcStreamSource};
-//! 
+//!
 //! #[rpc_service(name = "Calculator")]
 //! trait Calculator {
 //!     // Unary RPC: simple request/response
@@ -30,10 +30,10 @@
 //!     // Bidirectional streaming: stream of requests, stream of responses
 //!     async fn transform(&self, input: RpcStreamSource<String>) -> RpcResult<RpcStreamSource<String>>;
 //! }
-//! 
+//!
 //! // Implementation
 //! struct CalculatorImpl;
-//! 
+//!
 //! impl Calculator for CalculatorImpl {
 //!     async fn add(&self, a: i32, b: i32) -> RpcResult<i32> {
 //!         Ok(a + b)
@@ -74,19 +74,19 @@
 //!     }
 //! }
 //! ```
-//! 
+//!
 //! ## Running a Server
-//! 
+//!
 //! ```rust,no_run
 //! use quiccrunch_core::{QuicTransport, TlsConfig};
 //! use quiccrunch_core::rpc::RpcServer;
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Setup transport with TLS
 //!     let tls_config = TlsConfig::generate_self_signed("localhost")?;
 //!     let transport = QuicTransport::new(tls_config)?;
-//! 
+//!
 //!     // Create RPC server
 //!     let mut server = RpcServer::new();
 //!     
@@ -99,13 +99,13 @@
 //!     Ok(())
 //! }
 //! ```
-//! 
+//!
 //! ## Creating a Client
-//! 
+//!
 //! ```rust,no_run
 //! use quiccrunch_core::{QuicTransport, TlsConfig};
 //! use quiccrunch_core::rpc::RpcClient;
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Setup transport
@@ -132,36 +132,36 @@
 //!     Ok(())
 //! }
 //! ```
-//! 
+//!
 //! # Advanced Features
-//! 
+//!
 //! ## Connection Pooling
-//! 
+//!
 //! ```rust,no_run
 //! use quiccrunch_core::rpc::{RpcConnectionPool, PooledRpcClient};
-//! 
+//!
 //! // Create connection pool
 //! let pool = RpcConnectionPool::new("127.0.0.1:50051", 10).await?;
 //! let client = PooledRpcClient::new(pool);
 //! let calculator = CalculatorClient::new(client);
-//! 
+//!
 //! // Calls automatically use pooled connections
 //! let result = calculator.add(1, 2).await?;
 //! ```
-//! 
+//!
 //! ## Stream Lifecycle Management
-//! 
+//!
 //! Streams automatically handle cleanup and resource management:
 //! - Streams are closed when dropped
 //! - Network resources are freed when streams complete
 //! - Backpressure is handled automatically
 //! - Flow control prevents memory exhaustion
-//! 
+//!
 //! ## Error Handling
-//! 
+//!
 //! ```rust
 //! use quiccrunch_core::rpc::RpcError;
-//! 
+//!
 //! match calculator.add(5, 3).await {
 //!     Ok(result) => println!("Result: {}", result),
 //!     Err(RpcError::MethodNotFound(method)) => {
@@ -178,35 +178,40 @@
 //! ```
 
 pub mod codegen;
+pub mod error;
+pub mod metrics;
+pub mod rate_limit;
+pub mod reflection;
 pub mod retry;
 pub mod service;
-pub mod error;
-pub mod reflection;
-pub mod rate_limit;
-pub mod metrics;
 pub mod simd_parser;
 // pub mod discovery; // Temporarily disabled
 
 #[cfg(feature = "auth")]
-use crate::interceptor::{Interceptor, InterceptorChain, LoggingInterceptor, MetricsInterceptor, TimeoutInterceptor, CircuitBreakerInterceptor};
-use crate::rpc::retry::{RetryConfig, RetryableError, CircuitBreaker, CircuitBreakerConfig, CircuitState};
+use crate::interceptor::{
+    CircuitBreakerInterceptor, Interceptor, InterceptorChain, LoggingInterceptor,
+    MetricsInterceptor, TimeoutInterceptor,
+};
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
-use std::time::{Duration, SystemTime};
 use std::pin::Pin;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::task::{Context, Poll};
+use std::time::{Duration, SystemTime};
 
+use crate::rpc::service::HealthStatus;
+use crate::schema::rpc_capnp::*;
+use crate::{QuicStream, Splittable, StreamReader, StreamWriter, TransportError};
 use async_trait::async_trait;
 use bytes::Bytes;
 use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
-use tokio::sync::RwLock;
 use futures::Stream;
-use crate::{QuicStream, TransportError, StreamReader, StreamWriter, Splittable, transport::async_bridge::AsyncTquicClient};
-use crate::schema::rpc_capnp::*;
-use crate::rpc::service::HealthStatus;
+use tokio::sync::RwLock;
 
 /// Endpoint information for services
 #[derive(Debug, Clone)]
@@ -288,11 +293,17 @@ impl From<ErrorCode> for RpcError {
         match code {
             ErrorCode::InvalidRequest => RpcError::InvalidParameters("Invalid request".to_string()),
             ErrorCode::MethodNotFound => RpcError::MethodNotFound("Method not found".to_string()),
-            ErrorCode::InvalidParams => RpcError::InvalidParameters("Invalid parameters".to_string()),
+            ErrorCode::InvalidParams => {
+                RpcError::InvalidParameters("Invalid parameters".to_string())
+            }
             ErrorCode::InternalError => RpcError::ServiceError("Internal error".to_string()),
             ErrorCode::Timeout => RpcError::Timeout,
-            ErrorCode::ServiceUnavailable => RpcError::ServiceUnavailable("Service unavailable".to_string()),
-            ErrorCode::PermissionDenied => RpcError::PermissionDenied("Permission denied".to_string()),
+            ErrorCode::ServiceUnavailable => {
+                RpcError::ServiceUnavailable("Service unavailable".to_string())
+            }
+            ErrorCode::PermissionDenied => {
+                RpcError::PermissionDenied("Permission denied".to_string())
+            }
             ErrorCode::RateLimited => RpcError::RateLimited("Rate limited".to_string()),
             _ => RpcError::ServiceError("Unknown error".to_string()),
         }
@@ -321,17 +332,17 @@ impl RpcContext {
             timeout: None,
         }
     }
-    
+
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
         self
     }
-    
+
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
-    
+
     pub fn elapsed(&self) -> Duration {
         self.start_time.elapsed().unwrap_or_default()
     }
@@ -354,7 +365,7 @@ pub trait StreamingRpcService: Send + Sync {
         params: Bytes,
         sink: RpcStreamSink,
     ) -> StreamingRpcResult<()>;
-    
+
     /// Client streaming: multiple requests, single response
     async fn client_streaming_call(
         &self,
@@ -362,7 +373,7 @@ pub trait StreamingRpcService: Send + Sync {
         method: &str,
         stream: RpcStreamReceiver,
     ) -> StreamingRpcResult<Bytes>;
-    
+
     /// Bidirectional streaming: multiple requests, multiple responses
     async fn bidirectional_streaming_call(
         &self,
@@ -374,35 +385,35 @@ pub trait StreamingRpcService: Send + Sync {
 }
 
 /// Sink for sending streaming data using QuicCrunch's split stream architecture
-/// 
+///
 /// `RpcStreamSink` provides the sending side of streaming RPCs with automatic message framing,
 /// flow control, and lifecycle management. It's designed to work seamlessly with Rust's
 /// ownership model by allowing independent ownership of send and receive sides.
-/// 
+///
 /// # Stream Architecture
-/// 
+///
 /// QuicCrunch uses a "split stream" design that solves Rust's ownership challenges in streaming:
 /// - `RpcStreamSink<T>` handles sending data (this type)
 /// - `RpcStreamSource<T>` handles receiving data
 /// - Both sides can be moved to different tasks independently
 /// - Automatic cleanup when either side is dropped
-/// 
+///
 /// # Examples
-/// 
+///
 /// ## Server Streaming - Real-time Data Feed
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::{RpcStreamSink, RpcStreamSource, RpcResult};
 /// use serde::{Serialize, Deserialize};
 /// use std::time::Duration;
-/// 
+///
 /// #[derive(Serialize, Deserialize)]
 /// struct StockPrice {
 ///     symbol: String,
 ///     price: f64,
 ///     timestamp: u64,
 /// }
-/// 
+///
 /// async fn stock_feed(&self, symbols: Vec<String>) -> RpcResult<RpcStreamSource<StockPrice>> {
 ///     let (mut sink, source) = RpcStreamSink::create();
 ///     
@@ -437,19 +448,19 @@ pub trait StreamingRpcService: Send + Sync {
 ///     Ok(source)
 /// }
 /// ```
-/// 
+///
 /// ## Client Streaming - Batch Upload with Progress
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::RpcStreamSink;
-/// 
+///
 /// #[derive(Serialize, Deserialize)]
 /// struct FileChunk {
 ///     chunk_id: u64,
 ///     data: Vec<u8>,
 ///     checksum: u32,
 /// }
-/// 
+///
 /// async fn upload_file(sink: RpcStreamSink<FileChunk>, file_path: &str) -> RpcResult<()> {
 ///     let file_data = std::fs::read(file_path)?;
 ///     const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
@@ -473,11 +484,11 @@ pub trait StreamingRpcService: Send + Sync {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Bidirectional Streaming - Live Chat
-/// 
+///
 /// ```rust,no_run
-/// async fn chat_handler(&self, 
+/// async fn chat_handler(&self,
 ///     mut input: RpcStreamSource<ChatMessage>,
 ///     output_sink: RpcStreamSink<ChatMessage>
 /// ) -> RpcResult<()> {
@@ -509,11 +520,11 @@ pub trait StreamingRpcService: Send + Sync {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// # Advanced Usage
-/// 
+///
 /// ## Flow Control and Backpressure
-/// 
+///
 /// ```rust,no_run
 /// async fn rate_limited_stream(sink: RpcStreamSink<Data>) -> RpcResult<()> {
 ///     let rate_limiter = RateLimiter::new(100); // 100 items/sec
@@ -536,9 +547,9 @@ pub trait StreamingRpcService: Send + Sync {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Error Recovery
-/// 
+///
 /// ```rust,no_run
 /// async fn resilient_streaming(sink: RpcStreamSink<Result<Data, ProcessingError>>) -> RpcResult<()> {
 ///     for item in data_source {
@@ -557,35 +568,35 @@ pub trait StreamingRpcService: Send + Sync {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// # Resource Management
-/// 
+///
 /// ## Automatic Cleanup
 /// - Always call [`finish()`] when done sending to properly close the stream
 /// - Stream resources are automatically freed when both sink and source are dropped
 /// - Network connections are cleaned up when the stream completes
 /// - QUIC streams are closed gracefully to avoid connection errors
-/// 
+///
 /// ## Memory Management
 /// - Internal buffering is bounded to prevent memory exhaustion
 /// - Backpressure signals when the receiver can't keep up
 /// - Large messages are automatically chunked by the transport layer
-/// 
+///
 /// # Performance Characteristics
-/// 
+///
 /// - **Throughput**: Optimized for high-volume streaming (millions of messages/sec)
 /// - **Latency**: Sub-millisecond message delivery for local connections
 /// - **Memory**: Bounded buffering with configurable limits
 /// - **CPU**: Zero-copy serialization where possible
-/// 
+///
 /// # Error Handling
-/// 
+///
 /// [`send()`] can fail in several scenarios:
 /// - **Network errors**: Connection lost, timeout, network unreachable
 /// - **Flow control**: Receiver can't keep up (temporary - retry possible)
 /// - **Serialization**: Data can't be serialized (permanent error)
 /// - **Stream closed**: Receiver closed the stream early
-/// 
+///
 /// ```rust,no_run
 /// match sink.send(data).await {
 ///     Ok(_) => { /* Success */ }
@@ -602,15 +613,15 @@ pub trait StreamingRpcService: Send + Sync {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Thread Safety
-/// 
+///
 /// `RpcStreamSink` is `Send` but not `Sync` - it can be moved between threads but not
 /// shared. For multi-threaded sending, use channels:
-/// 
+///
 /// ```rust,no_run
 /// let (tx, mut rx) = tokio::sync::mpsc::channel(100);
-/// 
+///
 /// // Spawn sending task
 /// tokio::spawn(async move {
 ///     while let Some(data) = rx.recv().await {
@@ -620,11 +631,11 @@ pub trait StreamingRpcService: Send + Sync {
 ///     }
 ///     let _ = sink.finish().await;
 /// });
-/// 
+///
 /// // Multiple threads can send via the channel
 /// tx.send(data).await?;
 /// ```
-/// 
+///
 /// [`finish()`]: RpcStreamSink::finish
 /// [`send()`]: RpcStreamSink::send
 pub struct RpcStreamSink<T = Bytes> {
@@ -641,68 +652,68 @@ impl<T> RpcStreamSink<T> {
             _phantom: PhantomData,
         }
     }
-    
+
     pub async fn send(&self, data: Bytes) -> RpcResult<()> {
         let stream_chunk_data = self.create_stream_chunk(data)?;
         self.writer.send_message(stream_chunk_data).await?;
         Ok(())
     }
-    
+
     pub async fn finish(self) -> RpcResult<()> {
         let stream_end_data = self.create_stream_end()?;
         self.writer.send_message(stream_end_data).await?;
         self.writer.close().await?;
         Ok(())
     }
-    
+
     fn create_stream_chunk(&self, data: Bytes) -> RpcResult<Bytes> {
         let mut message = Builder::new_default();
         let mut rpc_message = message.init_root::<rpc_message::Builder>();
         rpc_message.set_message_type(MessageType::StreamChunk);
-        
+
         let mut chunk = rpc_message.init_stream_chunk();
         chunk.set_stream_id(self.stream_id);
         chunk.set_data(&data);
-        
+
         let serialized = serialize::write_message_to_words(&message);
         Ok(Bytes::from(serialized))
     }
-    
+
     fn create_stream_end(&self) -> RpcResult<Bytes> {
         let mut message = Builder::new_default();
         let mut rpc_message = message.init_root::<rpc_message::Builder>();
         rpc_message.set_message_type(MessageType::StreamEnd);
-        
+
         let mut end = rpc_message.init_stream_end();
         end.set_stream_id(self.stream_id);
-        
+
         let serialized = serialize::write_message_to_words(&message);
         Ok(Bytes::from(serialized))
     }
 }
 
 /// Receiver for streaming data using QuicCrunch's split stream architecture
-/// 
-/// `RpcStreamReceiver` provides the receiving side of streaming RPCs with automatic message 
-/// parsing, deserialization, and stream lifecycle management. It's designed to work seamlessly 
+///
+/// `RpcStreamReceiver` provides the receiving side of streaming RPCs with automatic message
+/// parsing, deserialization, and stream lifecycle management. It's designed to work seamlessly
 /// with Rust's ownership model and async ecosystem.
-/// 
+///
 /// # Stream Architecture
-/// 
+///
 /// QuicCrunch's split stream design enables independent ownership:
 /// - `RpcStreamSink<T>` for sending (on the other side)
 /// - `RpcStreamReceiver<T>` for receiving (this type)
 /// - No shared state between send/receive sides
 /// - Automatic stream completion detection
-/// 
+///
 /// # Examples
-/// 
+///
 /// ## Server Streaming - Consuming Real-time Data
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::{RpcStreamReceiver, RpcResult};
 /// use serde::{Serialize, Deserialize};
-/// 
+///
 /// #[derive(Serialize, Deserialize, Debug)]
 /// struct MarketData {
 ///     symbol: String,
@@ -710,7 +721,7 @@ impl<T> RpcStreamSink<T> {
 ///     volume: u64,
 ///     timestamp: u64,
 /// }
-/// 
+///
 /// async fn consume_market_data(mut stream: RpcStreamReceiver<MarketData>) -> RpcResult<()> {
 ///     let mut total_volume = 0;
 ///     let mut price_sum = 0.0;
@@ -719,7 +730,7 @@ impl<T> RpcStreamSink<T> {
 ///     while let Some(data_result) = stream.next().await {
 ///         match data_result {
 ///             Ok(market_data) => {
-///                 println!("📊 {} - ${:.2} (vol: {})", 
+///                 println!("📊 {} - ${:.2} (vol: {})",
 ///                     market_data.symbol, market_data.price, market_data.volume);
 ///                 
 ///                 total_volume += market_data.volume;
@@ -735,7 +746,7 @@ impl<T> RpcStreamSink<T> {
 ///     }
 ///     
 ///     if count > 0 {
-///         println!("📈 Summary: {} updates, avg price: ${:.2}, total volume: {}", 
+///         println!("📈 Summary: {} updates, avg price: ${:.2}, total volume: {}",
 ///             count, price_sum / count as f64, total_volume);
 ///     }
 ///     
@@ -743,12 +754,12 @@ impl<T> RpcStreamSink<T> {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Client Streaming - Processing Upload Stream
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::RpcStreamReceiver;
-/// 
+///
 /// #[derive(Serialize, Deserialize)]
 /// struct FileChunk {
 ///     chunk_id: u64,
@@ -756,7 +767,7 @@ impl<T> RpcStreamSink<T> {
 ///     data: Vec<u8>,
 ///     is_final: bool,
 /// }
-/// 
+///
 /// #[derive(Serialize, Deserialize)]
 /// struct UploadResult {
 ///     filename: String,
@@ -764,7 +775,7 @@ impl<T> RpcStreamSink<T> {
 ///     chunks_received: u64,
 ///     checksum: String,
 /// }
-/// 
+///
 /// async fn handle_file_upload(mut stream: RpcStreamReceiver<FileChunk>) -> RpcResult<UploadResult> {
 ///     let mut file_data = Vec::new();
 ///     let mut filename = String::new();
@@ -805,7 +816,7 @@ impl<T> RpcStreamSink<T> {
 ///     std::fs::write(&file_path, &file_data)?;
 ///     let checksum = calculate_sha256(&file_data);
 ///     
-///     println!("✅ Upload completed: {} ({} bytes, {} chunks)", 
+///     println!("✅ Upload completed: {} ({} bytes, {} chunks)",
 ///         filename, file_data.len(), chunks_received);
 ///     
 ///     Ok(UploadResult {
@@ -816,9 +827,9 @@ impl<T> RpcStreamSink<T> {
 ///     })
 /// }
 /// ```
-/// 
+///
 /// ## Bidirectional Streaming - Interactive Processing
-/// 
+///
 /// ```rust,no_run
 /// async fn interactive_processor(
 ///     mut input: RpcStreamReceiver<ProcessRequest>,
@@ -833,11 +844,11 @@ impl<T> RpcStreamSink<T> {
 ///                 
 ///                 // Process the request
 ///                 let response = match session_state.process(request).await {
-///                     Ok(result) => ProcessResponse::Success { 
+///                     Ok(result) => ProcessResponse::Success {
 ///                         result,
 ///                         timestamp: current_timestamp(),
 ///                     },
-///                     Err(e) => ProcessResponse::Error { 
+///                     Err(e) => ProcessResponse::Error {
 ///                         message: e.to_string(),
 ///                         timestamp: current_timestamp(),
 ///                     },
@@ -876,11 +887,11 @@ impl<T> RpcStreamSink<T> {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// # Advanced Usage Patterns
-/// 
+///
 /// ## Stream Aggregation
-/// 
+///
 /// ```rust,no_run
 /// async fn aggregate_data(mut stream: RpcStreamReceiver<DataPoint>) -> RpcResult<AggregatedResult> {
 ///     let mut aggregator = DataAggregator::new();
@@ -902,9 +913,9 @@ impl<T> RpcStreamSink<T> {
 ///     Ok(aggregator.finalize())
 /// }
 /// ```
-/// 
+///
 /// ## Stream Transformation with Filtering
-/// 
+///
 /// ```rust,no_run
 /// async fn filter_and_transform(
 ///     mut input: RpcStreamReceiver<RawData>,
@@ -936,13 +947,13 @@ impl<T> RpcStreamSink<T> {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Parallel Processing
-/// 
+///
 /// ```rust,no_run
 /// use tokio::sync::mpsc;
 /// use futures::stream::StreamExt;
-/// 
+///
 /// async fn parallel_processing(mut stream: RpcStreamReceiver<WorkItem>) -> RpcResult<Vec<WorkResult>> {
 ///     let (tx, mut rx) = mpsc::channel(100);
 ///     let results = Arc::new(Mutex::new(Vec::new()));
@@ -981,16 +992,16 @@ impl<T> RpcStreamSink<T> {
 ///     Ok(results)
 /// }
 /// ```
-/// 
+///
 /// # Stream Completion
-/// 
+///
 /// The stream ends naturally when:
-/// - The sender calls [`RpcStreamSink::finish()`] 
+/// - The sender calls [`RpcStreamSink::finish()`]
 /// - The underlying network connection is closed
 /// - An unrecoverable error occurs during transmission
-/// 
+///
 /// [`next()`] returns `None` when the stream is complete and no more data will arrive.
-/// 
+///
 /// ```rust,no_run
 /// while let Some(item_result) = stream.next().await {
 ///     match item_result {
@@ -1005,20 +1016,20 @@ impl<T> RpcStreamSink<T> {
 ///         }
 ///     }
 /// }
-/// 
+///
 /// println!("Stream completed naturally");
 /// ```
-/// 
+///
 /// # Error Handling Strategy
-/// 
+///
 /// ## Per-Message Error Handling
-/// 
+///
 /// Individual message errors don't terminate the stream:
-/// 
+///
 /// ```rust,no_run
 /// let mut error_count = 0;
 /// const MAX_ERRORS: usize = 10;
-/// 
+///
 /// while let Some(item_result) = stream.next().await {
 ///     match item_result {
 ///         Ok(item) => {
@@ -1040,12 +1051,12 @@ impl<T> RpcStreamSink<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// ## Stream-Level Error Handling
-/// 
+///
 /// ```rust,no_run
 /// use tokio::time::{timeout, Duration};
-/// 
+///
 /// async fn process_with_timeout(mut stream: RpcStreamReceiver<Data>) -> RpcResult<ProcessResult> {
 ///     let processing_timeout = Duration::from_secs(30);
 ///     
@@ -1065,21 +1076,21 @@ impl<T> RpcStreamSink<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Performance Characteristics
-/// 
+///
 /// - **Throughput**: Handles millions of messages per second on modern hardware
 /// - **Latency**: Sub-millisecond message delivery for local connections  
 /// - **Memory**: Bounded buffering prevents memory exhaustion
 /// - **CPU**: Efficient deserialization with zero-copy where possible
-/// 
+///
 /// # Memory Management
-/// 
+///
 /// ## Automatic Resource Cleanup
 /// - Stream resources are freed when the receiver is dropped
 /// - Network connections are properly closed
 /// - No manual cleanup required
-/// 
+///
 /// ## Bounded Processing
 /// ```rust,no_run
 /// async fn memory_efficient_processing(mut stream: RpcStreamReceiver<LargeData>) -> RpcResult<()> {
@@ -1099,15 +1110,15 @@ impl<T> RpcStreamSink<T> {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// # Thread Safety
-/// 
+///
 /// `RpcStreamReceiver` is `Send` but not `Sync` - it can be moved between threads but not
 /// shared. For multi-threaded consumption, use channels:
-/// 
+///
 /// ```rust,no_run
 /// use tokio::sync::mpsc;
-/// 
+///
 /// // Single receiver distributes to multiple processors
 /// async fn distribute_processing(mut stream: RpcStreamReceiver<WorkItem>) -> RpcResult<()> {
 ///     let (tx, mut rx) = mpsc::channel(100);
@@ -1133,14 +1144,14 @@ impl<T> RpcStreamSink<T> {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// # Integration with Async Ecosystem
-/// 
+///
 /// `RpcStreamReceiver` implements standard async stream traits:
-/// 
+///
 /// ```rust,no_run
 /// use futures::StreamExt;
-/// 
+///
 /// // Use with futures combinators
 /// let results: Vec<_> = stream
 ///     .map(|item_result| async move {
@@ -1154,36 +1165,38 @@ impl<T> RpcStreamSink<T> {
 ///     .collect()
 ///     .await;
 /// ```
-/// 
+///
 /// [`next()`]: RpcStreamReceiver::next
 /// [`RpcStreamSink::finish()`]: RpcStreamSink::finish
 pub struct RpcStreamReceiver<T = Bytes> {
     reader: StreamReader,
+    /// Retained for stream diagnostics (reset/cancel).
+    #[allow(dead_code)]
     stream_id: StreamId,
     _phantom: PhantomData<T>,
 }
 
 /// Type alias for RpcStreamReceiver to provide a more intuitive API
-/// 
+///
 /// `RpcStreamSource<T>` represents a source of streaming data of type `T`. This is
 /// conceptually the "read" side of a stream, while `RpcStreamSink<T>` is the "write" side.
-/// 
+///
 /// This type alias makes the streaming API more intuitive:
 /// - `RpcStreamSource<T>` = receive/consume stream data
 /// - `RpcStreamSink<T>` = send/produce stream data
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::{RpcStreamSource, RpcStreamSink, RpcResult};
-/// 
+///
 /// // Service method returning a stream
 /// async fn get_data_stream(&self) -> RpcResult<RpcStreamSource<Data>> {
 ///     let (sink, source) = RpcStreamSink::create();
 ///     // ... populate stream via sink
 ///     Ok(source)
 /// }
-/// 
+///
 /// // Service method consuming a stream  
 /// async fn process_data_stream(&self, mut stream: RpcStreamSource<Data>) -> RpcResult<Summary> {
 ///     while let Some(data) = stream.next().await {
@@ -1202,7 +1215,7 @@ impl<T> RpcStreamReceiver<T> {
             _phantom: PhantomData,
         }
     }
-    
+
     pub async fn next(&mut self) -> StreamingRpcResult<Option<Bytes>> {
         match self.reader.receive_message().await {
             Ok(data) => {
@@ -1213,40 +1226,50 @@ impl<T> RpcStreamReceiver<T> {
                         StreamMessageType::End => Ok(None),
                     }
                 } else {
-                    Err(RpcError::SerializationError("Invalid stream message".into()))
+                    Err(RpcError::SerializationError(
+                        "Invalid stream message".into(),
+                    ))
                 }
             }
             Err(e) => Err(RpcError::Transport(e.to_string())),
         }
     }
-    
+
     fn parse_stream_message(&self, data: &Bytes) -> Result<StreamMessageType, RpcError> {
         let reader = serialize::read_message(data.as_ref(), ReaderOptions::new())
             .map_err(|e| RpcError::SerializationError(e.to_string()))?;
-        let rpc_message = reader.get_root::<rpc_message::Reader>()
+        let rpc_message = reader
+            .get_root::<rpc_message::Reader>()
             .map_err(|e| RpcError::SerializationError(e.to_string()))?;
-        
-        match rpc_message.get_message_type()
-            .map_err(|e| RpcError::SerializationError(e.to_string()))? {
+
+        match rpc_message
+            .get_message_type()
+            .map_err(|e| RpcError::SerializationError(e.to_string()))?
+        {
             MessageType::StreamChunk => {
                 if let Ok(chunk_which) = rpc_message.which() {
                     if let rpc_message::Which::StreamChunk(chunk_reader) = chunk_which {
                         let chunk = chunk_reader
                             .map_err(|e| RpcError::SerializationError(e.to_string()))?;
-                        let data = chunk.get_data()
+                        let data = chunk
+                            .get_data()
                             .map_err(|e| RpcError::SerializationError(e.to_string()))?;
                         Ok(StreamMessageType::Chunk(Bytes::from(data.to_vec())))
                     } else {
-                        Err(RpcError::SerializationError("Invalid stream chunk message".into()))
+                        Err(RpcError::SerializationError(
+                            "Invalid stream chunk message".into(),
+                        ))
                     }
                 } else {
-                    Err(RpcError::SerializationError("Failed to parse message union".into()))
+                    Err(RpcError::SerializationError(
+                        "Failed to parse message union".into(),
+                    ))
                 }
             }
-            MessageType::StreamEnd => {
-                Ok(StreamMessageType::End)
-            }
-            _ => Err(RpcError::SerializationError("Invalid stream message type".into())),
+            MessageType::StreamEnd => Ok(StreamMessageType::End),
+            _ => Err(RpcError::SerializationError(
+                "Invalid stream message type".into(),
+            )),
         }
     }
 }
@@ -1258,11 +1281,11 @@ enum StreamMessageType {
 
 impl<T> Stream for RpcStreamReceiver<T> {
     type Item = StreamingRpcResult<Bytes>;
-    
+
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Use a waker to handle the async operation
         let _waker = cx.waker().clone();
-        
+
         // Since we can't easily poll the async next() method directly,
         // we'll use a simple approach and return Pending most of the time
         // This is a simplified implementation - in production you'd want a proper async stream
@@ -1271,13 +1294,13 @@ impl<T> Stream for RpcStreamReceiver<T> {
 }
 
 /// High-performance RPC Server for handling incoming client connections
-/// 
+///
 /// The `RpcServer` manages RPC service registration and handles incoming client connections
 /// over QUIC transport. It provides automatic service discovery, method routing, streaming
 /// support, and connection lifecycle management.
-/// 
+///
 /// # Architecture Overview
-/// 
+///
 /// ```text
 /// ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 /// │   Client A      │    │                  │    │  UserService    │
@@ -1297,16 +1320,16 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///                        │  └─────────────┘ │
 ///                        └──────────────────┘
 /// ```
-/// 
+///
 /// # Examples
-/// 
+///
 /// ## Basic Server Setup
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::RpcServer;
 /// use quiccrunch_core::{QuicTransport, TlsConfig};
 /// use std::sync::Arc;
-/// 
+///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     // Create and configure server
@@ -1342,18 +1365,18 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Advanced Server with Multiple Service Types
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::{RpcServer, RpcService, StreamingRpcService};
-/// 
+///
 /// async fn setup_advanced_server() -> Result<(), Box<dyn std::error::Error>> {
 ///     let server = RpcServer::new();
 ///     
 ///     // Register regular RPC services
 ///     server.register_service(
-///         "UserService".to_string(), 
+///         "UserService".to_string(),
 ///         Arc::new(UserServiceImpl::new())
 ///     ).await;
 ///     
@@ -1387,19 +1410,19 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Service Registration with Macro Integration
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_macros::rpc_service;
-/// 
+///
 /// // Define service with macro
 /// #[rpc_service(name = "Calculator")]
 /// trait Calculator {
 ///     async fn add(&self, a: i32, b: i32) -> RpcResult<i32>;
 ///     async fn fibonacci(&self, n: u32) -> RpcResult<RpcStreamSource<u64>>;
 /// }
-/// 
+///
 /// // Implementation
 /// struct CalculatorImpl;
 /// impl Calculator for CalculatorImpl {
@@ -1412,7 +1435,7 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///         todo!()
 ///     }
 /// }
-/// 
+///
 /// // Register with server (using generated handler)
 /// async fn register_calculator(server: &RpcServer) {
 ///     let calculator = CalculatorImpl;
@@ -1422,13 +1445,13 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     server.register_service("Calculator".to_string(), Arc::new(handler)).await;
 /// }
 /// ```
-/// 
+///
 /// ## Production Server with Observability
-/// 
+///
 /// ```rust,no_run
 /// use tracing::{info, error, instrument};
 /// use tokio::signal;
-/// 
+///
 /// #[instrument]
 /// async fn production_server() -> Result<(), Box<dyn std::error::Error>> {
 ///     // Initialize logging and metrics
@@ -1476,7 +1499,7 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     
 ///     Ok(())
 /// }
-/// 
+///
 /// async fn serve_connections(server: &RpcServer, mut incoming: QuicListener) {
 ///     while let Ok(connection) = incoming.accept().await {
 ///         let server = server.clone();
@@ -1493,20 +1516,20 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Connection Handling
-/// 
+///
 /// ## Automatic Connection Management
-/// 
+///
 /// The server automatically handles:
 /// - **Connection acceptance**: New QUIC connections from clients
 /// - **Stream multiplexing**: Multiple concurrent RPC calls per connection
 /// - **Lifecycle management**: Connection setup, maintenance, and cleanup  
 /// - **Error recovery**: Automatic retry and graceful degradation
 /// - **Resource cleanup**: Memory and network resource management
-/// 
+///
 /// ## Connection Lifecycle
-/// 
+///
 /// ```text
 /// Client Connect ──► Authentication ──► Service Discovery ──► RPC Calls ──► Disconnect
 ///       │                   │                    │                │              │
@@ -1516,28 +1539,28 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///       │                   │                    │                │              │
 ///    QUIC Handshake    Check Permissions    Client Registers   Process Data   Free Resources
 /// ```
-/// 
+///
 /// ## Per-Connection State
-/// 
+///
 /// Each connection maintains:
 /// - **Authentication context**: User identity and permissions
 /// - **Active streams**: Currently running RPC calls
 /// - **Stream counters**: Track usage and limits
 /// - **Metrics**: Latency, throughput, error rates
-/// 
+///
 /// # Service Registration
-/// 
+///
 /// ## Regular RPC Services
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::{RpcService, RpcContext, RpcResult};
 /// use async_trait::async_trait;
-/// 
+///
 /// struct MyService {
 ///     database: DatabasePool,
 ///     cache: Arc<Cache>,
 /// }
-/// 
+///
 /// #[async_trait]
 /// impl RpcService for MyService {
 ///     async fn call(&self, context: &RpcContext, method: &str, params: Bytes) -> RpcResult<Bytes> {
@@ -1556,20 +1579,20 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///         }
 ///     }
 /// }
-/// 
+///
 /// // Register the service
 /// server.register_service("MyService".to_string(), Arc::new(MyService::new())).await;
 /// ```
-/// 
+///
 /// ## Streaming RPC Services
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::{StreamingRpcService, RpcStreamSink, RpcStreamReceiver};
-/// 
+///
 /// struct DataStreamingService {
 ///     data_source: Arc<dyn DataSource + Send + Sync>,
 /// }
-/// 
+///
 /// #[async_trait]
 /// impl StreamingRpcService for DataStreamingService {
 ///     // Server streaming: send multiple responses
@@ -1622,22 +1645,22 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Thread Safety and Concurrency
-/// 
+///
 /// ## Connection Concurrency
-/// 
+///
 /// - **Per-connection**: Each connection is handled in its own task
 /// - **Stream multiplexing**: Multiple RPC calls can run simultaneously on one connection
 /// - **Service isolation**: Services can be called concurrently without interference
 /// - **Shared state**: Use `Arc<RwLock<T>>` or similar for shared service state
-/// 
+///
 /// ## Service State Management
-/// 
+///
 /// ```rust,no_run
 /// use tokio::sync::RwLock;
 /// use std::collections::HashMap;
-/// 
+///
 /// struct StatefulService {
 ///     // Read-heavy shared state
 ///     config: Arc<RwLock<ServiceConfig>>,
@@ -1651,7 +1674,7 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     // Per-request state (no sharing)
 ///     request_counter: AtomicU64,
 /// }
-/// 
+///
 /// impl StatefulService {
 ///     async fn handle_request(&self, user_id: UserId, request: Request) -> RpcResult<Response> {
 ///         // Increment request counter
@@ -1671,38 +1694,38 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Resource Management
-/// 
+///
 /// ## Automatic Cleanup
 /// - **Connection resources**: Automatically freed when clients disconnect
 /// - **Stream resources**: Cleaned up when streams complete or error
 /// - **Memory management**: Bounded buffers prevent memory leaks
 /// - **Network resources**: QUIC connections properly closed
-/// 
+///
 /// ## Configuration and Limits
-/// 
+///
 /// ```rust,no_run
 /// use quinn::TransportConfig;
-/// 
+///
 /// let mut transport_config = TransportConfig::default();
-/// 
+///
 /// // Connection limits
 /// transport_config.max_concurrent_bidi_streams(1000u32.into());  // 1000 concurrent RPC calls
 /// transport_config.max_concurrent_uni_streams(100u32.into());    // 100 concurrent uni streams
 /// transport_config.max_idle_timeout(Some(Duration::from_secs(60).try_into()?)); // 60s idle timeout
-/// 
+///
 /// // Flow control
 /// transport_config.initial_window(1024 * 1024);         // 1MB initial window
 /// transport_config.receive_window(8 * 1024 * 1024);     // 8MB receive window
 /// transport_config.send_window(8 * 1024 * 1024);        // 8MB send window
-/// 
+///
 /// // Reliability
 /// transport_config.keep_alive_interval(Some(Duration::from_secs(15))); // 15s keepalive
 /// ```
-/// 
+///
 /// ## Memory Monitoring
-/// 
+///
 /// ```rust,no_run
 /// struct ServerMetrics {
 ///     active_connections: AtomicU64,
@@ -1711,7 +1734,7 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     bytes_received: AtomicU64,
 ///     requests_processed: AtomicU64,
 /// }
-/// 
+///
 /// impl RpcServer {
 ///     async fn handle_connection_with_metrics(&self, connection: Connection) -> RpcResult<()> {
 ///         self.metrics.active_connections.fetch_add(1, Ordering::Relaxed);
@@ -1723,30 +1746,30 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Performance Characteristics
-/// 
+///
 /// ## Scalability
 /// - **Connections**: Thousands of concurrent connections per server
 /// - **Streams**: Hundreds of concurrent streams per connection  
 /// - **Throughput**: Millions of RPC calls per second on modern hardware
 /// - **Latency**: Sub-millisecond for local calls, optimized for network latency
-/// 
+///
 /// ## Optimization Tips
-/// 
+///
 /// 1. **Connection Reuse**: Encourage clients to reuse connections
 /// 2. **Stream Multiplexing**: Use one connection for multiple concurrent calls
 /// 3. **Batching**: Group small operations into larger requests
 /// 4. **Caching**: Cache frequently accessed data in services
 /// 5. **Pooling**: Use connection pools for backend services
-/// 
+///
 /// ```rust,no_run
 /// // Example: Optimized service with caching
 /// struct OptimizedService {
 ///     cache: Arc<Cache<String, CachedData>>,
 ///     database: DatabasePool,
 /// }
-/// 
+///
 /// impl OptimizedService {
 ///     async fn get_user(&self, user_id: u64) -> RpcResult<User> {
 ///         let cache_key = format!("user:{}", user_id);
@@ -1766,17 +1789,17 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Error Handling and Recovery
-/// 
+///
 /// ## Service-Level Error Handling
-/// 
+///
 /// ```rust,no_run
 /// impl RpcService for ResilientService {
 ///     async fn call(&self, context: &RpcContext, method: &str, params: Bytes) -> RpcResult<Bytes> {
 ///         // Add request tracing
-///         let span = tracing::info_span!("rpc_call", 
-///             method = method, 
+///         let span = tracing::info_span!("rpc_call",
+///             method = method,
 ///             request_id = context.request_id
 ///         );
 ///         
@@ -1807,9 +1830,9 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// ## Connection Error Recovery
-/// 
+///
 /// ```rust,no_run
 /// impl RpcServer {
 ///     async fn handle_connection_with_recovery(&self, mut connection: Connection) -> RpcResult<()> {
@@ -1846,22 +1869,22 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Deployment and Operations
-/// 
+///
 /// ## Health Checks
-/// 
+///
 /// ```rust,no_run
 /// #[rpc_service]
 /// trait HealthService {
 ///     async fn health_check(&self) -> RpcResult<HealthStatus>;
 ///     async fn ready_check(&self) -> RpcResult<bool>;
 /// }
-/// 
+///
 /// struct HealthServiceImpl {
 ///     dependencies: Vec<Arc<dyn HealthCheckable + Send + Sync>>,
 /// }
-/// 
+///
 /// impl HealthService for HealthServiceImpl {
 ///     async fn health_check(&self) -> RpcResult<HealthStatus> {
 ///         let mut status = HealthStatus::new();
@@ -1875,12 +1898,12 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// ## Metrics and Monitoring
-/// 
+///
 /// ```rust,no_run
 /// use prometheus::{Counter, Histogram, register_counter, register_histogram};
-/// 
+///
 /// lazy_static! {
 ///     static ref RPC_REQUESTS_TOTAL: Counter = register_counter!(
 ///         "rpc_requests_total", "Total number of RPC requests"
@@ -1890,7 +1913,7 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///         "rpc_duration_seconds", "RPC request duration"
 ///     ).unwrap();
 /// }
-/// 
+///
 /// impl RpcServer {
 ///     async fn handle_stream_with_metrics(&self, stream: QuicStream) -> RpcResult<()> {
 ///         let timer = RPC_DURATION.start_timer();
@@ -1903,7 +1926,7 @@ impl<T> Stream for RpcStreamReceiver<T> {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// The `RpcServer` is designed to be production-ready with excellent performance,
 /// reliability, and observability features built-in.
 #[derive(Clone)]
@@ -1921,17 +1944,21 @@ impl RpcServer {
             next_stream_id: Arc::new(AtomicU64::new(1)),
         }
     }
-    
+
     /// Register a regular RPC service
     pub async fn register_service(&self, name: String, service: Arc<dyn RpcService>) {
         self.services.write().await.insert(name, service);
     }
-    
+
     /// Register a streaming RPC service  
-    pub async fn register_streaming_service(&self, name: String, service: Arc<dyn StreamingRpcService>) {
+    pub async fn register_streaming_service(
+        &self,
+        name: String,
+        service: Arc<dyn StreamingRpcService>,
+    ) {
         self.streaming_services.write().await.insert(name, service);
     }
-    
+
     /// Handle incoming connection - core server functionality
     pub async fn handle_connection(&self, mut connection: QuicStream) -> RpcResult<()> {
         loop {
@@ -1947,7 +1974,7 @@ impl RpcServer {
 
             // Clone server for concurrent stream handling
             let server = self.clone();
-            
+
             // Handle each stream concurrently
             tokio::spawn(async move {
                 if let Err(e) = server.handle_stream(stream).await {
@@ -1956,12 +1983,12 @@ impl RpcServer {
             });
         }
     }
-    
+
     /// Handle a single RPC stream - supports both unary and streaming calls
     async fn handle_stream(&self, stream: QuicStream) -> RpcResult<()> {
         // Convert to mutable stream for unary operations
         let mut stream = stream;
-        
+
         // Receive request message first to determine streaming type
         let request_data = match stream.receive_message().await {
             Ok(data) => data,
@@ -1979,7 +2006,7 @@ impl RpcServer {
                 let error_response = Self::create_error_response(
                     0, // Unknown request ID
                     Self::error_to_code(&e),
-                    &e.to_string()
+                    &e.to_string(),
                 );
                 let _ = stream.send_message(error_response).await;
                 return Err(e);
@@ -1991,21 +2018,19 @@ impl RpcServer {
             StreamingType::Unary => {
                 // Standard unary RPC - use stream directly
                 let result = self.process_request(&context, params).await;
-                
+
                 let response_data = match result {
-                    Ok(response_bytes) => {
-                        Self::create_success_response(response_bytes)
-                    }
-                    Err(e) => {
-                        Self::create_error_response(
-                            context.request_id,
-                            Self::error_to_code(&e),
-                            &e.to_string()
-                        )
-                    }
+                    Ok(response_bytes) => Self::create_success_response(response_bytes),
+                    Err(e) => Self::create_error_response(
+                        context.request_id,
+                        Self::error_to_code(&e),
+                        &e.to_string(),
+                    ),
                 };
 
-                stream.send_message(response_data).await
+                stream
+                    .send_message(response_data)
+                    .await
                     .map_err(|e| RpcError::Transport(e.to_string()))?;
             }
             StreamingType::ServerStreaming => {
@@ -2013,7 +2038,9 @@ impl RpcServer {
                 // Split stream for writing responses
                 let split_stream = stream.into_split_stream();
                 let (_, writer) = split_stream.split();
-                let result = self.process_server_streaming_request(&context, params, writer).await;
+                let result = self
+                    .process_server_streaming_request(&context, params, writer)
+                    .await;
                 if let Err(e) = result {
                     tracing::error!("Server streaming error: {}", e);
                     return Err(e);
@@ -2023,7 +2050,9 @@ impl RpcServer {
                 // Client streaming: multiple requests, single response
                 let split_stream = stream.into_split_stream();
                 let (reader, writer) = split_stream.split();
-                let result = self.process_client_streaming_request(&context, reader, writer).await;
+                let result = self
+                    .process_client_streaming_request(&context, reader, writer)
+                    .await;
                 if let Err(e) = result {
                     tracing::error!("Client streaming error: {}", e);
                     return Err(e);
@@ -2033,55 +2062,67 @@ impl RpcServer {
                 // Bidirectional streaming: multiple requests, multiple responses
                 let split_stream = stream.into_split_stream();
                 let (reader, writer) = split_stream.split();
-                let result = self.process_bidirectional_streaming_request(&context, reader, writer).await;
+                let result = self
+                    .process_bidirectional_streaming_request(&context, reader, writer)
+                    .await;
                 if let Err(e) = result {
                     tracing::error!("Bidirectional streaming error: {}", e);
                     return Err(e);
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Parse incoming request data into context and parameters, with streaming type
     async fn parse_request(&self, data: Bytes) -> RpcResult<(RpcContext, Bytes, StreamingType)> {
         let mut data_ref = data.as_ref();
-        let reader = capnp::serialize::read_message_from_flat_slice(&mut data_ref, ReaderOptions::new())
-            .map_err(|e| RpcError::SerializationError(format!("Failed to read request: {}", e)))?;
+        let reader =
+            capnp::serialize::read_message_from_flat_slice(&mut data_ref, ReaderOptions::new())
+                .map_err(|e| {
+                    RpcError::SerializationError(format!("Failed to read request: {}", e))
+                })?;
 
-        let rpc_message = reader.get_root::<rpc_message::Reader>()
+        let rpc_message = reader
+            .get_root::<rpc_message::Reader>()
             .map_err(|e| RpcError::SerializationError(format!("Invalid RPC message: {}", e)))?;
 
-        let message_type = rpc_message.get_message_type()
+        let message_type = rpc_message
+            .get_message_type()
             .map_err(|e| RpcError::SerializationError(format!("Invalid message type: {}", e)))?;
 
         if message_type != MessageType::Request {
-            return Err(RpcError::InvalidParameters("Expected request message".to_string()));
+            return Err(RpcError::InvalidParameters(
+                "Expected request message".to_string(),
+            ));
         }
 
-        let request_union = rpc_message.which()
+        let request_union = rpc_message
+            .which()
             .map_err(|e| RpcError::SerializationError(format!("Invalid union: {}", e)))?;
 
         if let rpc_message::Which::Request(request) = request_union {
             let request = request
                 .map_err(|e| RpcError::SerializationError(format!("Invalid request: {}", e)))?;
 
-            let service = request.get_service()
+            let service = request
+                .get_service()
                 .map_err(|e| RpcError::SerializationError(format!("Invalid service: {}", e)))?
                 .to_string()
                 .map_err(|_| RpcError::SerializationError("Invalid service string".to_string()))?;
 
-            let method = request.get_method()
+            let method = request
+                .get_method()
                 .map_err(|e| RpcError::SerializationError(format!("Invalid method: {}", e)))?
                 .to_string()
                 .map_err(|_| RpcError::SerializationError("Invalid method string".to_string()))?;
 
-            let parameters = request.get_parameters()
+            let parameters = request
+                .get_parameters()
                 .map_err(|e| RpcError::SerializationError(format!("Invalid parameters: {}", e)))?;
 
-            let streaming_type = request.get_streaming_type()
-                .unwrap_or(StreamingType::Unary); // Default to unary if not specified
+            let streaming_type = request.get_streaming_type().unwrap_or(StreamingType::Unary); // Default to unary if not specified
 
             let request_id = rpc_message.get_request_id();
 
@@ -2109,10 +2150,13 @@ impl RpcServer {
     /// Process the RPC request by routing to the appropriate service
     async fn process_request(&self, context: &RpcContext, params: Bytes) -> RpcResult<Bytes> {
         let services = self.services.read().await;
-        
+
         // Find the service
-        let service = services.get(&context.service)
-            .ok_or_else(|| RpcError::ServiceError(format!("Service not found: {}", context.service)))?
+        let service = services
+            .get(&context.service)
+            .ok_or_else(|| {
+                RpcError::ServiceError(format!("Service not found: {}", context.service))
+            })?
             .clone();
 
         // Drop the read lock before calling the service
@@ -2121,14 +2165,22 @@ impl RpcServer {
         // Call the service
         service.call(context, &context.method, params).await
     }
-    
+
     /// Process server streaming request: single request, multiple responses
-    async fn process_server_streaming_request(&self, context: &RpcContext, params: Bytes, writer: StreamWriter) -> RpcResult<()> {
+    async fn process_server_streaming_request(
+        &self,
+        context: &RpcContext,
+        params: Bytes,
+        writer: StreamWriter,
+    ) -> RpcResult<()> {
         let streaming_services = self.streaming_services.read().await;
-        
+
         // Find the streaming service
-        let service = streaming_services.get(&context.service)
-            .ok_or_else(|| RpcError::ServiceError(format!("Streaming service not found: {}", context.service)))?
+        let service = streaming_services
+            .get(&context.service)
+            .ok_or_else(|| {
+                RpcError::ServiceError(format!("Streaming service not found: {}", context.service))
+            })?
             .clone();
 
         // Drop the read lock before calling the service
@@ -2137,18 +2189,28 @@ impl RpcServer {
         // Create a stream sink for responses
         let stream_id = self.next_stream_id.fetch_add(1, Ordering::SeqCst);
         let sink = RpcStreamSink::new(writer, stream_id);
-        
+
         // Call the streaming service
-        service.server_streaming_call(context, &context.method, params, sink).await
+        service
+            .server_streaming_call(context, &context.method, params, sink)
+            .await
     }
-    
+
     /// Process client streaming request: multiple requests, single response
-    async fn process_client_streaming_request(&self, context: &RpcContext, reader: StreamReader, writer: StreamWriter) -> RpcResult<()> {
+    async fn process_client_streaming_request(
+        &self,
+        context: &RpcContext,
+        reader: StreamReader,
+        writer: StreamWriter,
+    ) -> RpcResult<()> {
         let streaming_services = self.streaming_services.read().await;
-        
+
         // Find the streaming service
-        let service = streaming_services.get(&context.service)
-            .ok_or_else(|| RpcError::ServiceError(format!("Streaming service not found: {}", context.service)))?
+        let service = streaming_services
+            .get(&context.service)
+            .ok_or_else(|| {
+                RpcError::ServiceError(format!("Streaming service not found: {}", context.service))
+            })?
             .clone();
 
         // Drop the read lock before calling the service
@@ -2157,25 +2219,35 @@ impl RpcServer {
         // Create a stream receiver for requests
         let stream_id = self.next_stream_id.fetch_add(1, Ordering::SeqCst);
         let receiver = RpcStreamReceiver::new(reader, stream_id);
-        
+
         // Call the streaming service and get the response
-        let response = service.client_streaming_call(context, &context.method, receiver).await?;
-        
+        let response = service
+            .client_streaming_call(context, &context.method, receiver)
+            .await?;
+
         // Send the final response
         let response_data = Self::create_success_response(response);
         writer.send_message(response_data).await?;
         writer.close().await?;
-        
+
         Ok(())
     }
-    
+
     /// Process bidirectional streaming request: multiple requests, multiple responses
-    async fn process_bidirectional_streaming_request(&self, context: &RpcContext, reader: StreamReader, writer: StreamWriter) -> RpcResult<()> {
+    async fn process_bidirectional_streaming_request(
+        &self,
+        context: &RpcContext,
+        reader: StreamReader,
+        writer: StreamWriter,
+    ) -> RpcResult<()> {
         let streaming_services = self.streaming_services.read().await;
-        
+
         // Find the streaming service
-        let service = streaming_services.get(&context.service)
-            .ok_or_else(|| RpcError::ServiceError(format!("Streaming service not found: {}", context.service)))?
+        let service = streaming_services
+            .get(&context.service)
+            .ok_or_else(|| {
+                RpcError::ServiceError(format!("Streaming service not found: {}", context.service))
+            })?
             .clone();
 
         // Drop the read lock before calling the service
@@ -2185,73 +2257,90 @@ impl RpcServer {
         let stream_id = self.next_stream_id.fetch_add(1, Ordering::SeqCst);
         let receiver = RpcStreamReceiver::new(reader, stream_id);
         let sink = RpcStreamSink::new(writer, stream_id);
-        
+
         // Call the streaming service
-        service.bidirectional_streaming_call(context, &context.method, receiver, sink).await
+        service
+            .bidirectional_streaming_call(context, &context.method, receiver, sink)
+            .await
     }
-    
+
     /// Parse stream chunk message
     fn _parse_stream_chunk(data: Bytes) -> RpcResult<(Bytes, bool)> {
         let mut data_ref = data.as_ref();
-        let reader = capnp::serialize::read_message_from_flat_slice(&mut data_ref, ReaderOptions::new())
-            .map_err(|e| RpcError::SerializationError(format!("Failed to read stream chunk: {}", e)))?;
+        let reader =
+            capnp::serialize::read_message_from_flat_slice(&mut data_ref, ReaderOptions::new())
+                .map_err(|e| {
+                    RpcError::SerializationError(format!("Failed to read stream chunk: {}", e))
+                })?;
 
-        let rpc_message = reader.get_root::<rpc_message::Reader>()
+        let rpc_message = reader
+            .get_root::<rpc_message::Reader>()
             .map_err(|e| RpcError::SerializationError(format!("Invalid RPC message: {}", e)))?;
 
-        let message_type = rpc_message.get_message_type()
+        let message_type = rpc_message
+            .get_message_type()
             .map_err(|e| RpcError::SerializationError(format!("Invalid message type: {}", e)))?;
 
         if message_type != MessageType::StreamChunk {
-            return Err(RpcError::InvalidParameters("Expected stream chunk message".to_string()));
+            return Err(RpcError::InvalidParameters(
+                "Expected stream chunk message".to_string(),
+            ));
         }
 
-        let chunk_union = rpc_message.which()
+        let chunk_union = rpc_message
+            .which()
             .map_err(|e| RpcError::SerializationError(format!("Invalid union: {}", e)))?;
 
         if let rpc_message::Which::StreamChunk(chunk) = chunk_union {
-            let chunk = chunk
-                .map_err(|e| RpcError::SerializationError(format!("Invalid chunk: {}", e)))?;
+            let chunk =
+                chunk.map_err(|e| RpcError::SerializationError(format!("Invalid chunk: {}", e)))?;
 
-            let data = chunk.get_data()
+            let data = chunk
+                .get_data()
                 .map_err(|e| RpcError::SerializationError(format!("Invalid chunk data: {}", e)))?;
-            
+
             let is_last = chunk.get_is_last();
 
             Ok((Bytes::copy_from_slice(data), is_last))
         } else {
-            Err(RpcError::SerializationError("Expected stream chunk".to_string()))
+            Err(RpcError::SerializationError(
+                "Expected stream chunk".to_string(),
+            ))
         }
     }
-    
+
     /// Create a success response message
     pub fn create_success_response(data: Bytes) -> Bytes {
         let mut message = Builder::new_default();
         let mut rpc_message = message.init_root::<rpc_message::Builder>();
         rpc_message.set_message_type(MessageType::Response);
-        
+
         let mut response = rpc_message.init_response();
         response.set_result(&data);
-        
+
         let serialized = serialize::write_message_to_words(&message);
         Bytes::from(serialized)
     }
-    
+
     /// Create an error response message
-    pub fn create_error_response(request_id: RequestId, error_code: ErrorCode, message: &str) -> Bytes {
+    pub fn create_error_response(
+        request_id: RequestId,
+        error_code: ErrorCode,
+        message: &str,
+    ) -> Bytes {
         let mut msg = Builder::new_default();
         let mut rpc_message = msg.init_root::<rpc_message::Builder>();
         rpc_message.set_message_type(MessageType::Error);
         rpc_message.set_request_id(request_id);
-        
+
         let mut error = rpc_message.init_error();
         error.set_code(error_code);
         error.set_message(message.to_string());
-        
+
         let serialized = serialize::write_message_to_words(&msg);
         Bytes::from(serialized)
     }
-    
+
     /// Convert RpcError to ErrorCode
     pub fn error_to_code(error: &RpcError) -> ErrorCode {
         match error {
@@ -2275,14 +2364,14 @@ impl Default for RpcServer {
 }
 
 /// High-performance RPC client for making remote calls over QUIC
-/// 
+///
 /// The `RpcClient` provides a low-level interface for making RPC calls over QUIC connections
-/// with native support for all streaming patterns. For most use cases, you should use the 
+/// with native support for all streaming patterns. For most use cases, you should use the
 /// generated client stubs created by the `#[rpc_service]` macro, which provide type-safe,
 /// ergonomic interfaces.
-/// 
+///
 /// # Architecture Overview
-/// 
+///
 /// ```text
 /// ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 /// │  Application    │    │                  │    │   RPC Server    │
@@ -2303,16 +2392,16 @@ impl Default for RpcServer {
 ///                        │  └─────────────┘ │
 ///                        └──────────────────┘
 /// ```
-/// 
+///
 /// # Examples
-/// 
+///
 /// ## Basic Client Usage
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::{QuicTransport, TlsConfig};
 /// use quiccrunch_core::rpc::{RpcClient, RpcContext};
 /// use bytes::Bytes;
-/// 
+///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     // Setup transport
@@ -2331,13 +2420,13 @@ impl Default for RpcServer {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Client with Custom Context and Timeouts
-/// 
+///
 /// ```rust,no_run
 /// use std::time::Duration;
 /// use quiccrunch_core::rpc::{RpcContext, RpcClient};
-/// 
+///
 /// async fn make_authenticated_call(client: &RpcClient) -> Result<(), Box<dyn std::error::Error>> {
 ///     let mut context = RpcContext::new("UserService".into(), "getUser".into())
 ///         .with_timeout(Duration::from_secs(5))
@@ -2351,21 +2440,21 @@ impl Default for RpcServer {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Generated Client (Recommended Approach)
-/// 
+///
 /// Instead of using `RpcClient` directly, use generated client stubs for type safety:
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_macros::rpc_service;
-/// 
+///
 /// // Service definition
 /// #[rpc_service(name = "Calculator")]
 /// trait Calculator {
 ///     async fn add(&self, a: i32, b: i32) -> RpcResult<i32>;
 ///     async fn fibonacci(&self, n: u32) -> RpcResult<RpcStreamSource<u64>>;
 /// }
-/// 
+///
 /// // Generated client usage (type-safe, no manual serialization)
 /// async fn use_generated_client(connection: Connection) -> RpcResult<()> {
 ///     let calculator = CalculatorClient::new(connection);
@@ -2383,29 +2472,29 @@ impl Default for RpcServer {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// # Streaming RPC Examples
-/// 
+///
 /// ## Server Streaming - Real-time Data Subscription
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::{RpcClient, RpcStreamReceiver};
 /// use serde::{Serialize, Deserialize};
-/// 
+///
 /// #[derive(Serialize, Deserialize, Debug)]
 /// struct StockPrice {
 ///     symbol: String,
 ///     price: f64,
 ///     timestamp: u64,
 /// }
-/// 
+///
 /// async fn subscribe_to_stock_prices(client: &RpcClient) -> RpcResult<()> {
 ///     let symbols = vec!["AAPL".to_string(), "GOOGL".to_string(), "MSFT".to_string()];
 ///     let params = Bytes::from(serde_json::to_vec(&symbols)?);
 ///     
 ///     let mut price_stream = client.server_streaming_call(
-///         "MarketDataService", 
-///         "subscribe_prices", 
+///         "MarketDataService",
+///         "subscribe_prices",
 ///         params
 ///     ).await?;
 ///     
@@ -2428,12 +2517,12 @@ impl Default for RpcServer {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Client Streaming - Batch File Upload
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::RpcClient;
-/// 
+///
 /// #[derive(Serialize, Deserialize)]
 /// struct FileChunk {
 ///     filename: String,
@@ -2441,7 +2530,7 @@ impl Default for RpcServer {
 ///     data: Vec<u8>,
 ///     checksum: u32,
 /// }
-/// 
+///
 /// #[derive(Serialize, Deserialize)]
 /// struct UploadResult {
 ///     filename: String,
@@ -2449,10 +2538,10 @@ impl Default for RpcServer {
 ///     chunks_uploaded: u64,
 ///     server_checksum: String,
 /// }
-/// 
+///
 /// async fn upload_file(client: &RpcClient, file_path: &str) -> RpcResult<UploadResult> {
 ///     let (sink, response_future) = client.client_streaming_call(
-///         "FileService", 
+///         "FileService",
 ///         "upload_file"
 ///     ).await?;
 ///     
@@ -2496,28 +2585,28 @@ impl Default for RpcServer {
 ///     let response_data = response_future.await?;
 ///     let result: UploadResult = serde_json::from_slice(&response_data)?;
 ///     
-///     println!("✅ Upload successful: {} chunks, server checksum: {}", 
+///     println!("✅ Upload successful: {} chunks, server checksum: {}",
 ///         result.chunks_uploaded, result.server_checksum);
 ///     
 ///     Ok(result)
 /// }
 /// ```
-/// 
+///
 /// ## Bidirectional Streaming - Interactive Chat
-/// 
+///
 /// ```rust,no_run
 /// use tokio::io::{self, AsyncBufReadExt, BufReader};
-/// 
+///
 /// #[derive(Serialize, Deserialize, Debug)]
 /// struct ChatMessage {
 ///     user: String,
 ///     message: String,
 ///     timestamp: u64,
 /// }
-/// 
+///
 /// async fn interactive_chat(client: &RpcClient, username: String) -> RpcResult<()> {
 ///     let (input_sink, mut output_stream) = client.bidirectional_streaming_call(
-///         "ChatService", 
+///         "ChatService",
 ///         "join_chat"
 ///     ).await?;
 ///     
@@ -2586,15 +2675,15 @@ impl Default for RpcServer {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// # Advanced Usage Patterns
-/// 
+///
 /// ## Connection Pooling
-/// 
+///
 /// ```rust,no_run
 /// use quiccrunch_core::rpc::RpcConnectionPool;
 /// use std::sync::Arc;
-/// 
+///
 /// async fn setup_connection_pool() -> Result<Arc<RpcConnectionPool>, Box<dyn std::error::Error>> {
 ///     let tls_config = TlsConfig::load_ca_cert("ca.crt")?;
 ///     let transport = QuicTransport::new(tls_config)?;
@@ -2609,7 +2698,7 @@ impl Default for RpcServer {
 ///     let pool = Arc::new(RpcConnectionPool::new(connections));
 ///     Ok(pool)
 /// }
-/// 
+///
 /// async fn use_pooled_client(pool: Arc<RpcConnectionPool>) -> RpcResult<()> {
 ///     // Get client from pool (automatically load-balanced)
 ///     let client = pool.get_client()
@@ -2622,12 +2711,12 @@ impl Default for RpcServer {
 ///     Ok(())
 /// }
 /// ```
-/// 
+///
 /// ## Concurrent RPC Calls
-/// 
+///
 /// ```rust,no_run
 /// use futures::future::try_join_all;
-/// 
+///
 /// async fn parallel_requests(client: &RpcClient) -> RpcResult<Vec<String>> {
 ///     // Launch multiple RPC calls concurrently
 ///     let futures = (0..10).map(|i| {
@@ -2646,16 +2735,16 @@ impl Default for RpcServer {
 ///     Ok(strings)
 /// }
 /// ```
-/// 
+///
 /// ## Request/Response Middleware
-/// 
+///
 /// ```rust,no_run
 /// struct MiddlewareClient {
 ///     inner: RpcClient,
 ///     auth_token: Option<String>,
 ///     metrics: Arc<ClientMetrics>,
 /// }
-/// 
+///
 /// impl MiddlewareClient {
 ///     async fn call_with_middleware(&self, service: &str, method: &str, params: Bytes) -> RpcResult<Bytes> {
 ///         let start_time = std::time::Instant::now();
@@ -2683,13 +2772,13 @@ impl Default for RpcServer {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// ## Circuit Breaker Pattern
-/// 
+///
 /// ```rust,no_run
 /// use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 /// use std::time::{Instant, Duration};
-/// 
+///
 /// struct CircuitBreakerClient {
 ///     inner: RpcClient,
 ///     failure_count: AtomicU32,
@@ -2698,7 +2787,7 @@ impl Default for RpcServer {
 ///     failure_threshold: u32,
 ///     timeout: Duration,
 /// }
-/// 
+///
 /// impl CircuitBreakerClient {
 ///     async fn call_with_circuit_breaker(&self, service: &str, method: &str, params: Bytes) -> RpcResult<Bytes> {
 ///         // Check if circuit is open
@@ -2744,32 +2833,32 @@ impl Default for RpcServer {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Connection Management
-/// 
+///
 /// ## Connection Lifecycle
 /// - Each `RpcClient` instance uses a single QUIC connection
 /// - QUIC connections multiplex many concurrent RPC calls over different streams
 /// - Connections are automatically maintained with keep-alive mechanisms
 /// - Connections are cleaned up when the client is dropped
-/// 
+///
 /// ## Connection Reuse
 /// ```rust,no_run
 /// // ✅ Good: Reuse client for multiple calls
 /// let client = RpcClient::new(connection);
-/// 
+///
 /// for i in 0..100 {
 ///     let result = client.call("Service", "method", params.clone()).await?;
 ///     // Process result...
 /// }
-/// 
+///
 /// // ❌ Bad: Creating new client for each call
 /// for i in 0..100 {
 ///     let client = RpcClient::new(connection.clone()); // Expensive!
 ///     let result = client.call("Service", "method", params.clone()).await?;
 /// }
 /// ```
-/// 
+///
 /// ## Connection Health Monitoring
 /// ```rust,no_run
 /// impl RpcClient {
@@ -2788,34 +2877,34 @@ impl Default for RpcServer {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Performance Characteristics
-/// 
+///
 /// ## Throughput and Latency
 /// - **Concurrent calls**: Thousands of simultaneous RPC calls per connection
 /// - **Latency**: Sub-millisecond for local calls, optimized for network latency  
 /// - **Throughput**: Millions of RPC calls per second on modern hardware
 /// - **Streaming**: Gigabits per second streaming throughput
-/// 
+///
 /// ## Memory Usage
 /// - **Connection overhead**: ~100KB per connection
 /// - **Per-call overhead**: ~1KB per active RPC call
 /// - **Streaming overhead**: Bounded buffering, configurable limits
 /// - **Zero-copy**: Serialization avoided where possible
-/// 
+///
 /// ## CPU Usage
 /// - **Serialization**: Efficient serde-based serialization
 /// - **Network I/O**: Async I/O with minimal context switching
 /// - **QUIC processing**: Hardware-accelerated where available
-/// 
+///
 /// # Thread Safety
-/// 
+///
 /// `RpcClient` is thread-safe and can be cloned cheaply. Each clone shares the same
 /// underlying connection but maintains independent request ID sequences.
-/// 
+///
 /// ```rust,no_run
 /// use std::sync::Arc;
-/// 
+///
 /// async fn shared_client_usage(client: Arc<RpcClient>) {
 ///     // Spawn multiple tasks sharing the same client
 ///     let mut handles = Vec::new();
@@ -2838,11 +2927,11 @@ impl Default for RpcServer {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// # Error Handling
-/// 
+///
 /// ## Comprehensive Error Handling
-/// 
+///
 /// ```rust,no_run
 /// async fn robust_rpc_call(client: &RpcClient) -> Result<String, Box<dyn std::error::Error>> {
 ///     let params = Bytes::from(r#"{"key": "value"}"#);
@@ -2880,9 +2969,9 @@ impl Default for RpcServer {
 ///     }
 /// }
 /// ```
-/// 
+///
 /// ## Retry Logic
-/// 
+///
 /// ```rust,no_run
 /// async fn call_with_retry(
 ///     client: &RpcClient,
@@ -2901,7 +2990,7 @@ impl Default for RpcServer {
 ///                 
 ///                 // Don't retry on certain errors
 ///                 match e {
-///                     RpcError::MethodNotFound(_) | 
+///                     RpcError::MethodNotFound(_) |
 ///                     RpcError::InvalidParameters(_) |
 ///                     RpcError::SerializationError(_) => break,
 ///                     _ => {}
@@ -2918,7 +3007,7 @@ impl Default for RpcServer {
 ///     Err(last_error.unwrap())
 /// }
 /// ```
-/// 
+///
 /// The `RpcClient` provides a robust foundation for building distributed applications
 /// with excellent performance, reliability, and developer experience.
 pub struct RpcClient {
@@ -2934,24 +3023,28 @@ impl RpcClient {
             next_request_id: AtomicU64::new(1),
         }
     }
-    
+
     /// Call an RPC method with context  
-    pub async fn call_with_context(&mut self, context: &mut RpcContext, params: Bytes) -> RpcResult<Bytes> {
+    pub async fn call_with_context(
+        &mut self,
+        context: &mut RpcContext,
+        params: Bytes,
+    ) -> RpcResult<Bytes> {
         let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
         context.request_id = request_id;
-        
+
         // Create the actual call future
         let call_future = async {
             // Create Cap'n Proto request
             let request_data = self.create_request(context, params)?;
-            
+
             // Send request and receive response using the stream directly
             self.stream.send_message(request_data).await?;
-            
+
             let response_data = self.stream.receive_message().await?;
             self.parse_response(response_data)
         };
-        
+
         // Apply timeout if specified
         if let Some(timeout_duration) = context.timeout {
             match tokio::time::timeout(timeout_duration, call_future).await {
@@ -2962,134 +3055,178 @@ impl RpcClient {
             call_future.await
         }
     }
-    
+
     /// Simple call with service and method names
     pub async fn call(&mut self, service: &str, method: &str, params: Bytes) -> RpcResult<Bytes> {
         let mut context = RpcContext::new(service.to_string(), method.to_string());
         self.call_with_context(&mut context, params).await
     }
-    
+
     /// Server streaming call: single request, multiple responses
-    pub async fn server_streaming_call(&mut self, service: &str, method: &str, params: Bytes) -> RpcResult<RpcStreamReceiver> {
+    pub async fn server_streaming_call(
+        &mut self,
+        service: &str,
+        method: &str,
+        params: Bytes,
+    ) -> RpcResult<RpcStreamReceiver> {
         let mut context = RpcContext::new(service.to_string(), method.to_string());
         context.request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
-        
+
         // Create streaming request
-        let request_data = self.create_streaming_request(&context, params, StreamingType::ServerStreaming)?;
-        
+        let request_data =
+            self.create_streaming_request(&context, params, StreamingType::ServerStreaming)?;
+
         // Open stream and send request
-        let mut stream = self.stream.open_bi().await?;
+        let stream = self.stream.open_bi().await?;
         let split_stream = stream.into_split_stream();
         let (reader, writer) = split_stream.split();
-        
+
         writer.send_message(request_data).await?;
-        
+
         // Return receiver for streaming responses
         Ok(RpcStreamReceiver::new(reader, 0))
     }
-    
+
     /// Client streaming call: multiple requests, single response
-    pub async fn client_streaming_call(&mut self, service: &str, method: &str) -> RpcResult<(RpcStreamSink, impl std::future::Future<Output = RpcResult<Bytes>>)> {
+    pub async fn client_streaming_call(
+        &mut self,
+        service: &str,
+        method: &str,
+    ) -> RpcResult<(
+        RpcStreamSink,
+        impl std::future::Future<Output = RpcResult<Bytes>>,
+    )> {
         let mut context = RpcContext::new(service.to_string(), method.to_string());
         context.request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
-        
+
         // Create streaming request
-        let request_data = self.create_streaming_request(&context, Bytes::new(), StreamingType::ClientStreaming)?;
-        
+        let request_data =
+            self.create_streaming_request(&context, Bytes::new(), StreamingType::ClientStreaming)?;
+
         // Open stream and send initial request
-        let mut stream = self.stream.open_bi().await?;
+        let stream = self.stream.open_bi().await?;
         let split_stream = stream.into_split_stream();
         let (reader, writer) = split_stream.split();
-        
+
         writer.send_message(request_data).await?;
-        
+
         // Create sink for sending data and a future for the final response
         let sink = RpcStreamSink::new(writer, 0);
         let response_future = async move {
-            let response_data = reader.receive_message().await
+            let response_data = reader
+                .receive_message()
+                .await
                 .map_err(|e| RpcError::Transport(e.to_string()))?;
             // Parse response logic would go here - simplified for now
             Ok(response_data)
         };
-        
+
         Ok((sink, response_future))
     }
-    
+
     /// Bidirectional streaming call: multiple requests, multiple responses
-    pub async fn bidirectional_streaming_call(&mut self, service: &str, method: &str) -> RpcResult<(RpcStreamSink, RpcStreamReceiver)> {
+    pub async fn bidirectional_streaming_call(
+        &mut self,
+        service: &str,
+        method: &str,
+    ) -> RpcResult<(RpcStreamSink, RpcStreamReceiver)> {
         let mut context = RpcContext::new(service.to_string(), method.to_string());
         context.request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
-        
+
         // Create streaming request
-        let request_data = self.create_streaming_request(&context, Bytes::new(), StreamingType::BidirectionalStreaming)?;
-        
+        let request_data = self.create_streaming_request(
+            &context,
+            Bytes::new(),
+            StreamingType::BidirectionalStreaming,
+        )?;
+
         // Open stream and send initial request
-        let mut stream = self.stream.open_bi().await?;
+        let stream = self.stream.open_bi().await?;
         let split_stream = stream.into_split_stream();
         let (reader, writer) = split_stream.split();
-        
+
         writer.send_message(request_data).await?;
-        
+
         // Return both sink and receiver
         let sink = RpcStreamSink::new(writer, 0);
         let receiver = RpcStreamReceiver::new(reader, 0);
-        
+
         Ok((sink, receiver))
     }
-    
+
     fn create_request(&self, context: &RpcContext, params: Bytes) -> RpcResult<Bytes> {
         self.create_streaming_request(context, params, StreamingType::Unary)
     }
-    
-    fn create_streaming_request(&self, context: &RpcContext, params: Bytes, streaming_type: StreamingType) -> RpcResult<Bytes> {
+
+    fn create_streaming_request(
+        &self,
+        context: &RpcContext,
+        params: Bytes,
+        streaming_type: StreamingType,
+    ) -> RpcResult<Bytes> {
         let mut message = Builder::new_default();
         let mut rpc_message = message.init_root::<rpc_message::Builder>();
         rpc_message.set_message_type(MessageType::Request);
         rpc_message.set_request_id(context.request_id);
-        
+
         let mut request = rpc_message.init_request();
         request.set_service(context.service.as_str());
         request.set_method(context.method.as_str());
         request.set_parameters(&params);
         request.set_streaming_type(streaming_type);
-        
+
         let serialized = serialize::write_message_to_words(&message);
         Ok(Bytes::from(serialized))
     }
-    
+
     fn parse_response(&self, data: Bytes) -> RpcResult<Bytes> {
         let mut data_ref = data.as_ref();
-        let reader = capnp::serialize::read_message_from_flat_slice(&mut data_ref, ReaderOptions::new())
-            .map_err(|e| RpcError::SerializationError(format!("Failed to read response: {}", e)))?;
-        
-        let rpc_message = reader.get_root::<rpc_message::Reader>()
+        let reader =
+            capnp::serialize::read_message_from_flat_slice(&mut data_ref, ReaderOptions::new())
+                .map_err(|e| {
+                    RpcError::SerializationError(format!("Failed to read response: {}", e))
+                })?;
+
+        let rpc_message = reader
+            .get_root::<rpc_message::Reader>()
             .map_err(|e| RpcError::SerializationError(format!("Invalid RPC message: {}", e)))?;
-        
-        let message_type = rpc_message.get_message_type()
+
+        let message_type = rpc_message
+            .get_message_type()
             .map_err(|e| RpcError::SerializationError(format!("Invalid message type: {}", e)))?;
-        
+
         match message_type {
             MessageType::Response => {
-                let response_union = rpc_message.which()
+                let response_union = rpc_message
+                    .which()
                     .map_err(|e| RpcError::SerializationError(format!("Invalid union: {}", e)))?;
                 if let rpc_message::Which::Response(response) = response_union {
-                    let response = response
-                        .map_err(|e| RpcError::SerializationError(format!("Invalid response: {}", e)))?;
-                    let result_data = response.get_result()
-                        .map_err(|e| RpcError::SerializationError(format!("Invalid response data: {}", e)))?;
+                    let response = response.map_err(|e| {
+                        RpcError::SerializationError(format!("Invalid response: {}", e))
+                    })?;
+                    let result_data = response.get_result().map_err(|e| {
+                        RpcError::SerializationError(format!("Invalid response data: {}", e))
+                    })?;
                     Ok(Bytes::copy_from_slice(result_data))
                 } else {
-                    Err(RpcError::SerializationError("Expected response".to_string()))
+                    Err(RpcError::SerializationError(
+                        "Expected response".to_string(),
+                    ))
                 }
             }
             MessageType::Error => {
-                let error_union = rpc_message.which()
+                let error_union = rpc_message
+                    .which()
                     .map_err(|e| RpcError::SerializationError(format!("Invalid union: {}", e)))?;
                 if let rpc_message::Which::Error(error) = error_union {
-                    let error = error
-                        .map_err(|e| RpcError::SerializationError(format!("Invalid error: {}", e)))?;
-                    let error_message = error.get_message()
-                        .map_err(|e| RpcError::SerializationError(format!("Invalid error message: {}", e)))?
+                    let error = error.map_err(|e| {
+                        RpcError::SerializationError(format!("Invalid error: {}", e))
+                    })?;
+                    let error_message = error
+                        .get_message()
+                        .map_err(|e| {
+                            RpcError::SerializationError(format!("Invalid error message: {}", e))
+                        })?
                         .to_string()
                         .unwrap_or_else(|_| "Unknown error".to_string());
                     Err(RpcError::ServiceError(error_message))
@@ -3097,7 +3234,9 @@ impl RpcClient {
                     Err(RpcError::SerializationError("Expected error".to_string()))
                 }
             }
-            _ => Err(RpcError::SerializationError("Unexpected message type".to_string())),
+            _ => Err(RpcError::SerializationError(
+                "Unexpected message type".to_string(),
+            )),
         }
     }
 }
@@ -3115,13 +3254,14 @@ impl RpcConnectionPool {
             next_connection: AtomicU64::new(0),
         }
     }
-    
+
     pub fn get_client(&self) -> Option<RpcClient> {
         if self.connections.is_empty() {
             return None;
         }
-        
-        let index = self.next_connection.fetch_add(1, Ordering::SeqCst) as usize % self.connections.len();
+
+        let index =
+            self.next_connection.fetch_add(1, Ordering::SeqCst) as usize % self.connections.len();
         self.connections.get(index).cloned().map(RpcClient::new)
     }
 }
@@ -3135,11 +3275,13 @@ impl PooledRpcClient {
     pub fn new(pool: Arc<RpcConnectionPool>) -> Self {
         Self { pool }
     }
-    
+
     pub async fn call(&self, service: &str, method: &str, params: Bytes) -> RpcResult<Bytes> {
         match self.pool.get_client() {
             Some(mut client) => client.call(service, method, params).await,
-            None => Err(RpcError::ServiceUnavailable("No available connections in pool".to_string())),
+            None => Err(RpcError::ServiceUnavailable(
+                "No available connections in pool".to_string(),
+            )),
         }
     }
-    }
+}

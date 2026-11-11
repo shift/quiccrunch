@@ -1,8 +1,8 @@
+use bytes::Bytes;
 use quiccrunch_core::transport::async_bridge::AsyncTquicServer;
-use std::time::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use bytes::Bytes;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     } else {
         "quiccrunch-core/tests/certs/cert.pem".to_string()
     };
-    
+
     let key_file = if args.len() > 3 {
         args[3].clone()
     } else {
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let bind_addr: std::net::SocketAddr = addr.parse()?;
     let server = AsyncTquicServer::new(bind_addr, cert_file, key_file).await?;
     let mut listener = server.listen().await?;
-    
+
     log::info!("Server listening on {}", addr);
 
     let connection_counter = Arc::new(AtomicU64::new(0));
@@ -44,27 +44,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match listener.accept().await {
             Ok(mut stream) => {
                 let conn_id = connection_counter.fetch_add(1, Ordering::Relaxed);
-                
+
                 log::debug!("Connection #{} accepted", conn_id);
-                
+
                 tokio::spawn(async move {
                     let mut message_count = 0u64;
                     let mut total_bytes = 0usize;
-                    
+
                     loop {
                         match stream.receive_message().await {
                             Ok(data) => {
                                 if data.is_empty() {
                                     break;
                                 }
-                                
+
                                 message_count += 1;
                                 total_bytes += data.len();
-                                
-                                log::trace!("Connection #{}: received {} bytes (message #{})", 
-                                           conn_id, data.len(), message_count);
-                                
-                                let response = format!("Echo: {}", String::from_utf8_lossy(&data)).into_bytes();
+
+                                log::trace!(
+                                    "Connection #{}: received {} bytes (message #{})",
+                                    conn_id,
+                                    data.len(),
+                                    message_count
+                                );
+
+                                let response = format!("Echo: {}", String::from_utf8_lossy(&data))
+                                    .into_bytes();
                                 if let Err(e) = stream.send_message(Bytes::from(response)).await {
                                     log::error!("Connection #{}: send error: {}", conn_id, e);
                                     break;
@@ -76,10 +81,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             }
                         }
                     }
-                    
-                    log::debug!("Connection #{}: processed {} messages, {} bytes total", 
-                               conn_id, message_count, total_bytes);
-                    
+
+                    log::debug!(
+                        "Connection #{}: processed {} messages, {} bytes total",
+                        conn_id,
+                        message_count,
+                        total_bytes
+                    );
+
                     let _ = stream.close().await;
                 });
             }

@@ -1,13 +1,13 @@
 use dashmap::DashMap;
 use mio::Waker;
 use std::collections::VecDeque;
-use std::sync::{    atomic::{AtomicU64, AtomicUsize, Ordering},
-    Arc,
-    Mutex,
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    Arc, Mutex,
 };
-use tokio::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 use crate::transport::worker::TquicWorker;
 
@@ -19,6 +19,8 @@ use crate::transport::messages::{
 #[derive(Debug)]
 pub struct TquicWorkerPool {
     workers: Vec<TquicWorkerHandle>,
+    /// Retained for the pending round-robin fast path.
+    #[allow(dead_code)]
     next_worker: AtomicUsize,
     connection_map: Arc<DashMap<ConnectionId, usize>>, // connection_id -> worker_index
     next_connection_id: AtomicU64,
@@ -32,8 +34,12 @@ pub struct TquicWorkerHandle {
     worker_id: usize,
     command_tx: mpsc::Sender<TquicCommand>,
     waker: Option<Arc<Waker>>,
+    /// Kept alive so the worker thread is joined on pool shutdown.
+    #[allow(dead_code)]
     join_handle: JoinHandle<()>,
     is_healthy: Arc<std::sync::atomic::AtomicBool>,
+    /// Shared worker statistics, retained for diagnostics.
+    #[allow(dead_code)]
     stats: Arc<std::sync::RwLock<WorkerStats>>,
 }
 
@@ -44,7 +50,7 @@ struct LoadBalancer {
     last_selected: AtomicUsize,
 }
 
-/// Performance monitor for tracking worker pool efficiency 
+/// Performance monitor for tracking worker pool efficiency
 #[derive(Debug)]
 struct PerformanceMonitor {
     start_time: Instant,
@@ -59,52 +65,52 @@ impl LoadBalancer {
         for _ in 0..worker_count {
             worker_loads.push(Arc::new(AtomicUsize::new(0)));
         }
-        
+
         Self {
             worker_loads,
             last_selected: AtomicUsize::new(0),
         }
     }
-    
+
     /// Select the best worker based on current load and health
     fn select_worker(&self, worker_handles: &[TquicWorkerHandle]) -> usize {
         let worker_count = self.worker_loads.len();
-        
+
         // Find worker with minimum load that is healthy
         let mut min_load = usize::MAX;
         let mut best_worker = 0;
-        
-        for i in 0..worker_count {
-            if !worker_handles[i].is_healthy.load(Ordering::Relaxed) {
+
+        for (i, handle) in worker_handles.iter().enumerate().take(worker_count) {
+            if !handle.is_healthy.load(Ordering::Relaxed) {
                 continue; // Skip unhealthy workers
             }
-            
+
             let current_load = self.worker_loads[i].load(Ordering::Relaxed);
             if current_load < min_load {
                 min_load = current_load;
                 best_worker = i;
             }
         }
-        
+
         // If all workers have the same load, use round-robin
         if min_load == usize::MAX {
             // All workers are unhealthy, fallback to round-robin
             best_worker = self.last_selected.fetch_add(1, Ordering::Relaxed) % worker_count;
         }
-        
+
         // Increment selected worker's load
         self.worker_loads[best_worker].fetch_add(1, Ordering::Relaxed);
-        
+
         best_worker
     }
-    
+
     /// Decrement worker load when a connection closes
     fn release_worker_load(&self, worker_id: usize) {
         if worker_id < self.worker_loads.len() {
             self.worker_loads[worker_id].fetch_sub(1, Ordering::Relaxed);
         }
     }
-    
+
     /// Get current worker load distribution
     fn get_load_distribution(&self) -> Vec<usize> {
         self.worker_loads
@@ -120,7 +126,7 @@ impl PerformanceMonitor {
         for i in 0..worker_count {
             socket_distribution_stats.insert(i, AtomicUsize::new(0));
         }
-        
+
         Self {
             start_time: Instant::now(),
             total_connections: AtomicUsize::new(0),
@@ -128,31 +134,33 @@ impl PerformanceMonitor {
             socket_distribution_stats,
         }
     }
-    
+
     fn record_command(&self) {
         self.total_commands.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_connection(&self) {
         self.total_connections.fetch_add(1, Ordering::Relaxed);
     }
-    
+
+    #[allow(dead_code)]
     fn record_packet_for_worker(&self, worker_id: usize) {
         if let Some(counter) = self.socket_distribution_stats.get(&worker_id) {
             counter.fetch_add(1, Ordering::Relaxed);
         }
     }
-    
+
     fn get_performance_metrics(&self) -> PerformanceMetrics {
         let uptime = self.start_time.elapsed();
         let total_connections = self.total_connections.load(Ordering::Relaxed);
         let total_commands = self.total_commands.load(Ordering::Relaxed);
-        
-        let distribution = self.socket_distribution_stats
+
+        let distribution = self
+            .socket_distribution_stats
             .iter()
             .map(|entry| (*entry.key(), entry.value().load(Ordering::Relaxed)))
             .collect();
-        
+
         PerformanceMetrics {
             uptime,
             total_connections,
@@ -185,7 +193,7 @@ pub struct SocketDistributionAnalysis {
     pub fairness_score: f64, // 1.0 = perfectly fair, 0.0 = completely unfair
     pub per_worker_packets: Vec<(usize, usize)>, // (worker_id, packet_count)
     pub load_distribution: Vec<usize>, // Current load per worker
-    pub is_balanced: bool, // True if distribution is considered fair
+    pub is_balanced: bool,   // True if distribution is considered fair
 }
 impl TquicWorkerPool {
     pub fn new(worker_count: usize, base_config: WorkerConfig) -> Result<Self, TransportError> {
@@ -197,12 +205,12 @@ impl TquicWorkerPool {
 
         let mut workers = Vec::with_capacity(worker_count);
         let connection_map = Arc::new(DashMap::new());
-        
+
         // Create shared pending trace IDs queue for accept load balancing
         // This allows any worker to accept connections that arrive on any worker's socket
         // (due to SO_REUSEPORT kernel load balancing)
         let shared_pending_trace_ids = Arc::new(Mutex::new(VecDeque::new()));
-        
+
         // Initialize performance monitoring and load balancing
         let load_balancer = LoadBalancer::new(worker_count);
         let performance_monitor = PerformanceMonitor::new(worker_count);
@@ -219,7 +227,7 @@ impl TquicWorkerPool {
             let (event_tx, _event_rx) = mpsc::channel::<TquicEvent>(100);
             let is_healthy = Arc::new(std::sync::atomic::AtomicBool::new(true));
             let is_healthy_clone = is_healthy.clone();
-            
+
             // Initialize worker stats
             let worker_stats = Arc::new(std::sync::RwLock::new(WorkerStats {
                 worker_id,
@@ -240,7 +248,12 @@ impl TquicWorkerPool {
                 .spawn(move || {
                     eprintln!("[worker-{}] Thread started", worker_id);
                     // Create and run real TquicWorker with shared pending trace IDs
-                    let mut worker = match TquicWorker::new(config, command_rx, Some(event_tx_clone), Some(shared_pending_trace_ids_clone)) {
+                    let mut worker = match TquicWorker::new(
+                        config,
+                        command_rx,
+                        Some(event_tx_clone),
+                        Some(shared_pending_trace_ids_clone),
+                    ) {
                         Ok(w) => {
                             eprintln!("[worker-{}] Worker created successfully", worker_id);
                             w
@@ -251,7 +264,7 @@ impl TquicWorkerPool {
                             return;
                         }
                     };
-                    
+
                     eprintln!("[worker-{}] Starting worker.run()", worker_id);
                     if let Err(e) = worker.run() {
                         eprintln!("[worker-{}] Worker.run() failed: {}", worker_id, e);
@@ -292,12 +305,16 @@ impl TquicWorkerPool {
     pub async fn submit_command(&self, mut cmd: TquicCommand) -> Result<(), TransportError> {
         // Record command for performance monitoring
         self.performance_monitor.record_command();
-        
+
         // Pre-assign connection_id for Connect commands
-        if let TquicCommand::Connect { ref mut connection_id, .. } = cmd {
+        if let TquicCommand::Connect {
+            ref mut connection_id,
+            ..
+        } = cmd
+        {
             *connection_id = self.next_connection_id();
         }
-        
+
         let worker_id = self.select_worker(&cmd);
 
         if worker_id >= self.workers.len() {
@@ -311,7 +328,7 @@ impl TquicWorkerPool {
         // Check if worker is healthy
         if !worker.is_healthy.load(Ordering::Relaxed) {
             // Try to restart the worker before failing
-            if let Err(_) = self.restart_worker(worker_id) {
+            if self.restart_worker(worker_id).is_err() {
                 return Err(TransportError::ConnectionFailed(
                     "Worker is unhealthy and restart failed".into(),
                 ));
@@ -356,25 +373,29 @@ impl TquicWorkerPool {
     pub fn get_performance_metrics(&self) -> PerformanceMetrics {
         self.performance_monitor.get_performance_metrics()
     }
-    
+
     /// Get load distribution across workers
     pub fn get_load_distribution(&self) -> Vec<usize> {
         self.load_balancer.get_load_distribution()
     }
-    
+
     /// Check if SO_REUSEPORT is distributing load evenly
     pub fn analyze_socket_distribution(&self) -> SocketDistributionAnalysis {
         let metrics = self.get_performance_metrics();
         let load_distribution = self.get_load_distribution();
-        
+
         // Calculate distribution fairness
-        let total_packets: usize = metrics.socket_distribution.iter().map(|(_, count)| *count).sum();
+        let total_packets: usize = metrics
+            .socket_distribution
+            .iter()
+            .map(|(_, count)| *count)
+            .sum();
         let worker_count = self.worker_count;
         let expected_per_worker = total_packets as f64 / worker_count as f64;
-        
+
         let mut max_deviation = 0.0;
         let mut distribution_score = 0.0;
-        
+
         for &(_, packet_count) in &metrics.socket_distribution {
             let deviation = (packet_count as f64 - expected_per_worker).abs() / expected_per_worker;
             if deviation > max_deviation {
@@ -382,9 +403,9 @@ impl TquicWorkerPool {
             }
             distribution_score += deviation * deviation; // Squared deviation for fairness metric
         }
-        
+
         distribution_score = (distribution_score / worker_count as f64).sqrt();
-        
+
         SocketDistributionAnalysis {
             total_packets,
             worker_count,
@@ -400,7 +421,7 @@ impl TquicWorkerPool {
     pub async fn shutdown(&self, timeout: Duration) -> Result<(), TransportError> {
         // Send shutdown commands to all workers
         for worker in &self.workers {
-            let _ = worker.command_tx.send(TquicCommand::Shutdown);
+            let _ = worker.command_tx.send(TquicCommand::Shutdown).await;
         }
 
         // Wait for workers to finish or timeout
@@ -523,14 +544,13 @@ impl TquicWorkerPool {
             })
             .collect()
     }
-
 }
 
 impl Drop for TquicWorkerPool {
     fn drop(&mut self) {
         // Send shutdown commands
         for worker in &self.workers {
-            let _ = worker.command_tx.send(TquicCommand::Shutdown);
+            let _ = worker.command_tx.try_send(TquicCommand::Shutdown);
         }
 
         // Note: We can't easily wait for threads to finish in Drop

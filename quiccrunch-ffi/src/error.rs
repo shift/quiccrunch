@@ -1,45 +1,43 @@
-
-
 /// Error codes for QuicCrunch FFI operations
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuicError {
     /// Operation completed successfully
     Success = 0,
-    
+
     /// Generic error occurred
     Error = 1,
-    
+
     /// Invalid argument passed to function
     InvalidArgument = 2,
-    
+
     /// Connection failed
     ConnectionFailed = 3,
-    
+
     /// Operation timed out
     TimeoutError = 4,
-    
+
     /// Serialization/deserialization error
     SerializationError = 5,
-    
+
     /// TLS/certificate error
     TlsError = 6,
-    
+
     /// Address parsing error
     AddressError = 7,
-    
+
     /// Out of memory
     OutOfMemory = 8,
-    
+
     /// Invalid handle/pointer
     InvalidHandle = 9,
-    
+
     /// Operation would block (for non-blocking operations)
     WouldBlock = 10,
-    
+
     /// Stream was closed
     StreamClosed = 11,
-    
+
     /// Not implemented
     NotImplemented = 12,
 }
@@ -86,14 +84,16 @@ impl From<serde_json::Error> for QuicError {
 }
 
 /// Convert a Rust Result to a C-style error code, storing the Ok value in an out parameter
-pub fn result_to_c_error<T, E>(result: Result<T, E>, out: *mut T) -> QuicError 
-where 
-    E: Into<QuicError>
+pub fn result_to_c_error<T, E>(result: Result<T, E>, out: *mut T) -> QuicError
+where
+    E: Into<QuicError>,
 {
     match result {
         Ok(value) => {
             if !out.is_null() {
-                unsafe { std::ptr::write(out, value); }
+                unsafe {
+                    std::ptr::write(out, value);
+                }
             }
             QuicError::Success
         }
