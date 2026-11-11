@@ -56,11 +56,7 @@ impl SpiffeIdentityInterceptor {
 
 #[async_trait]
 impl Interceptor for SpiffeIdentityInterceptor {
-    async fn before_request(
-        &self,
-        context: &mut RpcContext,
-        _params: &mut Bytes,
-    ) -> RpcResult<()> {
+    async fn before_request(&self, context: &mut RpcContext, _params: &mut Bytes) -> RpcResult<()> {
         let identity = Self::identity_for(context).map_err(|e| {
             RpcError::PermissionDenied(format!("invalid peer SPIFFE identity: {e}"))
         })?;
@@ -87,10 +83,8 @@ mod tests {
     fn context(service: &str, method: &str, identity: Option<&str>) -> RpcContext {
         let mut ctx = RpcContext::new(service.to_string(), method.to_string());
         if let Some(identity) = identity {
-            ctx.metadata.insert(
-                PEER_SPIFFE_ID_METADATA.to_string(),
-                identity.to_string(),
-            );
+            ctx.metadata
+                .insert(PEER_SPIFFE_ID_METADATA.to_string(), identity.to_string());
         }
         ctx
     }
@@ -104,7 +98,11 @@ mod tests {
         );
         let interceptor = SpiffeIdentityInterceptor::new(policy);
 
-        let mut ctx = context("Raft", "AppendEntries", Some("spiffe://cluster.local/ns/kv/sa/raft"));
+        let mut ctx = context(
+            "Raft",
+            "AppendEntries",
+            Some("spiffe://cluster.local/ns/kv/sa/raft"),
+        );
         interceptor
             .before_request(&mut ctx, &mut Bytes::new())
             .await
@@ -120,7 +118,11 @@ mod tests {
         );
         let interceptor = SpiffeIdentityInterceptor::new(policy);
 
-        let mut ctx = context("Raft", "AppendEntries", Some("spiffe://cluster.local/ns/other/sa/rogue"));
+        let mut ctx = context(
+            "Raft",
+            "AppendEntries",
+            Some("spiffe://cluster.local/ns/other/sa/rogue"),
+        );
         let err = interceptor
             .before_request(&mut ctx, &mut Bytes::new())
             .await

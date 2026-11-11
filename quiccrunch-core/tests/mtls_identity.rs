@@ -4,6 +4,8 @@
 //! the repository or the platform trust store. These tests exercise the real
 //! tQUIC adapter and BoringSSL handshake, not a mock.
 
+#![cfg(feature = "tls")]
+
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;

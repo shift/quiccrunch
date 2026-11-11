@@ -50,11 +50,13 @@ no-default-features = true
 
 [lib]
 name = "tquic"
-crate-type = [
-    "lib",
-    "staticlib",
-    "cdylib",
-]
+# Vendored as a path dependency, QuicCrunch uses only the Rust API. Building
+# staticlib/cdylib as well makes cargo emit unhashed libtquic.{a,so,rlib}
+# artifacts; when the crate is compiled for more than one profile (dev + test,
+# or --all-targets) those files overwrite each other and dependents can link
+# against a rlib built with a different crate disambiguator. Restrict the
+# vendored crate to `lib` so every artifact keeps its metadata hash.
+crate-type = ["lib"]
 path = "src/lib.rs"
 
 [[bench]]

@@ -475,12 +475,29 @@ enum TquicEvent {
     },
     /// A connection reached `on_conn_established` but was rejected by the
     /// application identity policy (missing/invalid/out-of-domain SPIFFE SAN).
-    ConnectionRejected { index: u64, reason: String },
-    ConnectionClosed { index: u64 },
-    StreamCreated { index: u64, stream_id: u64 },
-    StreamReadable { index: u64, stream_id: u64 },
-    StreamWritable { index: u64, stream_id: u64 },
-    StreamClosed { index: u64, stream_id: u64 },
+    ConnectionRejected {
+        index: u64,
+        reason: String,
+    },
+    ConnectionClosed {
+        index: u64,
+    },
+    StreamCreated {
+        index: u64,
+        stream_id: u64,
+    },
+    StreamReadable {
+        index: u64,
+        stream_id: u64,
+    },
+    StreamWritable {
+        index: u64,
+        stream_id: u64,
+    },
+    StreamClosed {
+        index: u64,
+        stream_id: u64,
+    },
 }
 
 impl TransportHandler for TquicHandler {
@@ -504,9 +521,7 @@ impl TransportHandler for TquicHandler {
             (Some(policy), Some(chain)) if !chain.is_empty() => {
                 match peer_identity_from_chain(chain, Some(&policy.trust_domain)) {
                     Ok(identity) => {
-                        self.metrics
-                            .mtls_handshakes
-                            .fetch_add(1, Ordering::Relaxed);
+                        self.metrics.mtls_handshakes.fetch_add(1, Ordering::Relaxed);
                         info!(
                             "verified mTLS peer {} on connection {}",
                             identity.spiffe_id(),
@@ -515,21 +530,16 @@ impl TransportHandler for TquicHandler {
                         Some(identity)
                     }
                     Err(e) => {
-                        self.metrics
-                            .mtls_rejections
-                            .fetch_add(1, Ordering::Relaxed);
+                        self.metrics.mtls_rejections.fetch_add(1, Ordering::Relaxed);
                         let reason = format!("peer identity rejected: {e}");
                         warn!("connection {}: {}", index, reason);
-                        if let Some(state) =
-                            self.connections.lock().unwrap().get_mut(&index)
-                        {
+                        if let Some(state) = self.connections.lock().unwrap().get_mut(&index) {
                             state.rejected = true;
                         }
                         let _ = conn.close(true, 0x100, reason.as_bytes());
-                        let _ = self.event_tx.send(TquicEvent::ConnectionRejected {
-                            index,
-                            reason,
-                        });
+                        let _ = self
+                            .event_tx
+                            .send(TquicEvent::ConnectionRejected { index, reason });
                         return;
                     }
                 }
@@ -540,9 +550,7 @@ impl TransportHandler for TquicHandler {
                 // defence-in-depth check here means a future TLS backend that
                 // only requests certificates cannot create an unauthenticated
                 // session.
-                self.metrics
-                    .mtls_rejections
-                    .fetch_add(1, Ordering::Relaxed);
+                self.metrics.mtls_rejections.fetch_add(1, Ordering::Relaxed);
                 let reason = "client certificate required but not presented".to_string();
                 warn!("connection {}: {}", index, reason);
                 if let Some(state) = self.connections.lock().unwrap().get_mut(&index) {
@@ -561,7 +569,10 @@ impl TransportHandler for TquicHandler {
                 match peer_identity_from_chain(chain, None) {
                     Ok(identity) => Some(identity),
                     Err(e) => {
-                        debug!("connection {}: peer certificate has no usable SPIFFE SAN: {}", index, e);
+                        debug!(
+                            "connection {}: peer certificate has no usable SPIFFE SAN: {}",
+                            index, e
+                        );
                         None
                     }
                 }
@@ -606,9 +617,7 @@ impl TransportHandler for TquicHandler {
                     // untrusted/expired cert, or a timeout. Count it as a
                     // rejection once, in addition to the application-level
                     // SAN rejections handled in on_conn_established.
-                    self.metrics
-                        .mtls_rejections
-                        .fetch_add(1, Ordering::Relaxed);
+                    self.metrics.mtls_rejections.fetch_add(1, Ordering::Relaxed);
                     debug!(
                         "connection {} closed before mTLS identity was established",
                         index
@@ -850,141 +859,139 @@ impl TquicAdapter {
         quic_config.set_ack_eliciting_threshold(options.ack_eliciting_threshold);
         quic_config.set_send_batch_size(64);
 
-        let client_verify =
-            !config.is_server && options.verify_server_cert && config.verify_cert;
-        let peer_identity_policy = if config.is_server {
-            let cert_file = config
-                .cert_file
-                .as_ref()
-                .ok_or_else(|| TransportError::ConfigError("Server requires cert_file".into()))?;
-            let key_file = config
-                .key_file
-                .as_ref()
-                .ok_or_else(|| TransportError::ConfigError("Server requires key_file".into()))?;
-
-            let mut tls_config = TlsConfig::new_server_config(
-                cert_file,
-                key_file,
-                vec![b"h3".to_vec(), b"http/0.9".to_vec()],
-                false,
-            )
-            .map_err(|e| TransportError::ConfigError(format!("TLS config failed: {:?}", e)))?;
-
-            let client_ca = options
-                .client_ca_file
-                .as_ref()
-                .or(config.client_ca_file.as_ref());
-            let trust_domain = options
-                .trust_domain
-                .as_ref()
-                .or(config.trust_domain.as_ref());
-
-            let peer_identity_policy = if let Some(ca_file) = client_ca {
-                let trust_domain = trust_domain.ok_or_else(|| {
-                    TransportError::ConfigError(
-                        "mTLS requires RuntimeOptions::trust_domain when client_ca_file is set"
-                            .into(),
-                    )
+        let client_verify = !config.is_server && options.verify_server_cert && config.verify_cert;
+        let peer_identity_policy =
+            if config.is_server {
+                let cert_file = config.cert_file.as_ref().ok_or_else(|| {
+                    TransportError::ConfigError("Server requires cert_file".into())
                 })?;
-                load_trust_anchors(&mut tls_config, ca_file, "client CA certificates")?;
-                // SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT: request a
-                // client certificate and make a missing/invalid one a fatal
-                // handshake error.
-                tls_config.set_verify_client_cert(true);
-                info!(
-                    "tQUIC server mTLS ENABLED: client CA={}, trust domain={}",
-                    ca_file, trust_domain
-                );
-                Some(PeerIdentityPolicy {
-                    trust_domain: trust_domain.clone(),
-                })
-            } else {
-                warn!(
-                    "tQUIC server TLS is ONE-WAY: no client_ca_file configured, so client \
+                let key_file = config.key_file.as_ref().ok_or_else(|| {
+                    TransportError::ConfigError("Server requires key_file".into())
+                })?;
+
+                let mut tls_config = TlsConfig::new_server_config(
+                    cert_file,
+                    key_file,
+                    vec![b"h3".to_vec(), b"http/0.9".to_vec()],
+                    false,
+                )
+                .map_err(|e| TransportError::ConfigError(format!("TLS config failed: {:?}", e)))?;
+
+                let client_ca = options
+                    .client_ca_file
+                    .as_ref()
+                    .or(config.client_ca_file.as_ref());
+                let trust_domain = options
+                    .trust_domain
+                    .as_ref()
+                    .or(config.trust_domain.as_ref());
+
+                let peer_identity_policy = if let Some(ca_file) = client_ca {
+                    let trust_domain = trust_domain.ok_or_else(|| {
+                        TransportError::ConfigError(
+                            "mTLS requires RuntimeOptions::trust_domain when client_ca_file is set"
+                                .into(),
+                        )
+                    })?;
+                    load_trust_anchors(&mut tls_config, ca_file, "client CA certificates")?;
+                    // SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT: request a
+                    // client certificate and make a missing/invalid one a fatal
+                    // handshake error.
+                    tls_config.set_verify_client_cert(true);
+                    info!(
+                        "tQUIC server mTLS ENABLED: client CA={}, trust domain={}",
+                        ca_file, trust_domain
+                    );
+                    Some(PeerIdentityPolicy {
+                        trust_domain: trust_domain.clone(),
+                    })
+                } else {
+                    warn!(
+                        "tQUIC server TLS is ONE-WAY: no client_ca_file configured, so client \
                      certificates are neither requested nor verified and mTLS is OFF"
-                );
-                None
-            };
+                    );
+                    None
+                };
 
-            quic_config.set_tls_config(tls_config);
+                quic_config.set_tls_config(tls_config);
 
-            peer_identity_policy
-        } else {
-            // Two independent switches can disable verification: the runtime
-            // option (used by TquicRuntime clients) and WorkerConfig::verify_cert
-            // (used by callers constructing TquicAdapter directly). Both must
-            // opt out; either one being false wins, so a caller cannot
-            // accidentally re-enable a deliberately insecure test transport.
-            let verify = client_verify;
-            let ca_file = options
-                .ca_cert_file
-                .as_ref()
-                .or(config.ca_cert_file.as_ref());
-
-            let mut tls_config =
-                TlsConfig::new_client_config(vec![b"h3".to_vec(), b"http/0.9".to_vec()], false)
-                    .map_err(|e| {
-                        TransportError::ConfigError(format!("TLS config failed: {:?}", e))
-                    })?;
-
-            // Present a client certificate when configured. This is what makes
-            // the server's mTLS policy usable end-to-end.
-            let client_cert = options
-                .client_cert_file
-                .as_ref()
-                .or(config.client_cert_file.as_ref());
-            let client_key = options
-                .client_key_file
-                .as_ref()
-                .or(config.client_key_file.as_ref());
-            match (client_cert, client_key) {
-                (Some(cert), Some(key)) => {
-                    tls_config.set_certificate_file(cert).map_err(|e| {
-                        TransportError::ConfigError(format!(
-                            "Failed to load client certificate from {}: {:?}",
-                            cert, e
-                        ))
-                    })?;
-                    tls_config.set_private_key_file(key).map_err(|e| {
-                        TransportError::ConfigError(format!(
-                            "Failed to load client private key from {}: {:?}",
-                            key, e
-                        ))
-                    })?;
-                }
-                (Some(_), None) => {
-                    return Err(TransportError::ConfigError(
-                        "client_cert_file is set but client_key_file is missing".into(),
-                    ))
-                }
-                (None, Some(_)) => {
-                    return Err(TransportError::ConfigError(
-                        "client_key_file is set but client_cert_file is missing".into(),
-                    ))
-                }
-                (None, None) => {}
-            }
-
-            if verify {
-                tls_config.set_verify(true);
-                // With no explicit CA file the BoringSSL context keeps the
-                // platform trust store loaded in Context::new().
-                if let Some(ca_file) = ca_file {
-                    load_trust_anchors(&mut tls_config, ca_file, "CA certificates")?;
-                }
+                peer_identity_policy
             } else {
-                warn!(
-                    "tQUIC client TLS server-certificate verification is DISABLED \
+                // Two independent switches can disable verification: the runtime
+                // option (used by TquicRuntime clients) and WorkerConfig::verify_cert
+                // (used by callers constructing TquicAdapter directly). Both must
+                // opt out; either one being false wins, so a caller cannot
+                // accidentally re-enable a deliberately insecure test transport.
+                let verify = client_verify;
+                let ca_file = options
+                    .ca_cert_file
+                    .as_ref()
+                    .or(config.ca_cert_file.as_ref());
+
+                let mut tls_config =
+                    TlsConfig::new_client_config(vec![b"h3".to_vec(), b"http/0.9".to_vec()], false)
+                        .map_err(|e| {
+                            TransportError::ConfigError(format!("TLS config failed: {:?}", e))
+                        })?;
+
+                // Present a client certificate when configured. This is what makes
+                // the server's mTLS policy usable end-to-end.
+                let client_cert = options
+                    .client_cert_file
+                    .as_ref()
+                    .or(config.client_cert_file.as_ref());
+                let client_key = options
+                    .client_key_file
+                    .as_ref()
+                    .or(config.client_key_file.as_ref());
+                match (client_cert, client_key) {
+                    (Some(cert), Some(key)) => {
+                        tls_config.set_certificate_file(cert).map_err(|e| {
+                            TransportError::ConfigError(format!(
+                                "Failed to load client certificate from {}: {:?}",
+                                cert, e
+                            ))
+                        })?;
+                        tls_config.set_private_key_file(key).map_err(|e| {
+                            TransportError::ConfigError(format!(
+                                "Failed to load client private key from {}: {:?}",
+                                key, e
+                            ))
+                        })?;
+                    }
+                    (Some(_), None) => {
+                        return Err(TransportError::ConfigError(
+                            "client_cert_file is set but client_key_file is missing".into(),
+                        ))
+                    }
+                    (None, Some(_)) => {
+                        return Err(TransportError::ConfigError(
+                            "client_key_file is set but client_cert_file is missing".into(),
+                        ))
+                    }
+                    (None, None) => {}
+                }
+
+                if verify {
+                    tls_config.set_verify(true);
+                    // With no explicit CA file the BoringSSL context keeps the
+                    // platform trust store loaded in Context::new().
+                    if let Some(ca_file) = ca_file {
+                        load_trust_anchors(&mut tls_config, ca_file, "CA certificates")?;
+                    }
+                } else {
+                    warn!(
+                        "tQUIC client TLS server-certificate verification is DISABLED \
                      (verify_server_cert={}, WorkerConfig::verify_cert={}); \
                      this is only acceptable for loopback self-signed test certificates",
-                    options.verify_server_cert, config.verify_cert
-                );
-            }
+                        options.verify_server_cert, config.verify_cert
+                    );
+                }
 
-            quic_config.set_tls_config(tls_config);
+                quic_config.set_tls_config(tls_config);
 
-            None
-        };
+                None
+            };
 
         let poll = mio::Poll::new()?;
         let registry = poll.registry();
@@ -1436,8 +1443,7 @@ impl TquicRuntime {
                             }
                         },
                         RuntimeCommand::Accept { resp } => {
-                            if let Some((conn_index, remote, identity)) =
-                                incoming_connections.pop()
+                            if let Some((conn_index, remote, identity)) = incoming_connections.pop()
                             {
                                 let _ = resp.send(Ok((conn_index, remote, identity)));
                             } else {
@@ -1999,8 +2005,10 @@ impl TquicClient {
 
         let server_name = server_addr.ip().to_string();
 
-        let (conn_index, peer_identity) =
-            self.runtime.connect_with_identity(&server_name, server_addr).await?;
+        let (conn_index, peer_identity) = self
+            .runtime
+            .connect_with_identity(&server_name, server_addr)
+            .await?;
 
         Ok(TquicConnection {
             conn_index,
@@ -2023,13 +2031,7 @@ impl TquicServer {
         key_file: String,
         _worker_count: Option<usize>,
     ) -> Result<Self, TransportError> {
-        Self::with_options(
-            bind_addr,
-            cert_file,
-            key_file,
-            RuntimeOptions::default(),
-        )
-        .await
+        Self::with_options(bind_addr, cert_file, key_file, RuntimeOptions::default()).await
     }
 
     /// Start a server with explicit mTLS/identity configuration.
@@ -2039,13 +2041,8 @@ impl TquicServer {
         key_file: String,
         options: RuntimeOptions,
     ) -> Result<Self, TransportError> {
-        let runtime = TquicRuntime::with_options(
-            true,
-            bind_addr,
-            Some(cert_file),
-            Some(key_file),
-            options,
-        )?;
+        let runtime =
+            TquicRuntime::with_options(true, bind_addr, Some(cert_file), Some(key_file), options)?;
 
         Ok(TquicServer {
             runtime: Arc::new(runtime),

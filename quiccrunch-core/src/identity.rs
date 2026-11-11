@@ -14,11 +14,10 @@
 //!
 //! [`SpiffePolicy`] maps an RPC method (`Service.Method`) to the set of exact
 //! SPIFFE IDs that may call it. Methods without a rule are not restricted by
-//! this policy (they may still be restricted by the JWT [`AuthInterceptor`]).
+//! this policy (they may still be restricted by the JWT `AuthInterceptor`,
+//! which is only compiled with the `auth` feature).
 //! A rule with an empty set denies every identity, which is useful to fail a
 //! method closed while its allowed callers are being rolled out.
-//!
-//! [`AuthInterceptor`]: crate::interceptor::auth::AuthInterceptor
 
 use std::collections::HashMap;
 use std::fmt;
@@ -47,7 +46,10 @@ pub enum IdentityError {
     /// The SAN trust domain is not the configured trust domain.
     TrustDomainMismatch { expected: String, actual: String },
     /// The configured policy does not allow this identity for the method.
-    PolicyDenied { method: String, identity: Option<String> },
+    PolicyDenied {
+        method: String,
+        identity: Option<String>,
+    },
 }
 
 impl fmt::Display for IdentityError {
@@ -326,11 +328,7 @@ impl SpiffePolicy {
 
     /// Check a bare SPIFFE ID, for callers (such as the RPC interceptor) that
     /// only have the identity string from request metadata.
-    pub fn check_id(
-        &self,
-        method: &str,
-        identity: Option<&SpiffeId>,
-    ) -> Result<(), IdentityError> {
+    pub fn check_id(&self, method: &str, identity: Option<&SpiffeId>) -> Result<(), IdentityError> {
         let Some(allowed) = self.rules.get(method) else {
             return Ok(());
         };
@@ -363,7 +361,10 @@ mod tests {
         assert_eq!(id.trust_domain(), "cluster.local");
         assert_eq!(id.namespace(), Some("payments"));
         assert_eq!(id.service_account(), Some("ledger"));
-        assert_eq!(id.to_string(), "spiffe://cluster.local/ns/payments/sa/ledger");
+        assert_eq!(
+            id.to_string(),
+            "spiffe://cluster.local/ns/payments/sa/ledger"
+        );
     }
 
     #[test]
