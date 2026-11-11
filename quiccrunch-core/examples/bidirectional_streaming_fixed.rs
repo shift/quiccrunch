@@ -57,19 +57,18 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Server listening on {}", addr);
 
     // Use a shutdown signal for graceful shutdown
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
 
     // Handle Ctrl+C
     let shutdown_tx = Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx)));
-    ctrlc::set_handler(move || {
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
         log::info!("Received shutdown signal");
-        if let Ok(mut tx) = shutdown_tx.lock() {
-            if let Some(tx) = tx.take() {
-                let _ = tx.send(());
-            }
+        let mut tx = shutdown_tx.lock().await;
+        if let Some(tx) = tx.take() {
+            let _ = tx.send(());
         }
-    })
-    .expect("Error setting Ctrl-C handler");
+    });
 
     loop {
         tokio::select! {
@@ -109,7 +108,7 @@ async fn handle_connection(
     log::info!("Handling new connection");
 
     match connection.accept_stream().await {
-        Ok(mut stream) => {
+        Ok(stream) => {
             log::info!("Stream accepted, starting echo loop");
 
             loop {
@@ -174,10 +173,10 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Connected: conn_index={:?}", connection.conn_index);
 
             match connection.open_stream().await {
-                Ok(mut stream) => {
+                Ok(stream) => {
                     log::info!("Stream opened: stream_id={}", stream.stream_id);
 
-                    let messages = vec![
+                    let messages = [
                         "Hello from client!",
                         "This is message 2",
                         "Testing bidirectional streaming",
@@ -248,7 +247,7 @@ fn generate_test_certificates(
     cert_file: &str,
     key_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use rcgen::{Certificate, CertificateParams, KeyPair};
+    use rcgen::{Certificate, CertificateParams};
     use std::fs::File;
     use std::io::Write;
 
@@ -259,7 +258,7 @@ fn generate_test_certificates(
 
     let cert = Certificate::from_params(params)?;
     let cert_pem = cert.serialize_pem()?;
-    let key_pem = cert.serialize_private_key_pem()?;
+    let key_pem = cert.serialize_private_key_pem();
 
     let mut cert_file = File::create(cert_file)?;
     cert_file.write_all(cert_pem.as_bytes())?;

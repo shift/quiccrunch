@@ -80,7 +80,7 @@ impl Transport for QuicTransport {
     type Listener = tquic::TquicListener;
     type Config = QuicTransportConfig;
 
-    async fn new(config: Self::Config) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+    async fn new(_config: Self::Config) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
         let client = tquic::TquicClient::with_options(crate::transport::adapter::RuntimeOptions {
             // Loopback self-signed test certificate: verification is explicitly off.
             verify_server_cert: false,

@@ -1,5 +1,5 @@
-use std::os::raw::{c_char, c_void};
 use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
 
 /// Opaque handle to a QuicTransport
 #[repr(C)]
@@ -45,23 +45,20 @@ impl Default for QuicConnectionConfig {
     fn default() -> Self {
         Self {
             max_concurrent_streams: 1000,
-            connection_timeout_ms: 30000,  // 30 seconds
-            keep_alive_ms: 10000,          // 10 seconds
+            connection_timeout_ms: 30000, // 30 seconds
+            keep_alive_ms: 10000,         // 10 seconds
         }
     }
 }
 
 /// Callback function type for async operations
-/// 
+///
 /// Parameters:
 /// - user_data: User-provided data pointer
 /// - error: Error code (QuicError::Success if no error)
 /// - result_data: Operation-specific result data (can be null)
-pub type QuicCallback = extern "C" fn(
-    user_data: *mut c_void,
-    error: crate::error::QuicError,
-    result_data: *mut c_void,
-);
+pub type QuicCallback =
+    extern "C" fn(user_data: *mut c_void, error: crate::error::QuicError, result_data: *mut c_void);
 
 /// Message data structure for sending/receiving
 #[repr(C)]
@@ -77,9 +74,11 @@ pub fn c_str_to_str(c_str: *const c_char) -> Result<&'static str, crate::error::
     if c_str.is_null() {
         return Err(crate::error::QuicError::InvalidArgument);
     }
-    
+
     let c_str = unsafe { CStr::from_ptr(c_str) };
-    c_str.to_str().map_err(|_| crate::error::QuicError::InvalidArgument)
+    c_str
+        .to_str()
+        .map_err(|_| crate::error::QuicError::InvalidArgument)
 }
 
 /// Helper to convert Rust str to C string (caller must free)

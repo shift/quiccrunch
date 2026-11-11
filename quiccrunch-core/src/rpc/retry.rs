@@ -1,13 +1,8 @@
 //! Retry and Circuit Breaker Types
-//! 
+//!
 //! Shared types for retry logic and circuit breaker functionality.
 
-use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering}};
-use std::sync::{Mutex, RwLock};
-use std::time::{Duration, SystemTime};
-use std::collections::HashMap;
-use bytes::Bytes;
-use crate::{RpcError, RpcResult};
+use std::time::Duration;
 
 /// Configuration for retry behavior
 #[derive(Debug, Clone)]
@@ -135,17 +130,22 @@ impl CircuitBreaker {
     pub fn record_success(&self) {
         let state = *self.state.read().unwrap();
         if state == CircuitState::HalfOpen {
-            let successes = self.success_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let successes = self
+                .success_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
             if successes >= self.config.success_threshold {
                 *self.state.write().unwrap() = CircuitState::Closed;
             }
         }
-        self.failure_count.store(0, std::sync::atomic::Ordering::SeqCst);
+        self.failure_count
+            .store(0, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Record a failed request
     pub fn record_failure(&self) {
-        let failures = self.failure_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        self.failure_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         *self.last_failure_time.write().unwrap() = Some(std::time::SystemTime::now());
 
         let state = *self.state.read().unwrap();
@@ -169,8 +169,10 @@ impl CircuitBreaker {
     /// Reset circuit breaker
     pub fn reset(&self) {
         *self.state.write().unwrap() = CircuitState::Closed;
-        self.failure_count.store(0, std::sync::atomic::Ordering::SeqCst);
-        self.success_count.store(0, std::sync::atomic::Ordering::SeqCst);
+        self.failure_count
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+        self.success_count
+            .store(0, std::sync::atomic::Ordering::SeqCst);
         *self.last_failure_time.write().unwrap() = None;
     }
 }

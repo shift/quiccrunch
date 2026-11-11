@@ -1,6 +1,6 @@
+use bytes::Bytes;
 use quiccrunch_core::transport::async_bridge::AsyncTquicClient;
 use std::time::Instant;
-use bytes::Bytes;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -24,37 +24,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("Starting Async QUIC client");
     log::info!("Server address: {}", addr);
     log::info!("Messages to send: {}", message_count);
-    
-    let client = AsyncTquicClient::new(Some("./quiccrunch-core/tests/certs/cert.pem".to_string())).await?;
-    
+
+    let client =
+        AsyncTquicClient::new(Some("./quiccrunch-core/tests/certs/cert.pem".to_string())).await?;
+
     log::info!("Connecting to {}", addr);
     let start = Instant::now();
     let mut stream = client.connect(addr).await?;
     let connect_duration = start.elapsed();
-    
+
     log::info!("Connected in {:?}", connect_duration);
-    
+
     let messages: Vec<String> = (1..=message_count)
         .map(|i| format!("Message #{}", i))
         .collect();
-    
+
     log::info!("Sending {} messages", messages.len());
-    
+
     let mut total_bytes_sent = 0usize;
     let mut total_bytes_received = 0usize;
     let send_start = Instant::now();
-    
+
     for (i, msg) in messages.iter().enumerate() {
         let msg_bytes = msg.as_bytes();
         total_bytes_sent += msg_bytes.len();
-        
-        log::debug!("Sending message {}/{}: {} bytes", i + 1, message_count, msg_bytes.len());
-        stream.send_message(Bytes::copy_from_slice(msg_bytes)).await?;
-        
+
+        log::debug!(
+            "Sending message {}/{}: {} bytes",
+            i + 1,
+            message_count,
+            msg_bytes.len()
+        );
+        stream
+            .send_message(Bytes::copy_from_slice(msg_bytes))
+            .await?;
+
         match stream.receive_message().await {
             Ok(data) if !data.is_empty() => {
                 total_bytes_received += data.len();
-                log::debug!("Received response {}/{}: {} bytes", i + 1, message_count, data.len());
+                log::debug!(
+                    "Received response {}/{}: {} bytes",
+                    i + 1,
+                    message_count,
+                    data.len()
+                );
                 log::trace!("Response content: {}", String::from_utf8_lossy(&data));
             }
             Ok(_) => {
@@ -66,23 +79,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     }
-    
+
     let send_duration = send_start.elapsed();
-    
+
     log::debug!("Closing stream");
     stream.close().await?;
-    
-    let throughput_mbps = (total_bytes_sent + total_bytes_received) as f64 
-        / send_duration.as_secs_f64() 
-        / 1_000_000.0 
+
+    let throughput_mbps = (total_bytes_sent + total_bytes_received) as f64
+        / send_duration.as_secs_f64()
+        / 1_000_000.0
         * 8.0;
-    
+
     log::info!("Client completed successfully");
     log::info!("Messages: {}", message_count);
     log::info!("Bytes sent: {}", total_bytes_sent);
     log::info!("Bytes received: {}", total_bytes_received);
     log::info!("Duration: {:?}", send_duration);
     log::info!("Throughput: {:.2} Mbps", throughput_mbps);
-    
+
     Ok(())
 }

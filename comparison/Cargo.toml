@@ -16,8 +16,8 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-tonic = { version = "0.10", features = ["transport", "tls"] }
-prost = "0.12"
+tonic = { version = "0.12", features = ["transport", "tls"] }
+prost = "0.13"
 tokio-stream = "0.1"
 hdrhistogram = "7"
 anyhow = "1"
@@ -26,4 +26,4 @@ env_logger = "0.11"
 log = "0.4"
 
 [build-dependencies]
-tonic-build = "0.10"
+tonic-build = "0.12"

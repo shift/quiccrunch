@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use quiccrunch_core::raft::{
-    AppendEntriesRequest, InMemoryRaftTransport, InstallSnapshotChunk, RaftPeer, RaftTransport,
-    RequestVoteRequest, SnapshotUpload,
+    InMemoryRaftTransport, InstallSnapshotChunk, RaftPeer, RaftTransport, RequestVoteRequest,
+    SnapshotUpload,
 };
 use raft_common::TestNode;
 

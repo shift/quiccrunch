@@ -1,8 +1,8 @@
-use quiccrunch_core::transport::adapter::{TquicServer, TquicConnection};
+use quiccrunch_core::transport::adapter::{TquicConnection, TquicServer};
 use quiccrunch_core::TransportError;
-use std::time::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,13 +22,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         4
     };
-    
+
     let cert_file = if args.len() > 3 {
         args[3].clone()
     } else {
         "quiccrunch-core/tests/certs/cert.pem".to_string()
     };
-    
+
     let key_file = if args.len() > 4 {
         args[4].clone()
     } else {
@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr: std::net::SocketAddr = addr.parse()?;
     let server = TquicServer::new(bind_addr, cert_file, key_file, Some(workers)).await?;
     let mut listener = server.listen(addr).await?;
-    
+
     log::info!("Server listening on {}", addr);
 
     let connection_counter = Arc::new(AtomicU64::new(0));
@@ -53,11 +53,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(connection) => {
                 let conn_id = connection_counter.fetch_add(1, Ordering::Relaxed);
                 active_connections.fetch_add(1, Ordering::Relaxed);
-                
-                log::debug!("Connection #{} accepted: {:?}", conn_id, connection.conn_index);
-                
+
+                log::debug!(
+                    "Connection #{} accepted: {:?}",
+                    conn_id,
+                    connection.conn_index
+                );
+
                 let active_conns = Arc::clone(&active_connections);
-                
+
                 tokio::spawn(async move {
                     match handle_connection(connection, conn_id).await {
                         Ok(_) => {
@@ -78,33 +82,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn handle_connection(connection: TquicConnection, conn_id: u64) -> Result<(), TransportError> {
-    let mut stream = connection.accept_stream().await?;
-    log::debug!("Connection #{}: stream {} opened", conn_id, stream.stream_id);
-    
+async fn handle_connection(
+    connection: TquicConnection,
+    conn_id: u64,
+) -> Result<(), TransportError> {
+    let stream = connection.accept_stream().await?;
+    log::debug!(
+        "Connection #{}: stream {} opened",
+        conn_id,
+        stream.stream_id
+    );
+
     let mut message_count = 0u64;
     let mut total_bytes = 0usize;
-    
+
     loop {
         let data = stream.receive(8192).await?;
-        
+
         if data.is_empty() {
             break;
         }
-        
+
         message_count += 1;
         total_bytes += data.len();
-        
-        log::trace!("Connection #{}: received {} bytes (message #{})", 
-                   conn_id, data.len(), message_count);
-        
+
+        log::trace!(
+            "Connection #{}: received {} bytes (message #{})",
+            conn_id,
+            data.len(),
+            message_count
+        );
+
         let response = format!("Echo: {}", String::from_utf8_lossy(&data));
         stream.send(response.as_bytes(), false).await?;
     }
-    
-    log::debug!("Connection #{}: processed {} messages, {} bytes total", 
-               conn_id, message_count, total_bytes);
-    
+
+    log::debug!(
+        "Connection #{}: processed {} messages, {} bytes total",
+        conn_id,
+        message_count,
+        total_bytes
+    );
+
     stream.close().await?;
     Ok(())
 }

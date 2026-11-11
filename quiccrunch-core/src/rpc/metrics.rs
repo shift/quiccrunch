@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Metric types
@@ -50,7 +50,7 @@ impl MetricsCollector {
     pub async fn increment_counter(&self, name: &str, labels: HashMap<String, String>, value: u64) {
         let mut metrics = self.metrics.write().await;
         let key = format!("{}:{}", name, Self::labels_hash(&labels));
-        
+
         let metric = metrics.entry(key).or_insert_with(|| Metric {
             name: name.to_string(),
             metric_type: MetricType::Counter,
@@ -68,21 +68,24 @@ impl MetricsCollector {
     pub async fn set_gauge(&self, name: &str, labels: HashMap<String, String>, value: f64) {
         let mut metrics = self.metrics.write().await;
         let key = format!("{}:{}", name, Self::labels_hash(&labels));
-        
-        metrics.insert(key, Metric {
-            name: name.to_string(),
-            metric_type: MetricType::Gauge,
-            value: MetricValue::Gauge(value),
-            labels,
-            timestamp: Self::now(),
-        });
+
+        metrics.insert(
+            key,
+            Metric {
+                name: name.to_string(),
+                metric_type: MetricType::Gauge,
+                value: MetricValue::Gauge(value),
+                labels,
+                timestamp: Self::now(),
+            },
+        );
     }
 
     /// Record a histogram value
     pub async fn record_histogram(&self, name: &str, labels: HashMap<String, String>, value: f64) {
         let mut metrics = self.metrics.write().await;
         let key = format!("{}:{}", name, Self::labels_hash(&labels));
-        
+
         let metric = metrics.entry(key).or_insert_with(|| Metric {
             name: name.to_string(),
             metric_type: MetricType::Histogram,
@@ -109,7 +112,7 @@ impl MetricsCollector {
 
         for metric in metrics.values() {
             let labels = Self::format_labels(&metric.labels);
-            
+
             match &metric.value {
                 MetricValue::Counter(value) => {
                     output.push_str(&format!("{}{} {}\n", metric.name, labels, value));
@@ -123,7 +126,7 @@ impl MetricsCollector {
                         let sum: f64 = values.iter().sum();
                         let count = values.len();
                         let mean = sum / count as f64;
-                        
+
                         output.push_str(&format!("{}_sum{} {}\n", metric.name, labels, sum));
                         output.push_str(&format!("{}_count{} {}\n", metric.name, labels, count));
                         output.push_str(&format!("{}_mean{} {}\n", metric.name, labels, mean));
@@ -157,16 +160,16 @@ impl MetricsCollector {
         if labels.is_empty() {
             return String::new();
         }
-        
+
         let mut sorted: Vec<_> = labels.iter().collect();
         sorted.sort_by_key(|k| k.0.clone());
-        
+
         let label_str = sorted
             .iter()
             .map(|(k, v)| format!("{}=\"{}\"", k, v))
             .collect::<Vec<_>>()
             .join(",");
-        
+
         format!("{{{}}}", label_str)
     }
 
@@ -218,7 +221,13 @@ impl RpcMetrics {
     }
 
     /// Record a response
-    pub async fn record_response(&self, service: &str, method: &str, status: &str, duration: Duration) {
+    pub async fn record_response(
+        &self,
+        service: &str,
+        method: &str,
+        status: &str,
+        duration: Duration,
+    ) {
         let labels = HashMap::from([
             ("service".to_string(), service.to_string()),
             ("method".to_string(), method.to_string()),
@@ -254,11 +263,7 @@ impl RpcMetrics {
     /// Record active connections
     pub async fn set_active_connections(&self, count: usize) {
         self.collector
-            .set_gauge(
-                "rpc_active_connections",
-                HashMap::new(),
-                count as f64,
-            )
+            .set_gauge("rpc_active_connections", HashMap::new(), count as f64)
             .await;
     }
 
@@ -424,18 +429,18 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_collector() {
         let collector = MetricsCollector::new();
-        
+
         collector
             .increment_counter("test_counter", HashMap::new(), 1)
             .await;
-        
+
         collector
             .increment_counter("test_counter", HashMap::new(), 1)
             .await;
-        
+
         let metrics = collector.get_metrics().await;
         assert_eq!(metrics.len(), 1);
-        
+
         if let MetricValue::Counter(value) = metrics[0].value {
             assert_eq!(value, 2);
         } else {
@@ -446,7 +451,7 @@ mod tests {
     #[tokio::test]
     async fn test_prometheus_format() {
         let collector = MetricsCollector::new();
-        
+
         collector
             .increment_counter(
                 "test_counter",
@@ -454,7 +459,7 @@ mod tests {
                 42,
             )
             .await;
-        
+
         let prometheus = collector.to_prometheus().await;
         assert!(prometheus.contains("test_counter"));
         assert!(prometheus.contains("42"));
@@ -463,15 +468,20 @@ mod tests {
     #[tokio::test]
     async fn test_rpc_metrics() {
         let metrics = RpcMetrics::new();
-        
+
         metrics
             .record_request("test_service", "test_method", Duration::from_millis(100))
             .await;
-        
+
         metrics
-            .record_response("test_service", "test_method", "success", Duration::from_millis(100))
+            .record_response(
+                "test_service",
+                "test_method",
+                "success",
+                Duration::from_millis(100),
+            )
             .await;
-        
+
         let prometheus = metrics.to_prometheus().await;
         assert!(prometheus.contains("rpc_requests_total"));
         assert!(prometheus.contains("rpc_responses_total"));

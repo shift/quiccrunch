@@ -21,7 +21,7 @@ async fn setup_test_server() -> Result<(TquicServer, String), Box<dyn std::error
     }
 
     let server = TquicServer::new(bind_addr, cert_file, key_file, Some(2)).await?;
-    let addr = server.local_addr();
+    let addr = server.local_addr()?;
     Ok((server, addr.to_string()))
 }
 
@@ -29,7 +29,7 @@ fn generate_test_certificates(
     cert_file: &str,
     key_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use rcgen::{Certificate, CertificateParams, KeyPair};
+    use rcgen::{Certificate, CertificateParams};
     use std::fs::File;
     use std::io::Write;
 
@@ -40,7 +40,7 @@ fn generate_test_certificates(
 
     let cert = Certificate::from_params(params)?;
     let cert_pem = cert.serialize_pem()?;
-    let key_pem = cert.serialize_private_key_pem()?;
+    let key_pem = cert.serialize_private_key_pem();
 
     let mut cert_file = File::create(cert_file)?;
     cert_file.write_all(cert_pem.as_bytes())?;
@@ -69,7 +69,7 @@ fn bench_connection_establishment(c: &mut Criterion) {
                     let server_handle = tokio::spawn(async move {
                         let mut count = 0;
                         while count < concurrent {
-                            if let Ok(_) = listener.accept().await {
+                            if listener.accept().await.is_ok() {
                                 count += 1;
                             }
                         }
@@ -127,12 +127,12 @@ fn bench_streaming_performance(c: &mut Criterion) {
                     // Start echo server
                     let server_handle = tokio::spawn(async move {
                         if let Ok(conn) = listener.accept().await {
-                            if let Ok(mut stream) = conn.accept_stream().await {
-                                let mut data = vec![0u8; size];
+                            if let Ok(stream) = conn.accept_stream().await {
+                                let _data = vec![0u8; size];
                                 loop {
                                     match stream.receive(size).await {
                                         Ok(received) if !received.is_empty() => {
-                                            if let Err(_) = stream.send(&received, false).await {
+                                            if stream.send(&received, false).await.is_err() {
                                                 break;
                                             }
                                         }
@@ -156,7 +156,7 @@ fn bench_streaming_performance(c: &mut Criterion) {
                     .await
                     .unwrap();
                     let connection = client.connect(&addr).await.unwrap();
-                    let mut stream = connection.open_stream().await.unwrap();
+                    let stream = connection.open_stream().await.unwrap();
 
                     let test_data = vec![0x42u8; size];
                     for _ in 0..5 {
@@ -198,8 +198,8 @@ fn bench_concurrent_streams(c: &mut Criterion) {
                         for _ in 0..concurrent {
                             if let Ok(conn) = listener.accept().await {
                                 tokio::spawn(async move {
-                                    if let Ok(mut stream) = conn.accept_stream().await {
-                                        let mut data = vec![0u8; 1024];
+                                    if let Ok(stream) = conn.accept_stream().await {
+                                        let _data = vec![0u8; 1024];
                                         loop {
                                             match stream.receive(1024).await {
                                                 Ok(received) if !received.is_empty() => {
@@ -233,7 +233,7 @@ fn bench_concurrent_streams(c: &mut Criterion) {
                         let addr = addr.clone();
                         handles.push(tokio::spawn(async move {
                             let connection = client.connect(&addr).await.unwrap();
-                            let mut stream = connection.open_stream().await.unwrap();
+                            let stream = connection.open_stream().await.unwrap();
 
                             let test_data = vec![0x42u8; 1024];
                             for _ in 0..3 {

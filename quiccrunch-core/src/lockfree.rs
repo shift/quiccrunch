@@ -10,6 +10,11 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
+type StreamWriteSender = oneshot::Sender<Result<(), crate::TransportError>>;
+type StreamWriteReceiver = oneshot::Receiver<Result<(), crate::TransportError>>;
+type StreamReadSender = oneshot::Sender<Result<Option<Bytes>, crate::TransportError>>;
+type StreamReadReceiver = oneshot::Receiver<Result<Option<Bytes>, crate::TransportError>>;
+
 /// Stream command types for lock-free communication
 #[derive(Debug)]
 pub enum StreamCommand {
@@ -77,10 +82,7 @@ impl StreamHandle {
 
     /// Send data on this stream (non-blocking)
     pub async fn write(&self, data: Bytes, fin: bool) -> Result<(), crate::TransportError> {
-        let (tx, rx): (
-            oneshot::Sender<Result<(), crate::TransportError>>,
-            oneshot::Receiver<Result<(), crate::TransportError>>,
-        ) = oneshot::channel();
+        let (tx, rx): (StreamWriteSender, StreamWriteReceiver) = oneshot::channel();
 
         let cmd = StreamCommand::Write {
             stream_id: self.stream_id,
@@ -105,10 +107,7 @@ impl StreamHandle {
 
     /// Read data from this stream (non-blocking)
     pub async fn read(&self, buffer_size: usize) -> Result<Option<Bytes>, crate::TransportError> {
-        let (tx, rx): (
-            oneshot::Sender<Result<Option<Bytes>, crate::TransportError>>,
-            oneshot::Receiver<Result<Option<Bytes>, crate::TransportError>>,
-        ) = oneshot::channel();
+        let (tx, rx): (StreamReadSender, StreamReadReceiver) = oneshot::channel();
 
         let cmd = StreamCommand::Read {
             stream_id: self.stream_id,
@@ -137,10 +136,7 @@ impl StreamHandle {
 
     /// Close this stream
     pub async fn close(&self) -> Result<(), crate::TransportError> {
-        let (tx, rx): (
-            oneshot::Sender<Result<(), crate::TransportError>>,
-            oneshot::Receiver<Result<(), crate::TransportError>>,
-        ) = oneshot::channel();
+        let (tx, rx): (StreamWriteSender, StreamWriteReceiver) = oneshot::channel();
 
         let cmd = StreamCommand::Close {
             stream_id: self.stream_id,
@@ -169,6 +165,12 @@ pub struct StreamStats {
     pub bytes_written: AtomicU64,
     pub bytes_read: AtomicU64,
     pub errors: AtomicU64,
+}
+
+impl Default for StreamStats {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StreamStats {
@@ -306,6 +308,12 @@ pub struct ConnectionStats {
     pub command_queue_depth: AtomicUsize,
 }
 
+impl Default for ConnectionStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConnectionStats {
     pub fn new() -> Self {
         Self {
@@ -342,6 +350,8 @@ pub struct ConnectionStatsSnapshot {
 
 /// High-performance command processor for stream operations
 pub struct StreamProcessor {
+    /// Retained for stream diagnostics.
+    #[allow(dead_code)]
     connection_id: u64,
     channels: ConnectionChannels,
     backend: Box<dyn StreamBackend + Send>,

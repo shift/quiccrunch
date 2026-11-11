@@ -8,8 +8,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-use crate::rpc::error::{RpcError, RpcResult};
-
 /// Token bucket rate limiter
 pub struct TokenBucketRateLimiter {
     /// Maximum number of tokens (burst capacity)
@@ -42,7 +40,7 @@ impl TokenBucketRateLimiter {
         let now = Instant::now();
         let elapsed = last_refill.elapsed().as_secs_f64();
         let refill_amount = (elapsed * self.refill_rate) as u64;
-        
+
         if refill_amount > 0 {
             *current_tokens = (*current_tokens + refill_amount).min(self.max_tokens);
             *last_refill = now;
@@ -98,13 +96,15 @@ impl PerClientRateLimiter {
     /// Get or create rate limiter for a client
     pub async fn get_limiter(&self, client_id: &str) -> Arc<TokenBucketRateLimiter> {
         let mut limiters = self.limiters.write().await;
-        
+
         limiters
             .entry(client_id.to_string())
-            .or_insert_with(|| Arc::new(TokenBucketRateLimiter::new(
-                self.default_burst,
-                self.default_limit as f64,
-            )))
+            .or_insert_with(|| {
+                Arc::new(TokenBucketRateLimiter::new(
+                    self.default_burst,
+                    self.default_limit as f64,
+                ))
+            })
             .clone()
     }
 
@@ -206,7 +206,7 @@ impl Default for DdosProtectionConfig {
             max_requests_per_second: 1000,
             max_burst: 5000,
             max_concurrent_connections: 100,
-            max_request_size: 1024 * 1024, // 1MB
+            max_request_size: 1024 * 1024,            // 1MB
             block_duration: Duration::from_secs(300), // 5 minutes
             max_blocked_clients: 10000,
         }
@@ -240,7 +240,7 @@ impl DdosProtection {
             config.max_requests_per_second,
             config.max_burst,
         ));
-        
+
         Self {
             config,
             client_states: Arc::new(RwLock::new(HashMap::new())),
@@ -249,7 +249,11 @@ impl DdosProtection {
     }
 
     /// Check if a client is allowed to make a request
-    pub async fn check_request(&self, client_id: &str, request_size: usize) -> Result<(), DdosProtectionError> {
+    pub async fn check_request(
+        &self,
+        client_id: &str,
+        request_size: usize,
+    ) -> Result<(), DdosProtectionError> {
         // Check if client is blocked
         {
             let states = self.client_states.read().await;
@@ -267,7 +271,8 @@ impl DdosProtection {
 
         // Check request size
         if request_size > self.config.max_request_size {
-            self.record_violation(client_id, "request_size_exceeded").await;
+            self.record_violation(client_id, "request_size_exceeded")
+                .await;
             return Err(DdosProtectionError::RequestTooLarge {
                 size: request_size,
                 max_size: self.config.max_request_size,
@@ -276,7 +281,8 @@ impl DdosProtection {
 
         // Check rate limit
         if !self.rate_limiters.try_consume(client_id, 1).await {
-            self.record_violation(client_id, "rate_limit_exceeded").await;
+            self.record_violation(client_id, "rate_limit_exceeded")
+                .await;
             return Err(DdosProtectionError::RateLimitExceeded {
                 client_id: client_id.to_string(),
                 retry_after: Duration::from_secs(1),
@@ -289,16 +295,19 @@ impl DdosProtection {
     /// Record a connection open
     pub async fn record_connection_open(&self, client_id: &str) -> Result<(), DdosProtectionError> {
         let mut states = self.client_states.write().await;
-        let state = states.entry(client_id.to_string()).or_insert(ClientProtectionState {
-            violations: 0,
-            blocked_until: None,
-            concurrent_connections: 0,
-        });
+        let state = states
+            .entry(client_id.to_string())
+            .or_insert(ClientProtectionState {
+                violations: 0,
+                blocked_until: None,
+                concurrent_connections: 0,
+            });
 
         state.concurrent_connections += 1;
 
         if state.concurrent_connections > self.config.max_concurrent_connections {
-            self.record_violation_inner(state, client_id, "concurrent_connections_exceeded").await;
+            self.record_violation_inner(state, client_id, "concurrent_connections_exceeded")
+                .await;
             return Err(DdosProtectionError::TooManyConnections {
                 current: state.concurrent_connections,
                 max: self.config.max_concurrent_connections,
@@ -319,22 +328,31 @@ impl DdosProtection {
     /// Record a violation
     async fn record_violation(&self, client_id: &str, reason: &str) {
         let mut states = self.client_states.write().await;
-        let state = states.entry(client_id.to_string()).or_insert(ClientProtectionState {
-            violations: 0,
-            blocked_until: None,
-            concurrent_connections: 0,
-        });
+        let state = states
+            .entry(client_id.to_string())
+            .or_insert(ClientProtectionState {
+                violations: 0,
+                blocked_until: None,
+                concurrent_connections: 0,
+            });
 
         self.record_violation_inner(state, client_id, reason).await;
     }
 
     /// Record a violation (inner)
-    async fn record_violation_inner(&self, state: &mut ClientProtectionState, client_id: &str, reason: &str) {
+    async fn record_violation_inner(
+        &self,
+        state: &mut ClientProtectionState,
+        client_id: &str,
+        reason: &str,
+    ) {
         state.violations += 1;
-        
+
         log::warn!(
             "DDoS protection violation for client {}: {} (violations: {})",
-            client_id, reason, state.violations
+            client_id,
+            reason,
+            state.violations
         );
 
         // Block client after multiple violations
@@ -342,7 +360,9 @@ impl DdosProtection {
             state.blocked_until = Some(Instant::now() + self.config.block_duration);
             log::error!(
                 "Client {} blocked for {:?} due to {} violations",
-                client_id, self.config.block_duration, state.violations
+                client_id,
+                self.config.block_duration,
+                state.violations
             );
         }
     }
@@ -415,14 +435,28 @@ pub enum DdosProtectionError {
 impl std::fmt::Display for DdosProtectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DdosProtectionError::ClientBlocked { client_id, expires_at } => {
+            DdosProtectionError::ClientBlocked {
+                client_id,
+                expires_at,
+            } => {
                 write!(f, "Client {} is blocked until {:?}", client_id, expires_at)
             }
-            DdosProtectionError::RateLimitExceeded { client_id, retry_after } => {
-                write!(f, "Rate limit exceeded for client {}, retry after {:?}", client_id, retry_after)
+            DdosProtectionError::RateLimitExceeded {
+                client_id,
+                retry_after,
+            } => {
+                write!(
+                    f,
+                    "Rate limit exceeded for client {}, retry after {:?}",
+                    client_id, retry_after
+                )
             }
             DdosProtectionError::RequestTooLarge { size, max_size } => {
-                write!(f, "Request too large: {} bytes (max: {} bytes)", size, max_size)
+                write!(
+                    f,
+                    "Request too large: {} bytes (max: {} bytes)",
+                    size, max_size
+                )
             }
             DdosProtectionError::TooManyConnections { current, max } => {
                 write!(f, "Too many connections: {} (max: {})", current, max)
@@ -484,9 +518,16 @@ impl RateLimitInterceptor {
     }
 
     /// Check rate limit for a request
-    pub async fn check_rate_limit(&self, client_id: &str, service_name: &str, request_size: usize) -> Result<(), DdosProtectionError> {
+    pub async fn check_rate_limit(
+        &self,
+        client_id: &str,
+        service_name: &str,
+        request_size: usize,
+    ) -> Result<(), DdosProtectionError> {
         // Check DDoS protection first
-        self.ddos_protection.check_request(client_id, request_size).await?;
+        self.ddos_protection
+            .check_request(client_id, request_size)
+            .await?;
 
         // Check per-client rate limit
         if !self.client_limiter.try_consume(client_id, 1).await {
@@ -530,11 +571,11 @@ mod tests {
     #[tokio::test]
     async fn test_token_bucket_rate_limiter() {
         let limiter = TokenBucketRateLimiter::new(10, 1.0);
-        
+
         // Should be able to consume tokens
         assert!(limiter.try_consume(5).await);
         assert!(limiter.try_consume(5).await);
-        
+
         // Should not be able to consume more
         assert!(!limiter.try_consume(1).await);
     }
@@ -542,11 +583,11 @@ mod tests {
     #[tokio::test]
     async fn test_per_client_rate_limiter() {
         let limiter = PerClientRateLimiter::new(10, 10);
-        
+
         // Should be able to consume tokens for different clients
         assert!(limiter.try_consume("client1", 5).await);
         assert!(limiter.try_consume("client2", 5).await);
-        
+
         // Should not be able to consume more for client1
         assert!(!limiter.try_consume("client1", 6).await);
     }
@@ -561,12 +602,12 @@ mod tests {
             block_duration: Duration::from_secs(1),
             max_blocked_clients: 100,
         };
-        
+
         let protection = DdosProtection::new(config);
-        
+
         // Should allow requests
         assert!(protection.check_request("client1", 100).await.is_ok());
-        
+
         // Should reject large requests
         assert!(protection.check_request("client1", 2048).await.is_err());
     }

@@ -72,7 +72,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 async fn handle_connection(
     connection: quiccrunch_core::transport::adapter::TquicConnection,
 ) -> Result<(), TransportError> {
-    let mut stream = connection.accept_stream().await?;
+    let stream = connection.accept_stream().await?;
 
     loop {
         let data = stream.receive(8192).await?;
@@ -105,10 +105,10 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
     let connection = client.connect(addr).await?;
     log::info!("Connected: conn_index={:?}", connection.conn_index);
 
-    let mut stream = connection.open_stream().await?;
+    let stream = connection.open_stream().await?;
     log::info!("Stream opened: stream_id={}", stream.stream_id);
 
-    let messages = vec![
+    let messages = [
         "Hello from client!",
         "This is message 2",
         "Testing bidirectional streaming",

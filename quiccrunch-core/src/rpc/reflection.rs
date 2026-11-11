@@ -10,11 +10,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::rpc::error::{RpcResult, RpcError};
-use crate::rpc::service::{ServiceDefinition, MethodDefinition, StreamingType, ServiceRegistry};
+use crate::rpc::service::{ServiceRegistry, StreamingType};
 
 /// Documentation for a service or method
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Documentation {
     pub short_description: Option<String>,
     pub long_description: Option<String>,
@@ -95,7 +94,7 @@ impl ReflectionApi {
                         streaming_type: m.streaming_type,
                         input_type: "bytes".to_string(), // Default, would be from schema
                         output_type: "bytes".to_string(), // Default, would be from schema
-                        parameters: Vec::new(), // Would be parsed from schema
+                        parameters: Vec::new(),          // Would be parsed from schema
                         documentation: None,
                     })
                     .collect();
@@ -125,7 +124,9 @@ impl ReflectionApi {
                     .methods
                     .values()
                     .map(|m| {
-                        let method_doc = method_docs.get(&(service.name.clone(), m.name.clone())).cloned();
+                        let method_doc = method_docs
+                            .get(&(service.name.clone(), m.name.clone()))
+                            .cloned();
                         MethodReflection {
                             id: m.id,
                             name: m.name.clone(),
@@ -165,7 +166,9 @@ impl ReflectionApi {
                     .values()
                     .find(|m| m.name == method_name)
                     .map(|m| {
-                        let method_doc = method_docs.get(&(service_name.to_string(), method_name.to_string())).cloned();
+                        let method_doc = method_docs
+                            .get(&(service_name.to_string(), method_name.to_string()))
+                            .cloned();
                         MethodReflection {
                             id: m.id,
                             name: m.name.clone(),
@@ -236,20 +239,10 @@ impl ReflectionApi {
     }
 }
 
-impl Default for Documentation {
-    fn default() -> Self {
-        Self {
-            short_description: None,
-            long_description: None,
-            examples: Vec::new(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rpc::service::{ServiceDefinition, MethodDefinition};
+    use crate::rpc::service::{MethodDefinition, ServiceDefinition};
 
     #[tokio::test]
     async fn test_reflection_api() {

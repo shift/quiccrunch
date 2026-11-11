@@ -5,6 +5,12 @@ use bytes::Bytes;
 #[derive(Debug)]
 pub struct SimpleStreamingDemo;
 
+impl Default for SimpleStreamingDemo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SimpleStreamingDemo {
     pub fn new() -> Self {
         Self

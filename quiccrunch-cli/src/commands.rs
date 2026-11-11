@@ -11,31 +11,34 @@ pub async fn handle_generate(
     service: Option<String>,
 ) -> Result<()> {
     crate::print_info(&format!("Generating {} code from {}", language, input));
-    
+
     // Validate input file exists
     if !Path::new(&input).exists() {
         anyhow::bail!("Input file '{}' does not exist", input);
     }
-    
+
     // Create output directory if it doesn't exist
     std::fs::create_dir_all(&output)?;
-    
+
     match language.as_str() {
         "rust" => generate_rust_code(&input, &output, service).await,
         "typescript" => generate_typescript_code(&input, &output, service).await,
         "go" => generate_go_code(&input, &output, service).await,
         _ => {
-            anyhow::bail!("Unsupported language: {}. Supported: rust, typescript, go", language);
+            anyhow::bail!(
+                "Unsupported language: {}. Supported: rust, typescript, go",
+                language
+            );
         }
     }
 }
 
 async fn generate_rust_code(input: &str, output: &str, service: Option<String>) -> Result<()> {
     crate::print_info("Generating Rust RPC service code...");
-    
+
     // Parse Cap'n Proto schema
     let _schema_content = std::fs::read_to_string(input)?;
-    
+
     // For now, create a basic template - in a full implementation,
     // this would parse the actual Cap'n Proto schema
     let service_name = service.unwrap_or_else(|| {
@@ -45,17 +48,21 @@ async fn generate_rust_code(input: &str, output: &str, service: Option<String>) 
             .unwrap_or("Service")
             .to_string()
     });
-    
+
     let rust_code = generate_rust_service_template(&service_name)?;
-    
+
     let output_file = format!("{}/{}.rs", output, service_name.to_lowercase());
     std::fs::write(&output_file, rust_code)?;
-    
+
     crate::print_success(&format!("Generated Rust service: {}", output_file));
     Ok(())
 }
 
-async fn generate_typescript_code(_input: &str, _output: &str, _service: Option<String>) -> Result<()> {
+async fn generate_typescript_code(
+    _input: &str,
+    _output: &str,
+    _service: Option<String>,
+) -> Result<()> {
     crate::print_info("TypeScript generation not yet implemented");
     // TODO: Implement TypeScript code generation
     Ok(())
@@ -68,7 +75,8 @@ async fn generate_go_code(_input: &str, _output: &str, _service: Option<String>)
 }
 
 fn generate_rust_service_template(service_name: &str) -> Result<String> {
-    let template = format!(r#"
+    let template = format!(
+        r#"
 use quiccrunch_macros::rpc_service;
 use quiccrunch_core::rpc::{{RpcContext, RpcResult}};
 
@@ -110,8 +118,18 @@ mod tests {{
         assert!(result.is_ok());
     }}
 }}
-"#, service_name, service_name, service_name, service_name, service_name, service_name, service_name, service_name, service_name);
-    
+"#,
+        service_name,
+        service_name,
+        service_name,
+        service_name,
+        service_name,
+        service_name,
+        service_name,
+        service_name,
+        service_name
+    );
+
     Ok(template)
 }
 
@@ -128,30 +146,30 @@ pub async fn handle_test(
         "Testing {}.{} at {} ({} requests, {} concurrent)",
         service, method, endpoint, requests, concurrency
     ));
-    
+
     // Parse JSON parameters
     let _params: serde_json::Value = serde_json::from_str(&params)
         .map_err(|e| anyhow::anyhow!("Invalid JSON parameters: {}", e))?;
-    
+
     // TODO: Implement actual RPC testing
     // For now, simulate test results
-    
+
     use std::time::{Duration, Instant};
     let start = Instant::now();
-    
+
     // Simulate testing delay
     tokio::time::sleep(Duration::from_millis(100)).await;
-    
+
     let duration = start.elapsed();
     let rps = requests as f64 / duration.as_secs_f64();
-    
+
     crate::print_success(&format!(
         "Test completed: {} requests in {:.2}s ({:.2} req/s)",
         requests,
         duration.as_secs_f64(),
         rps
     ));
-    
+
     Ok(())
 }
 
@@ -163,25 +181,25 @@ pub async fn handle_call(
     _timeout: f64,
 ) -> Result<()> {
     crate::print_info(&format!("Calling {} at {}", method, endpoint));
-    
+
     // Parse method name (Service.method format)
     let parts: Vec<&str> = method.split('.').collect();
     if parts.len() != 2 {
         anyhow::bail!("Method must be in format 'ServiceName.method_name'");
     }
-    
+
     let service_name = parts[0];
     let method_name = parts[1];
-    
+
     // Parse JSON parameters
     let params: serde_json::Value = serde_json::from_str(&params)
         .map_err(|e| anyhow::anyhow!("Invalid JSON parameters: {}", e))?;
-    
+
     crate::print_info(&format!(
         "Calling {}.{} with params: {}",
         service_name, method_name, params
     ));
-    
+
     // TODO: Implement actual RPC call
     // For now, simulate a successful response
     let response = serde_json::json!({
@@ -189,10 +207,10 @@ pub async fn handle_call(
         "method": method_name,
         "echo": params
     });
-    
+
     println!("{}", "Response:".bold());
     println!("{}", serde_json::to_string_pretty(&response)?);
-    
+
     Ok(())
 }
 
@@ -202,17 +220,17 @@ pub async fn handle_serve(port: u16, service: String, watch: bool) -> Result<()>
         "Starting development server on port {} (service: {})",
         port, service
     ));
-    
+
     if watch {
         crate::print_info("Hot reloading enabled");
     }
-    
+
     // TODO: Implement actual server
     // For now, simulate server startup
-    
+
     crate::print_success(&format!("Server listening on http://localhost:{}", port));
     crate::print_info("Press Ctrl+C to stop");
-    
+
     // Keep the server running
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -232,22 +250,22 @@ pub async fn handle_benchmark(
         "Benchmarking {} for {}s with {} connections",
         method, duration, connections
     ));
-    
+
     // TODO: Implement actual benchmarking
     // For now, simulate benchmark results
-    
+
     use std::time::{Duration as StdDuration, Instant};
     let start = Instant::now();
-    
+
     // Simulate benchmark duration
     tokio::time::sleep(StdDuration::from_secs(1)).await;
-    
+
     let elapsed = start.elapsed();
-    
+
     // Simulate results
     let total_requests = connections * 100;
     let rps = total_requests as f64 / elapsed.as_secs_f64();
-    
+
     match output.as_str() {
         "json" => {
             let results = serde_json::json!({
@@ -265,8 +283,15 @@ pub async fn handle_benchmark(
         }
         "csv" => {
             println!("endpoint,method,duration_s,connections,total_requests,rps,avg_latency_ms,p95_latency_ms,p99_latency_ms");
-            println!("{},{},{:.2},{},{},{:.2},10.5,25.2,45.8", 
-                endpoint, method, elapsed.as_secs_f64(), connections, total_requests, rps);
+            println!(
+                "{},{},{:.2},{},{},{:.2},10.5,25.2,45.8",
+                endpoint,
+                method,
+                elapsed.as_secs_f64(),
+                connections,
+                total_requests,
+                rps
+            );
         }
         _ => {
             println!("{}", "Benchmark Results:".bold());
@@ -281,30 +306,34 @@ pub async fn handle_benchmark(
             println!("  99th Percentile: 45.8ms");
         }
     }
-    
+
     Ok(())
 }
 
 /// Handle the 'init' command
 pub async fn handle_init(name: String, template: String) -> Result<()> {
     crate::print_info(&format!("Initializing new QuicCrunch project: {}", name));
-    
+
     // Create project directory
     std::fs::create_dir_all(&name)?;
-    
+
     match template.as_str() {
         "basic" => create_basic_project(&name).await,
         "full" => create_full_project(&name).await,
         "microservice" => create_microservice_project(&name).await,
         _ => {
-            anyhow::bail!("Unknown template: {}. Available: basic, full, microservice", template);
+            anyhow::bail!(
+                "Unknown template: {}. Available: basic, full, microservice",
+                template
+            );
         }
     }
 }
 
 async fn create_basic_project(name: &str) -> Result<()> {
     // Create basic project structure
-    let cargo_toml = format!(r#"[package]
+    let cargo_toml = format!(
+        r#"[package]
 name = "{}"
 version = "0.1.0"
 edition = "2021"
@@ -314,8 +343,10 @@ quiccrunch-core = "0.1.0"
 quiccrunch-macros = "0.1.0"
 tokio = {{ version = "1.0", features = ["full"] }}
 anyhow = "1.0"
-"#, name);
-    
+"#,
+        name
+    );
+
     let main_rs = r#"use anyhow::Result;
 
 #[tokio::main]
@@ -324,11 +355,11 @@ async fn main() -> Result<()> {
     Ok(())
 }
 "#;
-    
+
     std::fs::write(format!("{}/Cargo.toml", name), cargo_toml)?;
     std::fs::create_dir_all(format!("{}/src", name))?;
     std::fs::write(format!("{}/src/main.rs", name), main_rs)?;
-    
+
     crate::print_success(&format!("Created basic QuicCrunch project in {}/", name));
     Ok(())
 }
