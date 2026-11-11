@@ -46,10 +46,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         run: |
-          sudo apt-get update
+          # GitHub's apt mirrors occasionally fail to resolve; retry rather
+          # than failing the job on a transient network error.
+          sudo apt-get -o Acquire::Retries=8 update
           # capnp/protoc are required by quiccrunch-core's build script.
           # Without them every job dies in build.rs, not in the code under test.
-          sudo apt-get install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
+          sudo apt-get -o Acquire::Retries=8 install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -63,10 +65,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         run: |
-          sudo apt-get update
+          # GitHub's apt mirrors occasionally fail to resolve; retry rather
+          # than failing the job on a transient network error.
+          sudo apt-get -o Acquire::Retries=8 update
           # capnp/protoc are required by quiccrunch-core's build script.
           # Without them every job dies in build.rs, not in the code under test.
-          sudo apt-get install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
+          sudo apt-get -o Acquire::Retries=8 install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
       - name: Build all targets
         run: cargo build --workspace --all-targets
       - name: Run tests
@@ -89,10 +93,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         run: |
-          sudo apt-get update
+          # GitHub's apt mirrors occasionally fail to resolve; retry rather
+          # than failing the job on a transient network error.
+          sudo apt-get -o Acquire::Retries=8 update
           # capnp/protoc are required by quiccrunch-core's build script.
           # Without them every job dies in build.rs, not in the code under test.
-          sudo apt-get install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
+          sudo apt-get -o Acquire::Retries=8 install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
       - run: cargo build --workspace --no-default-features
 
   # Optional manual run so beta drift does not break every PR.
@@ -107,10 +113,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         run: |
-          sudo apt-get update
+          # GitHub's apt mirrors occasionally fail to resolve; retry rather
+          # than failing the job on a transient network error.
+          sudo apt-get -o Acquire::Retries=8 update
           # capnp/protoc are required by quiccrunch-core's build script.
           # Without them every job dies in build.rs, not in the code under test.
-          sudo apt-get install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
+          sudo apt-get -o Acquire::Retries=8 install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace --no-fail-fast
 
@@ -155,10 +163,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         run: |
-          sudo apt-get update
+          # GitHub's apt mirrors occasionally fail to resolve; retry rather
+          # than failing the job on a transient network error.
+          sudo apt-get -o Acquire::Retries=8 update
           # capnp/protoc are required by quiccrunch-core's build script.
           # Without them every job dies in build.rs, not in the code under test.
-          sudo apt-get install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
+          sudo apt-get -o Acquire::Retries=8 install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
       - run: cargo bench --workspace
 
   docs:
@@ -172,8 +182,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         run: |
-          sudo apt-get update
+          # GitHub's apt mirrors occasionally fail to resolve; retry rather
+          # than failing the job on a transient network error.
+          sudo apt-get -o Acquire::Retries=8 update
           # capnp/protoc are required by quiccrunch-core's build script.
           # Without them every job dies in build.rs, not in the code under test.
-          sudo apt-get install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
+          sudo apt-get -o Acquire::Retries=8 install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
       - run: cargo doc --workspace --no-deps
