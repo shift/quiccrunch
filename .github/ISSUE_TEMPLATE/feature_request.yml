@@ -1,0 +1,62 @@
+name: Feature request
+description: Propose a change to the transport, RPC layer, benchmark, or documentation.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        QuicCrunch is a prototype with a narrow purpose: measuring whether QUIC
+        is a better backend messaging layer than tonic for a control plane.
+        Proposals are judged against that purpose, so please say what question
+        the change answers.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is missing or wrong today? Who is affected?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should happen instead? Include API sketches if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other designs, or doing nothing.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - transport (tQUIC adapter)
+        - mTLS / identity
+        - RPC layer / serialization
+        - Raft RPC
+        - benchmark methodology
+        - comparison harness
+        - documentation
+        - build / CI / Nix
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This is not a request to make the prototype production-ready without a defined user.
+          required: false
+        - label: This does not require publishing the crates or promising API stability.
+          required: false
+        - label: I checked `docs/README.md` and the known-issues folder first.
+          required: true

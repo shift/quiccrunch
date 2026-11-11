@@ -15,8 +15,12 @@ mod async_bridge_tests {
             return;
         }
         std::fs::create_dir_all(dir).expect("create cert dir");
-        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
-            .expect("generate self-signed cert");
+        // Use ECDSA P-256: BoringSSL (via tQUIC) rejects the default Ed25519
+        // key produced by `generate_simple_self_signed` on some builds.
+        let mut params =
+            rcgen::CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()]);
+        params.alg = &rcgen::PKCS_ECDSA_P256_SHA256;
+        let cert = rcgen::Certificate::from_params(params).expect("generate self-signed cert");
         std::fs::write(&cert_path, cert.serialize_pem().expect("cert pem")).expect("write cert");
         std::fs::write(&key_path, cert.serialize_private_key_pem()).expect("write key");
     }

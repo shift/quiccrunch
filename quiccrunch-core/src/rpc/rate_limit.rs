@@ -564,6 +564,25 @@ impl Clone for RateLimitInterceptor {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::interceptor::Interceptor for RateLimitInterceptor {
+    async fn before_request(
+        &self,
+        context: &mut crate::rpc::RpcContext,
+        params: &mut bytes::Bytes,
+    ) -> crate::RpcResult<()> {
+        let client_id = context
+            .metadata
+            .get("x-client-id")
+            .or_else(|| context.metadata.get("x-spiffe-id"))
+            .cloned()
+            .unwrap_or_else(|| "anonymous".to_string());
+        self.check_rate_limit(&client_id, &context.service, params.len())
+            .await
+            .map_err(|err| crate::RpcError::RateLimited(err.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

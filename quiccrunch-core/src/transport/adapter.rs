@@ -1999,11 +1999,24 @@ impl TquicClient {
     }
 
     pub async fn connect(&self, addr: &str) -> Result<TquicConnection, TransportError> {
+        self.connect_with_server_name(addr, None).await
+    }
+
+    /// Connect with an explicit TLS server name (SNI / certificate SAN).
+    /// `None` derives the name from the address, preserving the legacy
+    /// behaviour.
+    pub async fn connect_with_server_name(
+        &self,
+        addr: &str,
+        server_name: Option<&str>,
+    ) -> Result<TquicConnection, TransportError> {
         let server_addr: SocketAddr = addr
             .parse()
             .map_err(|e| TransportError::ConfigError(format!("Invalid address: {}", e)))?;
 
-        let server_name = server_addr.ip().to_string();
+        let server_name = server_name
+            .map(str::to_string)
+            .unwrap_or_else(|| server_addr.ip().to_string());
 
         let (conn_index, peer_identity) = self
             .runtime
