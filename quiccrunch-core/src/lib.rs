@@ -62,12 +62,12 @@ mod stream_splitter; // Stream splitting for concurrent RPC operations
 pub mod config;
 //pub mod client;
 //pub mod server;
+pub mod messaging;
 pub mod production;
 pub mod raft;
 pub mod rpc;
 
 // Interceptor/Middleware Framework for RPC
-#[cfg(feature = "auth")]
 pub mod interceptor;
 
 // Benchmark suite module
@@ -180,6 +180,10 @@ pub mod schema {
 
     pub mod raft_capnp {
         include!(concat!(env!("OUT_DIR"), "/schema/raft_capnp.rs"));
+    }
+
+    pub mod messaging_capnp {
+        include!(concat!(env!("OUT_DIR"), "/schema/messaging_capnp.rs"));
     }
 
     // Re-export types
