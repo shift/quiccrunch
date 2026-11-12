@@ -1,0 +1,42 @@
+[package]
+name = "quiccrunch-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+quiccrunch-core = { path = "../quiccrunch-core" }
+
+[[bin]]
+name = "frame_codec"
+path = "fuzz_targets/frame_codec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "messaging_decode"
+path = "fuzz_targets/messaging_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "raft_rpc_decode"
+path = "fuzz_targets/raft_rpc_decode.rs"
+test = false
+doc = false
+bench = false
+
+# Keep the fuzz crate out of the main workspace; cargo-fuzz builds it with
+# nightly and its own profile. The root workspace's [patch.crates-io] does not
+# apply to a separate workspace, so repeat the vendored tQUIC patch here.
+[patch.crates-io]
+tquic = { path = "../vendor/tquic" }
+
+[workspace]

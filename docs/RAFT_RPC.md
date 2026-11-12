@@ -20,8 +20,11 @@ u32 big-endian body length | flat Cap'n Proto Request/Response
 
 `Request.contractVersion` and `Response.contractVersion` are mandatory and
 currently `1`. A server rejects an unknown version before interpreting the
-payload. New fields use new ordinals; existing field numbers and types are
-never reused.
+payload, and the error names both the received and supported versions. New
+fields use new ordinals; existing field numbers and types are never reused.
+Unknown optional fields are safely ignored by older decoders; a new required
+field is a breaking change and must bump `contractVersion`. The compatibility
+suite is `quiccrunch-core/tests/schema_evolution.rs`.
 
 ### AppendEntries
 

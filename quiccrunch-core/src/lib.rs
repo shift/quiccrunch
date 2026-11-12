@@ -49,6 +49,7 @@
 //! ```
 
 mod error;
+pub mod frame_header;
 pub mod transport;
 //pub mod connection_pool;
 //pub mod crypto_accel;

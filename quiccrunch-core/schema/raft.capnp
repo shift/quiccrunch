@@ -102,6 +102,10 @@ struct Request {
         requestVote     @3 :RequestVote;
         installSnapshot @4 :InstallSnapshotChunk;
     }
+
+    # Optional field added after contract v1. Old v1 decoders ignore it
+    # (Cap'n Proto forward compatibility); it is not required for v1.
+    traceId @5 :Text;
 }
 
 struct Response {

@@ -38,6 +38,10 @@ struct Envelope {
     streamEnd @8 :StreamEnd;
     error @9 :Error;
   }
+
+  # Optional field added after contract v1. Old v1 decoders ignore it
+  # (Cap'n Proto forward compatibility); it is not required for v1.
+  traceId @10 :Text;
 }
 
 struct Identity {
