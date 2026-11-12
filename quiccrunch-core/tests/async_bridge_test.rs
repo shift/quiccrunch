@@ -5,24 +5,50 @@ mod async_bridge_tests {
     use std::time::Duration;
     use tokio::time::timeout;
 
-    /// Generate the self-signed certificate material expected by these tests.
-    /// The PEM files are gitignored; generate them on demand.
-    fn ensure_test_certs() {
-        let dir = std::path::Path::new("tests/certs");
-        let cert_path = dir.join("cert.pem");
-        let key_path = dir.join("key.pem");
-        if cert_path.exists() && key_path.exists() {
-            return;
-        }
-        std::fs::create_dir_all(dir).expect("create cert dir");
+    /// Certificate material for one test invocation.
+    ///
+    /// The `TempDir` must stay alive for as long as the server/client use the
+    /// paths: dropping it removes the PEM files.
+    struct TestCerts {
+        _dir: tempfile::TempDir,
+        cert_file: String,
+        key_file: String,
+    }
+
+    /// Generate fresh, per-test self-signed certificate material.
+    ///
+    /// Cargo runs test functions in parallel threads. Writing to a shared
+    /// `tests/certs` directory meant one thread could read `key.pem` while
+    /// another was still writing it, which BoringSSL rejects with
+    /// `use private key file(...) failed`. A private `TempDir` per test makes
+    /// the files unique to the caller, so no locking or shared state is
+    /// needed and stale files from a previous run are never reused.
+    fn ensure_test_certs() -> Result<TestCerts, String> {
+        let dir = tempfile::tempdir().map_err(|e| format!("create cert temp dir: {e}"))?;
         // Use ECDSA P-256: BoringSSL (via tQUIC) rejects the default Ed25519
         // key produced by `generate_simple_self_signed` on some builds.
         let mut params =
             rcgen::CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()]);
         params.alg = &rcgen::PKCS_ECDSA_P256_SHA256;
-        let cert = rcgen::Certificate::from_params(params).expect("generate self-signed cert");
-        std::fs::write(&cert_path, cert.serialize_pem().expect("cert pem")).expect("write cert");
-        std::fs::write(&key_path, cert.serialize_private_key_pem()).expect("write key");
+        let cert = rcgen::Certificate::from_params(params)
+            .map_err(|e| format!("generate self-signed cert: {e}"))?;
+
+        let cert_path = dir.path().join("cert.pem");
+        let key_path = dir.path().join("key.pem");
+        std::fs::write(
+            &cert_path,
+            cert.serialize_pem()
+                .map_err(|e| format!("serialize cert: {e}"))?,
+        )
+        .map_err(|e| format!("write {}: {e}", cert_path.display()))?;
+        std::fs::write(&key_path, cert.serialize_private_key_pem())
+            .map_err(|e| format!("write {}: {e}", key_path.display()))?;
+
+        Ok(TestCerts {
+            cert_file: cert_path.to_string_lossy().into_owned(),
+            key_file: key_path.to_string_lossy().into_owned(),
+            _dir: dir,
+        })
     }
 
     #[tokio::test]
@@ -51,10 +77,10 @@ mod async_bridge_tests {
 
     #[tokio::test]
     async fn test_server_creation() {
-        ensure_test_certs();
+        let certs = ensure_test_certs().expect("generate test certificates");
         let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let cert_file = "tests/certs/cert.pem".to_string();
-        let key_file = "tests/certs/key.pem".to_string();
+        let cert_file = certs.cert_file.clone();
+        let key_file = certs.key_file.clone();
 
         let result = TquicServer::new(bind_addr, cert_file, key_file, None).await;
         assert!(result.is_ok(), "TquicServer creation should succeed");
@@ -62,10 +88,10 @@ mod async_bridge_tests {
 
     #[tokio::test]
     async fn test_server_listen() {
-        ensure_test_certs();
+        let certs = ensure_test_certs().expect("generate test certificates");
         let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let cert_file = "tests/certs/cert.pem".to_string();
-        let key_file = "tests/certs/key.pem".to_string();
+        let cert_file = certs.cert_file.clone();
+        let key_file = certs.key_file.clone();
 
         let server = TquicServer::new(bind_addr, cert_file, key_file, None)
             .await
@@ -77,10 +103,10 @@ mod async_bridge_tests {
 
     #[tokio::test]
     async fn test_client_server_connection() {
-        ensure_test_certs();
+        let certs = ensure_test_certs().expect("generate test certificates");
         let bind_addr: SocketAddr = "127.0.0.1:14433".parse().unwrap();
-        let cert_file = "tests/certs/cert.pem".to_string();
-        let key_file = "tests/certs/key.pem".to_string();
+        let cert_file = certs.cert_file.clone();
+        let key_file = certs.key_file.clone();
 
         let server = TquicServer::new(bind_addr, cert_file, key_file, None)
             .await
@@ -132,10 +158,10 @@ mod async_bridge_tests {
 
     #[tokio::test]
     async fn test_bidirectional_stream() {
-        ensure_test_certs();
+        let certs = ensure_test_certs().expect("generate test certificates");
         let bind_addr: SocketAddr = "127.0.0.1:14434".parse().unwrap();
-        let cert_file = "tests/certs/cert.pem".to_string();
-        let key_file = "tests/certs/key.pem".to_string();
+        let cert_file = certs.cert_file.clone();
+        let key_file = certs.key_file.clone();
 
         let server = TquicServer::new(bind_addr, cert_file, key_file, None)
             .await
@@ -218,10 +244,10 @@ mod async_bridge_tests {
 
     #[tokio::test]
     async fn test_multiple_streams_per_connection() {
-        ensure_test_certs();
+        let certs = ensure_test_certs().expect("generate test certificates");
         let bind_addr: SocketAddr = "127.0.0.1:14435".parse().unwrap();
-        let cert_file = "tests/certs/cert.pem".to_string();
-        let key_file = "tests/certs/key.pem".to_string();
+        let cert_file = certs.cert_file.clone();
+        let key_file = certs.key_file.clone();
 
         let server = TquicServer::new(bind_addr, cert_file, key_file, None)
             .await
@@ -294,7 +320,6 @@ mod async_bridge_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Needs refinement - immediate failure vs timeout"]
     async fn test_connection_timeout() {
         let client = TquicClient::with_options(RuntimeOptions {
             // Loopback self-signed test certificate: verification is explicitly off.
@@ -327,12 +352,11 @@ mod async_bridge_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Runtime lifecycle issue - client runtime stops before connection completes"]
     async fn test_echo_service_full_e2e() {
-        ensure_test_certs();
+        let certs = ensure_test_certs().expect("generate test certificates");
         let bind_addr: SocketAddr = "127.0.0.1:14437".parse().unwrap();
-        let cert_file = "tests/certs/cert.pem".to_string();
-        let key_file = "tests/certs/key.pem".to_string();
+        let cert_file = certs.cert_file.clone();
+        let key_file = certs.key_file.clone();
 
         let server = TquicServer::new(bind_addr, cert_file, key_file, None)
             .await
@@ -483,12 +507,11 @@ mod async_bridge_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Runtime lifecycle issue - same as test_echo_service_full_e2e"]
     async fn test_concurrent_connections() {
-        ensure_test_certs();
+        let certs = ensure_test_certs().expect("generate test certificates");
         let bind_addr: SocketAddr = "127.0.0.1:14436".parse().unwrap();
-        let cert_file = "tests/certs/cert.pem".to_string();
-        let key_file = "tests/certs/key.pem".to_string();
+        let cert_file = certs.cert_file.clone();
+        let key_file = certs.key_file.clone();
 
         let server = TquicServer::new(bind_addr, cert_file, key_file, None)
             .await
@@ -499,27 +522,31 @@ mod async_bridge_tests {
             .await
             .expect("Server listen failed");
 
+        // Each client opens a separate connection, so the server must keep
+        // accepting rather than serving only the first one.
         tokio::spawn(async move {
-            match timeout(Duration::from_secs(5), listener.accept()).await {
-                Ok(Ok(conn)) => {
-                    println!("Server accepted connection");
-                    for i in 0..3 {
-                        if let Ok(Ok(stream)) =
-                            timeout(Duration::from_secs(5), conn.accept_stream()).await
-                        {
-                            println!("Server accepted stream {}", i);
-                            tokio::spawn(async move {
-                                if let Ok(data) = stream.receive(1024).await {
-                                    if !data.is_empty() {
-                                        let _ = stream.send(&data, false).await;
+            loop {
+                match timeout(Duration::from_secs(5), listener.accept()).await {
+                    Ok(Ok(conn)) => {
+                        println!("Server accepted connection");
+                        tokio::spawn(async move {
+                            match timeout(Duration::from_secs(5), conn.accept_stream()).await {
+                                Ok(Ok(stream)) => {
+                                    println!("Server accepted stream");
+                                    if let Ok(data) = stream.receive(1024).await {
+                                        if !data.is_empty() {
+                                            let _ = stream.send(&data, false).await;
+                                        }
                                     }
                                 }
-                            });
-                        }
+                                Ok(Err(e)) => eprintln!("Server accept_stream error: {:?}", e),
+                                Err(_) => eprintln!("Server accept_stream timeout"),
+                            }
+                        });
                     }
+                    Ok(Err(e)) => eprintln!("Server accept error: {:?}", e),
+                    Err(_) => break,
                 }
-                Ok(Err(e)) => eprintln!("Server accept error: {:?}", e),
-                Err(_) => eprintln!("Server accept timeout"),
             }
         });
 
