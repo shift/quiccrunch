@@ -196,7 +196,7 @@ pub type MetricsHandle = Arc<MessagingMetrics>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MessagingError {
-    #[error("unsupported contract version: {0}")]
+    #[error("unsupported contract version: {0} (supported: {})", CONTRACT_VERSION)]
     UnsupportedVersion(u16),
     #[error("frame too large: {size} > {max}")]
     FrameTooLarge { size: usize, max: usize },
@@ -697,6 +697,7 @@ fn decode_identity(reader: identity::Reader<'_>) -> Result<PeerIdentity> {
 fn decode_metadata(
     reader: capnp::struct_list::Reader<'_, key_value::Owned>,
 ) -> Result<HashMap<String, String>> {
+    check_len("metadata", reader.len() as usize, MAX_METADATA_ENTRIES)?;
     let mut metadata = HashMap::new();
     for entry in reader.iter() {
         let key = read_text(entry.get_key().map_err(codec_err)?)?;

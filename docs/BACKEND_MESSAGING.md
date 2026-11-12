@@ -41,14 +41,44 @@ Services:
 
 Versioning rules:
 
-- `Envelope.contractVersion` is mandatory and currently `1`.
-- Servers reject unknown versions before touching payloads.
+- `Envelope.contractVersion` is mandatory and currently `1`. It is the
+  **major** version. Additive minor changes do not change it; a breaking
+  change increments it.
+- Servers reject unknown versions before touching payloads. The error names
+  both the received and the supported version, e.g.
+  `unsupported contract version: 2 (supported: 1)`.
 - New fields use new ordinals; existing field numbers/types are never reused.
-  `Error.earliestAvailable`, `Error.serverLatest` and `Error.retryable` were
-  added this way; v1 decoders that predate them read the Cap'n Proto defaults.
+  `Error.earliestAvailable`, `Error.serverLatest`, `Error.retryable` and the
+  optional `Envelope.traceId` were added this way.
+- **Unknown fields are safely ignored.** Cap'n Proto readers only follow the
+  ordinals they know, so a v1 decoder ignores a field added in a later minor
+  revision and reads the documented default for it. The schema does not use a
+  reject-unknown-fields policy.
+- A new **required** field is a breaking change: it must bump
+  `contractVersion`. A v1 decoder rejects the new version before reading the
+  payload, so it cannot silently substitute a default for the required field.
 - `MAX_ENVELOPE_BYTES`, `MAX_BUNDLE_BYTES`, `MAX_EVENTS_PER_INGEST` and
   `MAX_METADATA_ENTRIES` are enforced on encode and decode.
 - Decode uses a 4 MiB traversal limit and nesting limit 32.
+
+### Evolution rules and compatibility matrix
+
+| Change | Version bump | v1 decoder behaviour |
+| --- | --- | --- |
+| Add an optional field with a new ordinal | Minor (no `contractVersion` change) | Safely ignores it; known fields decode normally |
+| Add a new enum value | Minor | Unknown value is a decode error for that field; callers must handle it |
+| Add a new message type / union arm | Minor | Unknown union arm is a decode error; old peers cannot use the new call |
+| Change a field type or reuse an ordinal | **Major** | Rejected by the version gate |
+| Add a required field | **Major** | Rejected by the version gate before payload decode |
+| Remove or rename a field | **Major** | Rejected by the version gate |
+| Change the meaning of an existing field | **Major** | Rejected by the version gate |
+
+The compatibility suite is
+`quiccrunch-core/tests/schema_evolution.rs`. It proves forward compatibility
+for an added optional field, asserts the ignore-unknown-fields policy, and
+proves that a v2 message with a required field is rejected by the v1 decoder
+with an error naming both versions. The Raft contract follows the same rules;
+its version gate is in `quiccrunch-core/src/raft/codec.rs`.
 
 ## 3. Watch resume semantics
 
@@ -231,10 +261,10 @@ architecture.
 | Flow control / bounded watch chunking | Slow consumers can stall streams | **Closed** — bounded queues + slow-consumer close |
 | Watch resume correctness (server-side retention) | Missed events after disconnect | **Closed** — `PolicyStore` ring buffer + `resume-too-old` |
 | Mutation retry idempotency | Duplicate lease/event application | **Closed within window** — request-id dedupe; at-least-once outside |
-| Schema evolution policy + compatibility tests | Safe v1→v2 rollout | Open — 1 week (new-ordinal rule documented; no compat suite) |
+| Schema evolution policy + compatibility tests | Safe v1→v2 rollout | **Closed** — rules documented; `schema_evolution` suite covers optional fields, unknown-field policy and major-version rejection |
 | Prometheus/OTel exporter + `/metrics`, health endpoints | Operability | Partially closed — atomic snapshots exist; no exporter/endpoint |
 | Per-worker metrics/health, graceful drain | Multi-worker operations | Open — 1 week |
-| Fuzzing (decode/auth/streaming) + adversarial TLS tests | Assurance | Open — 1–2 weeks |
+| Fuzzing (decode/auth/streaming) + adversarial TLS tests | Assurance | **Wire decoders closed** — `fuzz/` targets + stable `prop_wire` proptests; auth/streaming/TLS remain in `docs/known-issues/fuzzing-coverage.md` |
 | Revocation of policy versions / compromised node keys | Cannot withdraw a bad bundle | Open — requires contract extension |
 | Latency work (2 ms p50 / 35 ms p99 measured) | Lease/heartbeat tail latency | Open — 2–3 weeks |
 
@@ -255,6 +285,24 @@ nix develop -c cargo test --workspace
 nix develop -c cargo clippy --workspace --all-targets -- -D warnings
 nix develop -c cargo audit
 ```
+
+### Fuzzing and property tests
+
+The stable test gate includes `quiccrunch-core/tests/prop_wire.rs`, which
+exercises the same decoders as the nightly fuzz targets with structured and
+adversarial inputs. The nightly targets live in `fuzz/` and are run manually or
+from the `Fuzz (nightly)` `workflow_dispatch` CI job:
+
+```bash
+rustup toolchain install nightly
+cargo install cargo-fuzz --locked
+rustup run nightly scripts/fuzz.sh   # 60 s per target
+FUZZ_SECONDS=120 rustup run nightly scripts/fuzz.sh
+```
+
+Targets: `frame_codec`, `messaging_decode`, `raft_rpc_decode`. See
+`fuzz/README.md` and `docs/known-issues/fuzzing-coverage.md` for what is still
+unfuzzed.
 
 ### Feature gate
 

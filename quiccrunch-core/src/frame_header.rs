@@ -57,6 +57,7 @@ impl FrameHeader {
     }
 
     pub fn encode(&self) -> Vec<u8> {
+        #[allow(unused_mut)]
         let mut buf = self.length.to_le_bytes().to_vec();
 
         #[cfg(feature = "telemetry")]
@@ -64,12 +65,14 @@ impl FrameHeader {
             buf.extend_from_slice(&tc.trace_id.to_bytes());
             buf.extend_from_slice(&tc.span_id.to_le_bytes());
             buf.push(tc.trace_flags.to_u8());
-            
+
             let state_bytes = tc.trace_state.to_string().into_bytes();
             buf.extend_from_slice(&(state_bytes.len() as u16).to_le_bytes());
             buf.extend_from_slice(&state_bytes);
         } else {
-            buf.extend_from_slice(&[0u8; 16]); // Empty trace ID
+            // Empty trace context: 16-byte trace id, 8-byte span id, flags,
+            // and a zero-length trace-state string.
+            buf.extend_from_slice(&[0u8; 27]);
         }
 
         buf
@@ -84,19 +87,21 @@ impl FrameHeader {
 
         #[cfg(feature = "telemetry")]
         {
-            if buf.len() < 24 { // 4 + 16 + 4 minimum for length + trace_id + span_id
+            // 4-byte length + 16-byte trace id + 8-byte span id + 1-byte
+            // flags + 2-byte state length = 31 bytes minimum.
+            if buf.len() < 31 {
                 return None;
             }
 
             let trace_id = TraceId::from_bytes(buf[4..20].try_into().ok()?);
             let span_id = u64::from_le_bytes(buf[20..28].try_into().ok()?);
             let trace_flags = TraceFlags::from_u8(buf[28]);
-            
+
             let state_len = u16::from_le_bytes(buf[29..31].try_into().ok()?) as usize;
-            let state_bytes = &buf[31..31+state_len];
-            let trace_state = TraceState::from_str(
-                std::str::from_utf8(state_bytes).ok()?
-            ).ok()?;
+            let state_end = 31usize.checked_add(state_len)?;
+            let state_bytes = buf.get(31..state_end)?;
+            let trace_state =
+                std::str::FromStr::from_str(std::str::from_utf8(state_bytes).ok()?).ok()?;
 
             let trace_context = if !trace_id.is_zero() {
                 Some(TraceContext {
@@ -116,8 +121,6 @@ impl FrameHeader {
         }
 
         #[cfg(not(feature = "telemetry"))]
-        Some(Self {
-            length,
-        })
+        Some(Self { length })
     }
 }

@@ -102,6 +102,28 @@ jobs:
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace --no-fail-fast
 
+  fuzz:
+    name: Fuzz (nightly, manual)
+    # Never run on push/PR: cargo-fuzz needs nightly and a bounded run is
+    # intentionally slow. The stable proptest suite in the normal test job
+    # covers the same decoders on every PR.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang pkg-config libssl-dev capnproto protobuf-compiler
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run bounded fuzz targets
+        env:
+          FUZZ_SECONDS: "60"
+        run: ./scripts/fuzz.sh
+
   nix:
     name: Nix dev shell (main only)
     # Full nix evaluation is slow; gate it to main pushes. Pull requests still

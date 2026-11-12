@@ -254,8 +254,9 @@ pub fn decode_request(frame: &[u8]) -> RaftResult<RequestMessage> {
         return Err(RaftError::new(
             ErrorCode::InvalidRequest,
             format!(
-                "unsupported contract version {}",
-                req.get_contract_version()
+                "unsupported contract version {} (supported: {})",
+                req.get_contract_version(),
+                RAFT_CONTRACT_VERSION
             ),
         ));
     }
@@ -428,8 +429,9 @@ pub fn decode_response(frame: &[u8]) -> RaftResult<ResponseMessage> {
         return Err(RaftError::new(
             ErrorCode::InvalidRequest,
             format!(
-                "unsupported contract version {}",
-                resp.get_contract_version()
+                "unsupported contract version {} (supported: {})",
+                resp.get_contract_version(),
+                RAFT_CONTRACT_VERSION
             ),
         ));
     }
