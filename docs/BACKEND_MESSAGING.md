@@ -217,20 +217,32 @@ the transport identity merged in #6 and the RPC interceptor chain.
    configured with `client_ca_file` requests a client certificate, fails the
    handshake when none is presented, and rejects a chain outside the configured
    trust domain. `RuntimeMetrics::mtls_rejections` counts rejections.
-3. **Peer identity**: `TquicConnection::peer_identity()` returns the SPIFFE
+3. **Revocation**: with `crl_files` configured, the adapter checks the verified
+   peer chain against issuer CRLs before reporting the connection as
+   established. `CrlPolicy::Required` (default) is fail closed for a missing,
+   expired, malformed or badly signed CRL; a listed serial is rejected.
+   `revocation_rejections*` counters break rejections down by reason.
+   Established connections are not re-checked; revocation applies to the next
+   handshake. OCSP is not implemented (see [`SECURITY.md`](SECURITY.md)).
+4. **Hot rotation**: server certificate/key, client certificate/key, trust
+   anchors and CRLs are reloaded on `reload_interval` or on
+   `reload_tls_material()`. A reload swaps material atomically for new
+   handshakes and never drops established connections; see
+   [`operations/certificate-rotation.md`](operations/certificate-rotation.md).
+5. **Peer identity**: `TquicConnection::peer_identity()` returns the SPIFFE
    X.509-SVID from the chain BoringSSL verified. The server copies it into
    `RpcContext` metadata under `x-quiccrunch-peer-spiffe-id`; that key is never
    read from peer-supplied metadata. An unverified certificate never yields an
    identity.
-4. **Authz**: `SpiffePolicy` maps `Service.Method` to allowed SPIFFE IDs and
+6. **Authz**: `SpiffePolicy` maps `Service.Method` to allowed SPIFFE IDs and
    fails closed for protected methods with no identity. `AuthorizationPolicy`
    additionally requires the `waf` role for `EventIngest`.
-5. **Authn**: bearer tokens in `authorization` metadata are verified by
+7. **Authn**: bearer tokens in `authorization` metadata are verified by
    `AuthInterceptor` (HS256/RS256, expiry, issuer, audience).
-6. **Rate limiting / metrics**: `RateLimitInterceptor` keys on
+8. **Rate limiting / metrics**: `RateLimitInterceptor` keys on
    `x-client-id`/`x-spiffe-id`; `MetricsInterceptor` records totals, failures
    and latency.
-7. **Envelope identity**: `Envelope.Request.identity` is advisory only and is
+9. **Envelope identity**: `Envelope.Request.identity` is advisory only and is
    ignored unless `allow_untrusted_identity` is explicitly enabled for
    development. Production authorization uses the transport identity.
 
@@ -365,8 +377,11 @@ Identity-based authorization therefore uses the adapter path
 
 ```bash
 nix develop -c cargo test -p quiccrunch-core --test mtls_identity -- --test-threads=1
+nix develop -c cargo test -p quiccrunch-core --test revocation_rotation -- --test-threads=1
 ```
 
-The test generates a CA, server certificate and client certificates (including
-foreign-CA, expired and rogue-trust-domain cases), then runs real mTLS
-handshakes over loopback UDP.
+The mTLS test generates a CA, server certificate and client certificates
+(including foreign-CA, expired and rogue-trust-domain cases), then runs real
+mTLS handshakes over loopback UDP. The revocation/rotation test generates CRLs
+in-test and covers revoked, expired, missing and malformed CRLs plus server
+certificate and trust-anchor rotation.

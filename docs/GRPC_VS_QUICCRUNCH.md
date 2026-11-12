@@ -232,10 +232,13 @@ tens-to-hundreds of microseconds that separate these transports are not the
 bottleneck. Switching would buy no latency and would lose bulk throughput.
 
 The non-performance blocker has changed: the adapter now supports client
-certificate presentation, required server-side mTLS, and SPIFFE-bound peer
-identity reaching the method policy layer (see [`SECURITY.md`](SECURITY.md) and
-[`BACKEND_MESSAGING.md`](BACKEND_MESSAGING.md)). The remaining identity gaps are
-revocation (CRL/OCSP) and CA/server-certificate rotation without a restart. The
+certificate presentation, required server-side mTLS, SPIFFE-bound peer
+identity reaching the method policy layer, fail-closed CRL revocation, and hot
+rotation of server certificates, client certificates, trust anchors and CRLs
+without dropping connections (see [`SECURITY.md`](SECURITY.md),
+[`operations/certificate-rotation.md`](operations/certificate-rotation.md) and
+[`BACKEND_MESSAGING.md`](BACKEND_MESSAGING.md)). OCSP is not implemented and is
+documented as an explicit non-goal for this tQUIC/BoringSSL surface. The
 flaky 1-worker/64-connection/depth-1800 cell remains an additional operational
 risk, not a reason to migrate.
 

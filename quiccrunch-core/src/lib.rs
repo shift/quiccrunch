@@ -66,6 +66,11 @@ pub mod config;
 #[cfg(feature = "tls")]
 pub mod identity;
 
+// Certificate revocation (CRL) checking uses the same x509-parser path as the
+// SPIFFE identity extraction and therefore also requires TLS.
+#[cfg(feature = "tls")]
+pub mod revocation;
+
 // Asking for the tQUIC backend without TLS would silently produce a server
 // that cannot authenticate its peers. Fail the build instead.
 #[cfg(all(feature = "backend-tquic", not(feature = "tls")))]
