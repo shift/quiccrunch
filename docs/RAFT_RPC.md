@@ -275,34 +275,37 @@ dead pooled connection during replication.
 
 ## 7. Benchmark
 
-`quiccrunch-core/examples/raft_append_bench.rs`, driven by
-`scripts/bench_raft.sh`. Three servers on loopback, TLS on, 512-byte entry,
-sequential AppendEntries round trips. The service is a transport echo (no
-durable log or consensus work). Host was shared; every run records the
-1-minute load average. Three runs, medians below.
+The earlier development-profile numbers are withdrawn: they were not release
+measurements, the host was at load ~19, and there was no tonic comparison.
 
-| run | load1 | ops | rate/s | p50 µs | p95 µs | p99 µs | errors |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 19.47 | 6218 | 1244 | 287 | 2135 | 10431 | 0 |
-| 2 | 19.36 | 3138 | 628 | 1249 | 3005 | 11599 | 0 |
-| 3 | 19.17 | 4991 | 998 | 286 | 2915 | 11215 | 0 |
-| **median** | **19.36** | — | **998** | **287** | **2915** | **11215** | **0** |
+The corrected harness is the `raft-compare` workspace member
+(`raft-compare/src/main.rs`, `raft-compare/proto/raft.proto`,
+`scripts/bench_raft_vs_grpc.sh`, `scripts/raft_bench_medians.py`). It runs the
+same logical `AppendEntries` contract on tonic/HTTP2 and QuicCrunch, with the
+same bincode entry bytes (512 B and 4 KiB), the same 3-node loopback topology,
+TLS on both sides, three alternating repeats and 1/3/5 in-flight appends.
 
-These are development-profile numbers (`opt-level = 1`) on a host at load ~19,
-not a capacity claim. The spread between runs (628–1244 ops/s) is host noise;
-the p50 is bimodal because a scheduled-out client thread shows up as a whole
-scheduler slice. Absolute numbers matter less than repeatability and the
-absence of errors.
+The host is shared and was not quiet for this run. Per-cell 1-minute load was
+**4.77–8.71**, so the numbers are **provisional**. Medians of three repeats:
 
-**QuicCrunch/tonic ratio: not measured for Raft.** There is no comparable
-tonic AppendEntries harness in either repository; the existing tonic comparison
-in `comparison/` is a 1 KiB echo matrix, not Raft. Do not read a transport ratio
-into the numbers above. The honest summary remains the one in
-[`GRPC_VS_QUICCRUNCH.md`](GRPC_VS_QUICCRUNCH.md): on the echo matrix tonic wins
-most depth ≥64 cells, and distri-kv's control plane is fsync-bound, so this work
-does not establish a performance reason to switch. A tonic Raft comparison
-would need the same 3-node topology, the same service work, and the same load
-recording; that harness does not exist yet.
+| payload | depth | tonic ops/s | QUIC ops/s | QUIC/tonic | tonic p50 µs | QUIC p50 µs | tonic p99 µs | QUIC p99 µs | winner |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---|
+| 512 B | 1 | 8,095 | 7,357 | 0.91 | 118 | 131 | 179 | 210 | tonic |
+| 512 B | 3 | 24,339 | 9,464 | 0.39 | 113 | 303 | 297 | 553 | tonic |
+| 512 B | 5 | 33,300 | 12,138 | 0.36 | 141 | 384 | 263 | 769 | tonic |
+| 4 KiB | 1 | 7,804 | 4,836 | 0.62 | 122 | 195 | 186 | 280 | tonic |
+| 4 KiB | 3 | 23,882 | 6,863 | 0.29 | 118 | 419 | 275 | 713 | tonic |
+| 4 KiB | 5 | 29,724 | 8,396 | 0.28 | 154 | 571 | 378 | 1,040 | tonic |
+
+Errors were 0 in every cell. **Tonic wins all six cells**: the gap is smallest
+at depth 1 (0.91× at 512 B, 0.62× at 4 KiB) and roughly 2.5–3.6× at depths 3
+and 5. The service handler is 1–2 µs p99 for both, so the difference is
+transport queueing/serialisation, not service work. Full method, per-cell
+loads and caveats: [`RAFT_TRANSPORT_PERFORMANCE.md`](RAFT_TRANSPORT_PERFORMANCE.md).
+
+**Decision.** QuicCrunch loses the append benchmark on this host. Keep tonic as
+the distri-kv Raft transport; retain the QuicCrunch Raft seam as an optional
+backend or a future QUIC experiment, not as a default.
 
 ## 8. Remaining gaps
 
@@ -326,8 +329,10 @@ recording; that harness does not exist yet.
   stream limit and the service's own limits; there is no global server shed
   counter yet.
 - **Metrics export.** Counters exist but are not exported to Prometheus/OTel.
-- **Identity.** Server-certificate verification is on; mTLS peer-certificate
-  access is still blocked by tQUIC 1.6 (same gap as the WAF messaging
-  prototype).
-- **Comparison harness.** A tonic `PartitionRaft` benchmark with identical
-  service work and a recorded-load median protocol is still missing.
+- **Identity.** Server-certificate verification is on and the vendored tQUIC
+  patch exposes the verified peer certificate as a SPIFFE identity; see
+  [`SECURITY.md`](SECURITY.md) and `SpiffePolicy`.
+- **Comparison harness.** The `raft-compare` member provides the tonic
+  `PartitionRaft`-shaped harness with identical service work and a
+  recorded-load median protocol. Its results are provisional while the shared
+  host is loaded; see [`RAFT_TRANSPORT_PERFORMANCE.md`](RAFT_TRANSPORT_PERFORMANCE.md).
