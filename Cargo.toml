@@ -4,6 +4,7 @@ members = [
     "quiccrunch-macros",
     "quiccrunch-cli",
     "comparison",
+    "raft-compare",
 ]
 # quiccrunch-ffi is legacy: it targets a high-level client/server API that is
 # currently disabled in quiccrunch-core. Keep it out of the workspace until it

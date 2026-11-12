@@ -1,0 +1,25 @@
+[package]
+name = "raft-compare"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "AppendEntries benchmark: tonic vs QuicCrunch over the same Raft RPC contract"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+quiccrunch-core = { path = "../quiccrunch-core" }
+
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+bytes = { workspace = true }
+anyhow = "1"
+bincode = "1.3"
+hdrhistogram = "7"
+prost = "0.13"
+rcgen = "0.12"
+tempfile = "3"
+tonic = { version = "0.12", features = ["transport", "tls"] }
+
+[build-dependencies]
+tonic-build = "0.12"
