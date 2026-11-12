@@ -1,8 +1,9 @@
 # Backend Messaging (WAF ↔ distri-kv)
 
-Status: **prototype / conditional candidacy** — QuicCrunch is not yet approved as
-the WAF↔distri-kv transport, but the blockers identified in
-`quiccrunch-evaluation.md` now have concrete fixes and a working prototype.
+Status: **prototype, contract v1** — the messaging contract is implemented on
+top of the merged mTLS/SPIFFE transport identity and the bounded
+watch-retention/reconnect/backpressure machinery. QuicCrunch is still not the
+default WAF↔distri-kv transport; the remaining gaps are listed in §11.
 
 ## 1. What was built
 
@@ -11,12 +12,14 @@ the WAF↔distri-kv transport, but the blockers identified in
 | Workspace build | `cargo check --workspace --all-targets` passes |
 | Workspace tests | `cargo test --workspace` passes (doctest examples in `quiccrunch-core` are disabled; they describe an unimplemented high-level API) |
 | CI lint gate | `cargo clippy --workspace --all-targets -- -D warnings` passes |
-| TLS defaults | Peer verification is **on by default**; `verify_cert = false` is rejected unless `allow_insecure_tls = true` |
-| mTLS | Client certificate/key and CA bundle are applied to BoringSSL; servers request/verify client certs when a CA is configured |
-| Metadata | Request metadata is serialized/deserialized in Cap'n Proto; bearer tokens now cross the wire |
+| TLS defaults | Server certificates are verified by default; the messaging path has no insecure mode. Tests use a generated CA. |
+| mTLS | Clients present `client_cert_file`/`client_key_file`; a server with `client_ca_file` requires a client certificate and rejects the handshake otherwise |
+| Peer identity | `TquicConnection::peer_identity()` returns the SPIFFE ID from the verified chain; `SpiffePolicy` authorizes methods. Envelope identity is never trusted. |
+| Metadata | Request metadata is serialized/deserialized in Cap'n Proto; bearer tokens cross the wire |
 | Auth / RBAC / rate limit / metrics | `RpcServer` has a mandatory interceptor chain; `AuthInterceptor`, `RateLimitInterceptor` and `MetricsInterceptor` are invoked before/after dispatch |
 | Dependency audit | `cargo audit`: **0 vulnerabilities** (13 informational unmaintained warnings) |
-| Messaging prototype | Versioned Cap'n Proto schema, server dispatch, Rust client, in-memory loopback tests |
+| Messaging contract | Versioned Cap'n Proto schema, server dispatch, pooled Rust client, loopback and real-socket tests |
+| Feature gate | None needed: messaging is in the default build and adds no optional dependency; the socket adapter uses the default `backend-tquic` feature |
 | Watch resume | Bounded per-policy retention, exact `sinceVersion` replay, explicit `resume-too-old` |
 | Reconnect / pooling | Endpoint-keyed bounded pool, backoff+jitter, idle eviction, self-healing watcher |
 | Backpressure | Bounded per-watch/subscriber queues, slow-consumer close, `EventIngest` shedding |
@@ -173,28 +176,38 @@ are plain atomics so a Prometheus/OTel exporter can scrape them without a lock.
 
 ## 9. Security model
 
-1. **Transport**: TLS 1.3 via BoringSSL. Client verification defaults on.
-   Configure `ca_cert_file` (or rely on an explicitly opted-in insecure mode for
-   tests). `server_name` is configurable so DNS/SPIFFE SANs can be verified.
-2. **mTLS**: `client_cert_file` + `client_key_file` are presented by clients;
-   servers request and verify client certificates when `ca_cert_file` is set.
-3. **Identity**: the transport layer is expected to supply `PeerIdentity`.
-   Envelope-asserted identity is only honoured with
-   `allow_untrusted_identity = true` (development).
-4. **Authn**: bearer tokens in `authorization` metadata are verified by
-   `AuthInterceptor` (HS256/RS256, expiry, issuer, audience).
-5. **Authz**: per-method roles in `AuthorizationPolicy`; the prototype requires
-   role `waf` for `EventIngest`.
-6. **Rate limiting**: `RateLimitInterceptor` is part of the server chain and
-   keys on `x-client-id` / `x-spiffe-id`. The sub-token refill bug was fixed.
-7. **Metrics**: `MetricsInterceptor` records totals, failures and latency.
+The messaging layer does not implement its own TLS or identity model. It uses
+the transport identity merged in #6 and the RPC interceptor chain.
 
-Known limitation: tQUIC 1.6 does not expose the peer certificate to the
-application. The server can request/verify a client certificate, but cannot yet
-read its SPIFFE ID. Until that is available, identity must be bound at the
-application layer (e.g. a signed identity assertion) or tQUIC must gain a peer
-certificate accessor. This is the single blocking item for a production mTLS
-identity model.
+1. **Transport**: TLS 1.3 via the vendored tQUIC/BoringSSL stack. The client
+   verifies the server chain and name (`verify_server_cert = true`); the
+   messaging path has no insecure switch. Loopback tests generate a CA and pass
+   `ca_cert_file`.
+2. **mTLS**: clients present `client_cert_file` + `client_key_file`. A server
+   configured with `client_ca_file` requests a client certificate, fails the
+   handshake when none is presented, and rejects a chain outside the configured
+   trust domain. `RuntimeMetrics::mtls_rejections` counts rejections.
+3. **Peer identity**: `TquicConnection::peer_identity()` returns the SPIFFE
+   X.509-SVID from the chain BoringSSL verified. The server copies it into
+   `RpcContext` metadata under `x-quiccrunch-peer-spiffe-id`; that key is never
+   read from peer-supplied metadata. An unverified certificate never yields an
+   identity.
+4. **Authz**: `SpiffePolicy` maps `Service.Method` to allowed SPIFFE IDs and
+   fails closed for protected methods with no identity. `AuthorizationPolicy`
+   additionally requires the `waf` role for `EventIngest`.
+5. **Authn**: bearer tokens in `authorization` metadata are verified by
+   `AuthInterceptor` (HS256/RS256, expiry, issuer, audience).
+6. **Rate limiting / metrics**: `RateLimitInterceptor` keys on
+   `x-client-id`/`x-spiffe-id`; `MetricsInterceptor` records totals, failures
+   and latency.
+7. **Envelope identity**: `Envelope.Request.identity` is advisory only and is
+   ignored unless `allow_untrusted_identity` is explicitly enabled for
+   development. Production authorization uses the transport identity.
+
+The worker-pool path (`AsyncTquicClient`) installs TLS and can require client
+certificates, but does not yet expose the peer identity to the async API.
+Identity-based authorization therefore uses the adapter path
+(`TquicClient`/`TquicServer`) until that is added.
 
 ## 10. Dependency remediation
 
@@ -205,15 +218,15 @@ Updated: `bytes` 1.12.1, `capnp`/`capnpc` 0.27.x, `tonic` 0.12, `prost` 0.13,
 
 ## 11. Assessment: can QuicCrunch become a viable backend messaging layer?
 
-**Conditionally, yes for the application layer; not yet for production
-identity.** The unary and streaming contract, watch resume, bounded retention,
-reconnect/pooling and backpressure are implemented and tested, and the security
-scaffolding is wired rather than dead code. Remaining gaps are concrete
-engineering items rather than missing architecture.
+**Conditionally, yes for the application layer; identity is no longer the
+blocker.** The unary and streaming contract, watch resume, bounded retention,
+reconnect/pooling, backpressure and mTLS/SPIFFE identity are implemented and
+tested. Remaining gaps are concrete engineering items rather than missing
+architecture.
 
 | Gap | Impact | Status / estimate |
 | --- | --- | --- |
-| Peer certificate / SPIFFE identity from tQUIC | Blocks production mTLS authorization | Open — 2–3 weeks (patch tQUIC or add identity assertion) |
+| Peer certificate / SPIFFE identity from tQUIC | Blocks production mTLS authorization | **Closed** — vendored tQUIC patch + `SpiffePolicy` |
 | Reconnect, backoff, health-aware pooling | Control plane resilience | **Closed** — `MessagingPool` + `PolicyWatcher` |
 | Flow control / bounded watch chunking | Slow consumers can stall streams | **Closed** — bounded queues + slow-consumer close |
 | Watch resume correctness (server-side retention) | Missed events after disconnect | **Closed** — `PolicyStore` ring buffer + `resume-too-old` |
@@ -225,14 +238,13 @@ engineering items rather than missing architecture.
 | Revocation of policy versions / compromised node keys | Cannot withdraw a bad bundle | Open — requires contract extension |
 | Latency work (2 ms p50 / 35 ms p99 measured) | Lease/heartbeat tail latency | Open — 2–3 weeks |
 
-**Total to production parity: roughly 6–10 engineer-weeks**, down from 10–16
-now that resume, pooling and backpressure are closed. The remaining blocking
-item for a production identity model is still the peer certificate accessor.
+**Total to production parity: roughly 4–8 engineer-weeks**, down from 10–16
+now that identity, resume, pooling and backpressure are closed.
 
 Recommendation: keep QuicCrunch as a **prototype backend** behind a
 `PolicySource`/`EventSink`-style trait boundary. Do not make it the default
-control-plane transport until peer identity is exposed by the QUIC stack and the
-observability/schema-evolution work lands.
+control-plane transport until the observability, schema-evolution and
+operational-hardening work lands.
 
 ## 12. Running the prototype
 
@@ -243,6 +255,14 @@ nix develop -c cargo test --workspace
 nix develop -c cargo clippy --workspace --all-targets -- -D warnings
 nix develop -c cargo audit
 ```
+
+### Feature gate
+
+Messaging is part of the default build and adds no optional dependency beyond
+crates already in the default tree (`capnp`, `bytes`, `async-trait`, `tokio`).
+The socket adapter uses the default `backend-tquic` feature, so there is no
+separate `backend-messaging` feature to enable. The contract types, server
+dispatch and in-memory loopback tests are compiled unconditionally.
 
 The loopback test covers unary calls, server streaming, identity rejection,
 per-method RBAC, rate limiting and metrics interception without opening a
@@ -268,37 +288,9 @@ replicated policy backend; replication itself is the backend's responsibility.
 
 ## Peer identity (mTLS / SPIFFE)
 
-
-This document describes how a backend connection's authenticated identity is
-carried into QuicCrunch's RPC authorization layer. It complements
-[`SECURITY.md`](SECURITY.md), which covers the TLS/mTLS configuration itself.
-
-### Connection identity (adapter path)
-
-`TquicConnection::peer_identity() -> Option<PeerIdentity>` returns the identity
-extracted from the **verified** peer certificate chain (SPIFFE X.509-SVID).
-On the server this is the client workload; on the client it is the server
-workload. `TquicListener::accept_with_identity()` returns the same value next to
-the accepted connection.
-
-The identity is `None` when:
-
-* the peer presented no certificate (normal for a one-way TLS client), or
-* the certificate has no `spiffe://` URI SAN, or
-* mTLS is off on the server (a client certificate was never requested), or
-* the local TLS stack did not verify the peer chain (client with
-  `verify_server_cert` off). An unverified certificate is never exposed as an
-  identity.
-
-On a server configured with `RuntimeOptions::client_ca_file`, `None` cannot
-reach the accept path for a live connection: the handshake fails, or the
-connection is closed in `on_conn_established`, and
-`RuntimeMetrics::mtls_rejections` is incremented.
-
-### From connection to `RpcContext`
-
-The server is responsible for copying the transport identity into the request
-context. Use the provided helper so the metadata key cannot drift:
+The transport identity is the only identity the messaging layer trusts. It is
+extracted from the certificate chain BoringSSL verified, never from the
+envelope or from peer-supplied metadata.
 
 ```rust
 let mut metadata = HashMap::new();
@@ -309,54 +301,24 @@ if let Some(identity) = connection.peer_identity() {
 
 `PeerIdentity::insert_metadata` writes
 `x-quiccrunch-peer-spiffe-id = spiffe://<trust-domain>/ns/<ns>/sa/<sa>`.
-
-**Trust boundary:** never copy this key from peer-supplied metadata. It must
-only be populated from `TquicConnection::peer_identity()`. The interceptor
-cannot tell the difference, so the server-side copy is the enforcement point.
-
-### Method policy
-
 `quiccrunch_core::identity::SpiffePolicy` maps a `Service.Method` key to the
-exact SPIFFE IDs allowed to call it:
+exact SPIFFE IDs allowed to call it; a protected method with no identity is
+denied, and an empty allowlist denies every identity. The `auth`-feature
+`SpiffeIdentityInterceptor` applies the policy in the existing interceptor
+chain. This is orthogonal to JWT authentication: SPIFFE proves which workload
+opened the connection, while a JWT can carry end-user or tenant claims.
 
-```rust
-let mut policy = SpiffePolicy::new();
-policy.allow(
-    "Raft.AppendEntries",
-    vec![SpiffeId::parse("spiffe://cluster.local/ns/kv/sa/raft")?],
-);
-policy.deny_all("Admin.Shutdown");
-```
+The worker-pool path (`AsyncTquicClient`) installs TLS and can require client
+certificates, but does not yet expose the peer identity to the async API.
+Identity-based authorization therefore uses the adapter path
+(`TquicClient`/`TquicServer`) until that is added.
 
-* a method with no rule is not restricted by this policy;
-* an empty allowlist denies every identity (fail the method closed);
-* a missing identity is denied for any protected method.
-
-The `auth`-feature `SpiffeIdentityInterceptor` applies this policy in the
-existing interceptor chain. Its `with_require_identity(true)` mode additionally
-requires a transport identity for methods without a rule.
-
-This is orthogonal to JWT authentication: SPIFFE proves *which workload
-process* opened the connection, while a JWT (or another token) can carry
-end-user or tenant claims. A typical server enables both.
-
-### Worker-pool path
-
-`AsyncTquicClient`/`transport/worker.rs` now installs a `TlsConfig`, honours
-`WorkerConfig::verify_cert` and `WorkerConfig::ca_cert_file`, presents
-`client_cert_file`/`client_key_file`, and can require client certificates via
-`client_ca_file` plus `trust_domain`. It does **not** yet expose the peer
-identity to the async API, so identity-based authorization should use the
-adapter (`TquicClient`/`TquicServer`) until that is added.
-
-### Reproduce
+### Identity tests
 
 ```bash
-cd /tmp/opencode/qc-id
-nix develop -c env CARGO_TARGET_DIR=/run/media/shift/80c4f9f3-68ab-424f-830b-1c14514bc50f/code/.cargo-target-qc-id \
-  cargo test --offline -p quiccrunch-core --test mtls_identity -- --test-threads=1
+nix develop -c cargo test -p quiccrunch-core --test mtls_identity -- --test-threads=1
 ```
 
-The tests generate a CA, server certificate, client certificates (including a
-foreign-CA and an expired one) and a rogue-trust-domain SAN, then run real mTLS
+The test generates a CA, server certificate and client certificates (including
+foreign-CA, expired and rogue-trust-domain cases), then runs real mTLS
 handshakes over loopback UDP.
