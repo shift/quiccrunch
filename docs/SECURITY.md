@@ -154,12 +154,16 @@ the existing interceptor chain. Methods without a rule are unchanged; use
 
 ## Remaining gaps
 
-* Certificate revocation (CRL/OCSP) is not checked. The trust anchor and
-  expiry are checked by BoringSSL; a revoked-but-unexpired certificate is
-  still accepted.
-* Trust anchors and the server certificate are loaded at startup. Issuing a
-  second client certificate from the same CA works without a restart (tested);
-  rotating the CA or the server certificate still requires a restart.
+* Revocation is checked at handshake time (CRL only; see below). A certificate
+  that was valid when a connection was established is not re-checked for the
+  lifetime of that connection. Revoking a peer guarantees that its *next*
+  connection is rejected, not that an already-open connection is torn down.
+* OCSP (including stapled OCSP) is not implemented; the reason and the interim
+  stance are documented below.
+* Trust anchors, the server certificate/key, the client CA bundle and CRLs can
+  be hot-rotated (see below). The worker-pool path (`AsyncTquicClient`/`worker.rs`)
+  still installs its TLS config at construction; use the adapter
+  (`TquicClient`/`TquicServer`) when rotation is required.
 * SPIFFE bundle-endpoint federation and JWT-SVID support are not implemented;
   this is X.509-SVID identity only.
 * `AsyncTquicClient`/`worker.rs` now installs its `TlsConfig`, honours
@@ -173,20 +177,100 @@ the existing interceptor chain. Methods without a rule are unchanged; use
   early data `false`). If a caller enables it, request replay must be treated
   as a risk.
 
-## Revocation and trust-anchor rotation
+## Certificate revocation: CRL
 
-Both are unimplemented, and callers must plan around them:
+Revocation is implemented with `x509-parser` in
+`quiccrunch-core/src/revocation.rs`. BoringSSL has no CRL hook in this vendored
+tQUIC 1.6.0 build (no `X509_STORE_add_crl`/`CRL_CHECK` wrapper and no access to
+the verified chain from the TLS context), so the adapter checks the chain that
+BoringSSL accepted in `on_conn_established`, **before** the connection is
+reported as established and before any application stream is accepted. A
+revoked peer can complete the TLS handshake at the protocol level but is
+immediately closed with QUIC application error `0x102`; no application data
+flows.
 
-* **No CRL or OCSP.** A certificate that verified at handshake time remains
-  trusted for the lifetime of the connection. There is no online revocation
-  check and no reload hook for a revocation list. Revoking a peer means
-  removing its CA from the trust anchor and restarting the client.
-* **No CA rotation without a restart.** `RuntimeOptions::ca_cert_file` (or
-  `WorkerConfig::ca_cert_file`) is read once when the client is constructed.
-  Replacing the PEM on disk does not affect running clients. `CertificateRotator`
-  in `src/production.rs` is a standalone helper; no binary wires it to the
-  adapter's trust anchor.
-* The policy and disclosure process are in [`../SECURITY.md`](../SECURITY.md).
+Configuration (`RuntimeOptions`):
+
+| Option | Meaning |
+| --- | --- |
+| `crl_files: Vec<String>` | PEM or DER CRLs. Non-empty turns revocation on. |
+| `crl_policy: CrlPolicy` | `Required` (default) or explicit `IfPresent`. |
+| `reload_interval: Option<Duration>` | Bounded reload interval (default 60s); `None` disables periodic reloads. |
+
+Policy, in order:
+
+1. Each CRL is parsed and its signature verified against the issuer
+   certificate found in the same trust anchors BoringSSL uses. The issuer must
+   be a configured trust anchor; an unknown issuer, malformed CRL, bad
+   signature or missing `nextUpdate` makes the whole bundle unusable. At
+   startup that is a configuration error; on reload the previous bundle stays
+   active.
+2. Validity (`thisUpdate`/`nextUpdate`) is evaluated at every handshake, with a
+   5-minute clock-skew tolerance. An expired or not-yet-valid CRL for the
+   peer's issuer is a **handshake rejection** under `Required`; this is
+   deliberately fail closed even if the CRL was valid when it was loaded.
+3. A peer whose issuer has no loaded CRL is rejected under `Required`. A peer
+   from an issuer with a valid CRL is rejected only if its serial is listed.
+4. `CrlPolicy::IfPresent` is the only soft-fail mode. It is never selected
+   implicitly: it keeps enforcing any valid CRL but allows a handshake when no
+   valid CRL exists for the issuer. Do not use it where revocation is a
+   compliance requirement.
+
+CRL files are re-read when their metadata changes (periodic interval) or when
+an operator calls `TquicServer::reload_tls_material()` /
+`TquicClient::reload_tls_material()` (for example from an application SIGHUP
+handler). Established connections keep their identity; new handshakes use the
+new list.
+
+## Hot rotation of TLS material
+
+`TlsConfig` is no longer installed as an immutable object. The adapter installs
+a custom `tquic::TlsConfigSelector` that holds
+`Arc<RwLock<Arc<TlsConfig>>>`; every new handshake asks the selector for the
+current configuration, while existing connections keep the `TlsSession` they
+created. A reload:
+
+1. builds a complete candidate `TlsConfig` from the configured cert/key,
+   client certificate/key and trust-anchor paths (all parsing and
+   BoringSSL loading happens against the candidate);
+2. only then swaps the `Arc` under the write lock;
+3. on any parse/load failure keeps the old `Arc` active and increments a
+   failure metric. A partially written file therefore either fails to parse
+   (old material stays) or is never seen as valid until it is complete.
+
+Operators must publish material with write-to-temp + `fsync` + `rename`;
+`quiccrunch_core::revocation::write_atomic` implements this. See
+[`operations/certificate-rotation.md`](operations/certificate-rotation.md) for
+the procedure, CRL publishing and a rollback checklist.
+
+Metrics are exposed through `RuntimeMetrics::snapshot()`:
+
+* `cert_reload_success` / `cert_reload_failure`
+* `crl_reload_success` / `crl_reload_failure`
+* `cert_material_age_secs` / `crl_material_age_secs`
+* `revocation_rejections` with the reason counters
+  `revocation_rejections_revoked`, `revocation_rejections_unusable_crl`,
+  `revocation_rejections_missing_crl`,
+  `revocation_rejections_malformed_certificate`.
+
+## OCSP: not implemented, and why
+
+OCSP is **not** supported. This is a deliberate, documented non-implementation
+rather than a silent soft-fail:
+
+* the vendored tQUIC/BoringSSL `TlsConfig`/`Context` surface exposes no OCSP
+  stapling verification callback (`SSL_CTX_set_tlsext_status_cb`) and no
+  `SSL_get_tlsext_status_ocsp_resp` accessor;
+* `Connection` exposes only the peer certificate chain (via the local
+  peer-identity patch), not the TLS session or the stapled OCSP response;
+* tQUIC has no OCSP configuration or relay API, so there is nowhere to install
+  a responder URL, cache, nonce or soft/hard-fail policy.
+
+Adding OCSP would require a new patch to BoringSSL/tQUIC that exposes the
+stapled response and a verification hook, plus an HTTP client and response
+cache. Until then the interim stance is: **use CRLs and short-lived
+certificates**. CRLs are enforced fail-closed at handshake as described above;
+there is no on-line revocation fetch and no claim of OCSP support.
 
 ## Tests
 
@@ -202,6 +286,21 @@ runs over real loopback UDP sockets:
   identity it does not contain;
 * a second client certificate from the same CA is accepted without restarting
   the server.
+
+`quiccrunch-core/tests/revocation_rotation.rs` covers revocation and hot
+rotation over real loopback UDP sockets with in-test PKI and CRLs:
+
+* revoked client serial rejected, non-revoked client accepted;
+* expired CRL for a configured issuer fails the handshake closed;
+* missing CRL for the peer's issuer fails closed;
+* malformed and unverifiable-signature CRL reloads are rejected with a clear
+  error and the previous bundle stays active;
+* a CRL reload adds a newly revoked serial without a restart;
+* the bounded reload interval picks up a new CRL without a restart;
+* server certificate/key rotation serves the new certificate on new handshakes
+  while an established connection keeps working;
+* trust-anchor rotation accepts a certificate from the added CA and rejects one
+  from the removed CA, without a restart.
 
 `quiccrunch-core/src/transport/adapter.rs` also keeps:
 

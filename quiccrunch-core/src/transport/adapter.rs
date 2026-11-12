@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,10 +13,13 @@ use log::{debug, error, info, trace, warn};
 use mio::{Interest, Waker};
 use tokio::sync::{mpsc, oneshot};
 
-use tquic::{Config, Connection, Endpoint, PacketInfo, TlsConfig, TransportHandler};
+use tquic::{
+    Config, Connection, Endpoint, PacketInfo, TlsConfig, TlsConfigSelector, TransportHandler,
+};
 
 use crate::error::TransportError;
 use crate::identity::{peer_identity_from_chain, PeerIdentity};
+use crate::revocation::{CrlPolicy, RevocationError, RevocationStore};
 use crate::transport::messages::WorkerConfig;
 
 const MAX_BUF_SIZE: usize = 65536;
@@ -42,6 +47,372 @@ fn load_trust_anchors(
             description, path, e
         ))
     })
+}
+
+/// The file material that makes up one TLS configuration. Rebuilding a
+/// [`TlsConfig`] from these paths is what hot rotation performs.
+#[derive(Debug, Clone)]
+struct TlsMaterialSpec {
+    is_server: bool,
+    cert_file: Option<String>,
+    key_file: Option<String>,
+    /// Client CA (server) or server CA (client) handed to BoringSSL.
+    trust_anchor_file: Option<String>,
+    client_cert_file: Option<String>,
+    client_key_file: Option<String>,
+    verify: bool,
+    require_client_cert: bool,
+}
+
+impl TlsMaterialSpec {
+    fn build(&self) -> Result<TlsConfig, TransportError> {
+        if self.is_server {
+            let cert = self
+                .cert_file
+                .as_ref()
+                .ok_or_else(|| TransportError::ConfigError("Server requires cert_file".into()))?;
+            let key = self
+                .key_file
+                .as_ref()
+                .ok_or_else(|| TransportError::ConfigError("Server requires key_file".into()))?;
+            let mut tls_config = TlsConfig::new_server_config(
+                cert,
+                key,
+                vec![b"h3".to_vec(), b"http/0.9".to_vec()],
+                false,
+            )
+            .map_err(|e| TransportError::ConfigError(format!("TLS config failed: {:?}", e)))?;
+
+            if let Some(ca_file) = self.trust_anchor_file.as_ref() {
+                load_trust_anchors(&mut tls_config, ca_file, "client CA certificates")?;
+                if self.require_client_cert {
+                    tls_config.set_verify_client_cert(true);
+                }
+            }
+            Ok(tls_config)
+        } else {
+            let mut tls_config =
+                TlsConfig::new_client_config(vec![b"h3".to_vec(), b"http/0.9".to_vec()], false)
+                    .map_err(|e| {
+                        TransportError::ConfigError(format!("TLS config failed: {:?}", e))
+                    })?;
+
+            match (
+                self.client_cert_file.as_ref(),
+                self.client_key_file.as_ref(),
+            ) {
+                (Some(cert), Some(key)) => {
+                    tls_config.set_certificate_file(cert).map_err(|e| {
+                        TransportError::ConfigError(format!(
+                            "Failed to load client certificate from {}: {:?}",
+                            cert, e
+                        ))
+                    })?;
+                    tls_config.set_private_key_file(key).map_err(|e| {
+                        TransportError::ConfigError(format!(
+                            "Failed to load client private key from {}: {:?}",
+                            key, e
+                        ))
+                    })?;
+                }
+                (Some(_), None) => {
+                    return Err(TransportError::ConfigError(
+                        "client_cert_file is set but client_key_file is missing".into(),
+                    ))
+                }
+                (None, Some(_)) => {
+                    return Err(TransportError::ConfigError(
+                        "client_key_file is set but client_cert_file is missing".into(),
+                    ))
+                }
+                (None, None) => {}
+            }
+
+            if self.verify {
+                tls_config.set_verify(true);
+                if let Some(ca_file) = self.trust_anchor_file.as_ref() {
+                    load_trust_anchors(&mut tls_config, ca_file, "CA certificates")?;
+                }
+            }
+            Ok(tls_config)
+        }
+    }
+
+    fn paths(&self) -> Vec<PathBuf> {
+        [
+            self.cert_file.as_ref(),
+            self.key_file.as_ref(),
+            self.trust_anchor_file.as_ref(),
+            self.client_cert_file.as_ref(),
+            self.client_key_file.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(PathBuf::from)
+        .collect()
+    }
+
+    fn trust_anchor_paths(&self) -> Vec<PathBuf> {
+        self.trust_anchor_file.iter().map(PathBuf::from).collect()
+    }
+}
+
+/// A `TlsConfigSelector` whose active configuration can be swapped between
+/// handshakes. Existing connections keep the `TlsSession` they created with the
+/// previous configuration; only new handshakes see the new material.
+struct RotatingTlsConfig {
+    current: RwLock<Arc<TlsConfig>>,
+}
+
+impl RotatingTlsConfig {
+    fn new(config: TlsConfig) -> Self {
+        Self {
+            current: RwLock::new(Arc::new(config)),
+        }
+    }
+
+    fn replace(&self, config: TlsConfig) {
+        *self.current.write().unwrap() = Arc::new(config);
+    }
+
+    fn active(&self) -> Arc<TlsConfig> {
+        self.current.read().unwrap().clone()
+    }
+}
+
+impl TlsConfigSelector for RotatingTlsConfig {
+    fn get_default(&self) -> Option<Arc<TlsConfig>> {
+        Some(self.active())
+    }
+
+    fn select(&self, _server_name: &str) -> Option<Arc<TlsConfig>> {
+        Some(self.active())
+    }
+}
+
+/// Result of an explicit TLS material / CRL reload.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ReloadReport {
+    pub cert_reloaded: bool,
+    pub crl_reloaded: bool,
+    pub cert_error: Option<String>,
+    pub crl_error: Option<String>,
+}
+
+impl ReloadReport {
+    fn failed(&self) -> bool {
+        self.cert_error.is_some() || self.crl_error.is_some()
+    }
+}
+
+/// Shared, hot-swappable TLS and revocation material for one adapter.
+///
+/// A reload builds the candidate material completely before swapping it in. A
+/// parse or signature failure leaves the previously active material untouched
+/// and increments the corresponding failure counter.
+pub struct MaterialRotation {
+    spec: TlsMaterialSpec,
+    selector: Arc<RotatingTlsConfig>,
+    revocation: Arc<RwLock<Arc<RevocationStore>>>,
+    metrics: Arc<RuntimeMetrics>,
+    crl_files: Vec<PathBuf>,
+    crl_policy: CrlPolicy,
+    interval: Option<Duration>,
+    state: Mutex<RotationState>,
+}
+
+#[derive(Debug, Clone)]
+struct RotationState {
+    cert_fingerprint: String,
+    crl_fingerprint: String,
+    last_check: Instant,
+}
+
+impl MaterialRotation {
+    fn new(
+        spec: TlsMaterialSpec,
+        selector: Arc<RotatingTlsConfig>,
+        revocation: Arc<RwLock<Arc<RevocationStore>>>,
+        metrics: Arc<RuntimeMetrics>,
+        crl_files: Vec<PathBuf>,
+        crl_policy: CrlPolicy,
+        interval: Option<Duration>,
+    ) -> Self {
+        let state = RotationState {
+            cert_fingerprint: fingerprint(&spec.paths()),
+            crl_fingerprint: fingerprint(&crl_files),
+            last_check: Instant::now(),
+        };
+        Self {
+            spec,
+            selector,
+            revocation,
+            metrics,
+            crl_files,
+            crl_policy,
+            interval,
+            state: Mutex::new(state),
+        }
+    }
+
+    /// The currently active CRL bundle. Handshakes clone the `Arc` so a reload
+    /// never blocks or changes a check already in progress.
+    fn active_revocation(&self) -> Arc<RevocationStore> {
+        self.revocation.read().unwrap().clone()
+    }
+
+    /// Reload both TLS material and the CRL bundle now. Used by the interval
+    /// ticker and by operational tooling (for example an application SIGHUP
+    /// handler).
+    pub fn reload_now(&self) -> Result<ReloadReport, TransportError> {
+        let report = self.reload_components();
+        if !report.failed() {
+            let mut state = self.state.lock().unwrap();
+            state.cert_fingerprint = fingerprint(&self.spec.paths());
+            state.crl_fingerprint = fingerprint(&self.crl_files);
+            state.last_check = Instant::now();
+        }
+        if report.failed() {
+            Err(TransportError::ConfigError(format!(
+                "TLS material reload failed: cert={:?} crl={:?}",
+                report.cert_error, report.crl_error
+            )))
+        } else {
+            Ok(report)
+        }
+    }
+
+    fn reload_components(&self) -> ReloadReport {
+        let mut report = ReloadReport::default();
+
+        match self.spec.build() {
+            Ok(config) => {
+                self.selector.replace(config);
+                self.metrics
+                    .cert_reload_success
+                    .fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .cert_material_loaded_at
+                    .store(unix_now(), Ordering::Relaxed);
+                report.cert_reloaded = true;
+                info!("TLS certificate/key/trust anchors reloaded");
+            }
+            Err(e) => {
+                self.metrics
+                    .cert_reload_failure
+                    .fetch_add(1, Ordering::Relaxed);
+                error!("TLS material reload failed; previous material stays active: {e}");
+                report.cert_error = Some(e.to_string());
+            }
+        }
+
+        if !self.crl_files.is_empty() {
+            match RevocationStore::load(
+                &self.crl_files,
+                &self.spec.trust_anchor_paths(),
+                self.crl_policy,
+            ) {
+                Ok(store) => {
+                    *self.revocation.write().unwrap() = Arc::new(store);
+                    self.metrics
+                        .crl_reload_success
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.metrics
+                        .crl_material_loaded_at
+                        .store(unix_now(), Ordering::Relaxed);
+                    report.crl_reloaded = true;
+                    info!("CRL bundle reloaded");
+                }
+                Err(e) => {
+                    self.metrics
+                        .crl_reload_failure
+                        .fetch_add(1, Ordering::Relaxed);
+                    error!("CRL reload failed; previous bundle stays active: {e}");
+                    report.crl_error = Some(e.to_string());
+                }
+            }
+        }
+
+        report
+    }
+
+    /// Bounded-interval check. Cheap when nothing changed: only file metadata is
+    /// stat'ed, and files are re-read only when the fingerprint changes.
+    fn tick(&self) {
+        let Some(interval) = self.interval else {
+            return;
+        };
+        let now = Instant::now();
+        {
+            let mut state = self.state.lock().unwrap();
+            if now.duration_since(state.last_check) < interval {
+                return;
+            }
+            state.last_check = now;
+            if state.cert_fingerprint == fingerprint(&self.spec.paths())
+                && state.crl_fingerprint == fingerprint(&self.crl_files)
+            {
+                return;
+            }
+        }
+        if let Err(e) = self.reload_now() {
+            warn!("periodic TLS material reload failed: {e}");
+        }
+    }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Metadata fingerprint for a list of files or CA directories. A partially
+/// written file changes the fingerprint; it is only loaded if it parses, and a
+/// failed load keeps the previous material active.
+fn fingerprint(paths: &[PathBuf]) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    for path in paths {
+        match std::fs::metadata(path) {
+            Ok(meta) if meta.is_dir() => {
+                let _ = write!(out, "{}:dir:{};", path.display(), metadata_stamp(&meta));
+                if let Ok(entries) = std::fs::read_dir(path) {
+                    let mut names: Vec<String> = entries
+                        .flatten()
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect();
+                    names.sort();
+                    for name in names {
+                        let child = path.join(&name);
+                        if let Ok(child_meta) = std::fs::metadata(&child) {
+                            let _ =
+                                write!(out, "{}:{};", child.display(), metadata_stamp(&child_meta));
+                        }
+                    }
+                }
+            }
+            Ok(meta) => {
+                let _ = write!(out, "{}:{};", path.display(), metadata_stamp(&meta));
+            }
+            Err(_) => {
+                let _ = write!(out, "{}:missing;", path.display());
+            }
+        }
+    }
+    out
+}
+
+fn metadata_stamp(meta: &std::fs::Metadata) -> String {
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}:{}", meta.len(), modified)
 }
 
 /// Per-worker counters. Cheap enough to update on every batch (not every
@@ -72,6 +443,28 @@ pub struct RuntimeMetrics {
     /// True when this runtime was configured as a server with a client CA and
     /// therefore requires/verifies client certificates.
     pub mtls_enabled: std::sync::atomic::AtomicBool,
+    /// Successful reloads of TLS material (certificate, key, trust anchors).
+    pub cert_reload_success: AtomicU64,
+    /// Failed reloads of TLS material; the previous material stays active.
+    pub cert_reload_failure: AtomicU64,
+    /// Successful reloads of the CRL bundle.
+    pub crl_reload_success: AtomicU64,
+    /// Failed reloads of the CRL bundle; the previous bundle stays active.
+    pub crl_reload_failure: AtomicU64,
+    /// Unix timestamp (seconds) when the active TLS material was loaded.
+    pub cert_material_loaded_at: AtomicU64,
+    /// Unix timestamp (seconds) when the active CRL bundle was loaded.
+    pub crl_material_loaded_at: AtomicU64,
+    /// Total peer certificate rejections by the revocation layer.
+    pub revocation_rejections: AtomicU64,
+    /// Revocation rejections because the peer serial was listed in a CRL.
+    pub revocation_rejections_revoked: AtomicU64,
+    /// Revocation rejections because the issuer CRL was expired/not yet valid.
+    pub revocation_rejections_unusable_crl: AtomicU64,
+    /// Revocation rejections because no CRL was configured for the issuer.
+    pub revocation_rejections_missing_crl: AtomicU64,
+    /// Revocation rejections because the peer leaf certificate was malformed.
+    pub revocation_rejections_malformed_certificate: AtomicU64,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -92,6 +485,19 @@ pub struct RuntimeMetricsSnapshot {
     pub mtls_handshakes: u64,
     pub mtls_rejections: u64,
     pub mtls_enabled: bool,
+    pub cert_reload_success: u64,
+    pub cert_reload_failure: u64,
+    pub crl_reload_success: u64,
+    pub crl_reload_failure: u64,
+    /// Seconds since the active TLS material was loaded (0 if never).
+    pub cert_material_age_secs: u64,
+    /// Seconds since the active CRL bundle was loaded (0 if none configured).
+    pub crl_material_age_secs: u64,
+    pub revocation_rejections: u64,
+    pub revocation_rejections_revoked: u64,
+    pub revocation_rejections_unusable_crl: u64,
+    pub revocation_rejections_missing_crl: u64,
+    pub revocation_rejections_malformed_certificate: u64,
 }
 
 impl RuntimeMetrics {
@@ -113,8 +519,42 @@ impl RuntimeMetrics {
             mtls_handshakes: self.mtls_handshakes.load(Ordering::Relaxed),
             mtls_rejections: self.mtls_rejections.load(Ordering::Relaxed),
             mtls_enabled: self.mtls_enabled.load(Ordering::Relaxed),
+            cert_reload_success: self.cert_reload_success.load(Ordering::Relaxed),
+            cert_reload_failure: self.cert_reload_failure.load(Ordering::Relaxed),
+            crl_reload_success: self.crl_reload_success.load(Ordering::Relaxed),
+            crl_reload_failure: self.crl_reload_failure.load(Ordering::Relaxed),
+            cert_material_age_secs: material_age(
+                self.cert_material_loaded_at.load(Ordering::Relaxed),
+            ),
+            crl_material_age_secs: material_age(
+                self.crl_material_loaded_at.load(Ordering::Relaxed),
+            ),
+            revocation_rejections: self.revocation_rejections.load(Ordering::Relaxed),
+            revocation_rejections_revoked: self
+                .revocation_rejections_revoked
+                .load(Ordering::Relaxed),
+            revocation_rejections_unusable_crl: self
+                .revocation_rejections_unusable_crl
+                .load(Ordering::Relaxed),
+            revocation_rejections_missing_crl: self
+                .revocation_rejections_missing_crl
+                .load(Ordering::Relaxed),
+            revocation_rejections_malformed_certificate: self
+                .revocation_rejections_malformed_certificate
+                .load(Ordering::Relaxed),
         }
     }
+}
+
+fn material_age(loaded_at: u64) -> u64 {
+    if loaded_at == 0 {
+        return 0;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(loaded_at);
+    now.saturating_sub(loaded_at)
 }
 
 /// Pre-allocated buffer pool for common message sizes
@@ -438,6 +878,8 @@ struct TquicHandler {
     /// Whether an unauthenticated one-way TLS peer chain may be exposed as an
     /// identity. True only when the local TLS stack verified the peer chain.
     verify_peer_chain: bool,
+    /// Hot-swappable CRL bundle and TLS material for this worker.
+    rotation: Option<Arc<MaterialRotation>>,
     metrics: Arc<RuntimeMetrics>,
 }
 
@@ -446,12 +888,41 @@ struct PeerIdentityPolicy {
     trust_domain: String,
 }
 
+fn record_revocation_rejection(metrics: &RuntimeMetrics, error: &RevocationError) {
+    metrics
+        .revocation_rejections
+        .fetch_add(1, Ordering::Relaxed);
+    match error {
+        RevocationError::Revoked { .. } => {
+            metrics
+                .revocation_rejections_revoked
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        RevocationError::UnusableCrl { .. } => {
+            metrics
+                .revocation_rejections_unusable_crl
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        RevocationError::MissingCrl { .. } => {
+            metrics
+                .revocation_rejections_missing_crl
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        RevocationError::CertificateParse(_) => {
+            metrics
+                .revocation_rejections_malformed_certificate
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
 impl TquicHandler {
     fn new(
         event_tx: mpsc::UnboundedSender<TquicEvent>,
         stream_bufs: Arc<Mutex<HashMap<(u64, u64), StreamBuf>>>,
         peer_identity_policy: Option<PeerIdentityPolicy>,
         verify_peer_chain: bool,
+        rotation: Option<Arc<MaterialRotation>>,
         metrics: Arc<RuntimeMetrics>,
     ) -> Self {
         Self {
@@ -460,6 +931,7 @@ impl TquicHandler {
             event_tx,
             peer_identity_policy,
             verify_peer_chain,
+            rotation,
             metrics,
         }
     }
@@ -517,6 +989,32 @@ impl TransportHandler for TquicHandler {
         // policy. A failure closes the connection before it is reported as
         // established to the runtime, so no application data can flow.
         let chain = conn.peer_cert_chain();
+
+        // Revocation is enforced after BoringSSL has verified the chain and
+        // before the connection is reported established, so no application data
+        // flows from a revoked peer. The CRL bundle is snapshot per handshake;
+        // a concurrent reload cannot change a check in progress.
+        let chain_was_verified = matches!(&chain, Some(c) if !c.is_empty())
+            && (self.peer_identity_policy.is_some() || self.verify_peer_chain);
+        if chain_was_verified {
+            if let (Some(rotation), Some(chain)) = (&self.rotation, chain.as_deref()) {
+                let store = rotation.active_revocation();
+                if let Err(e) = store.check_chain(chain) {
+                    record_revocation_rejection(&self.metrics, &e);
+                    let reason = format!("peer certificate rejected by revocation policy: {e}");
+                    warn!("connection {}: {}", index, reason);
+                    if let Some(state) = self.connections.lock().unwrap().get_mut(&index) {
+                        state.rejected = true;
+                    }
+                    let _ = conn.close(true, 0x102, reason.as_bytes());
+                    let _ = self
+                        .event_tx
+                        .send(TquicEvent::ConnectionRejected { index, reason });
+                    return;
+                }
+            }
+        }
+
         let identity = match (&self.peer_identity_policy, chain.as_deref()) {
             (Some(policy), Some(chain)) if !chain.is_empty() => {
                 match peer_identity_from_chain(chain, Some(&policy.trust_domain)) {
@@ -721,6 +1219,7 @@ pub struct TquicAdapter {
     stream_bufs: Arc<Mutex<HashMap<(u64, u64), StreamBuf>>>,
     waker: Arc<Waker>,
     metrics: Arc<RuntimeMetrics>,
+    rotation: Option<Arc<MaterialRotation>>,
     running: bool,
     poll_events: mio::Events,
 }
@@ -771,6 +1270,20 @@ pub struct RuntimeOptions {
     /// SPIFFE trust domain that peer identities must belong to. Required when
     /// `client_ca_file` is set on a server.
     pub trust_domain: Option<String>,
+    /// CRL files (PEM or DER). When non-empty, revocation checking is on and
+    /// [`RuntimeOptions::crl_policy`] decides how a missing/expired issuer CRL
+    /// is treated. The CRL issuer certificate must be in the configured trust
+    /// anchors; BoringSSL has no CRL hook in this tQUIC build, so the adapter
+    /// checks the verified peer chain immediately after the handshake.
+    pub crl_files: Vec<String>,
+    /// Fail-closed (`Required`, default) or explicit soft-fail (`IfPresent`)
+    /// when no valid CRL is available for the peer's issuer.
+    pub crl_policy: CrlPolicy,
+    /// Bounded interval for checking material files and reloading changed TLS
+    /// material/CRLs. `None` disables periodic reloads (explicit
+    /// `reload_tls_material` still works). Established connections are never
+    /// dropped by a reload.
+    pub reload_interval: Option<Duration>,
 }
 
 impl Default for RuntimeOptions {
@@ -791,6 +1304,9 @@ impl Default for RuntimeOptions {
             client_key_file: None,
             client_ca_file: None,
             trust_domain: None,
+            crl_files: Vec::new(),
+            crl_policy: CrlPolicy::Required,
+            reload_interval: Some(Duration::from_secs(60)),
         }
     }
 }
@@ -815,6 +1331,9 @@ impl RuntimeOptions {
             client_key_file: None,
             client_ca_file: None,
             trust_domain: None,
+            crl_files: Vec::new(),
+            crl_policy: CrlPolicy::Required,
+            reload_interval: Some(Duration::from_secs(60)),
         }
     }
 
@@ -860,62 +1379,54 @@ impl TquicAdapter {
         quic_config.set_send_batch_size(64);
 
         let client_verify = !config.is_server && options.verify_server_cert && config.verify_cert;
-        let peer_identity_policy =
+        let metrics = Arc::new(RuntimeMetrics::default());
+
+        let tls_spec =
             if config.is_server {
-                let cert_file = config.cert_file.as_ref().ok_or_else(|| {
+                let cert_file = config.cert_file.clone().ok_or_else(|| {
                     TransportError::ConfigError("Server requires cert_file".into())
                 })?;
-                let key_file = config.key_file.as_ref().ok_or_else(|| {
+                let key_file = config.key_file.clone().ok_or_else(|| {
                     TransportError::ConfigError("Server requires key_file".into())
                 })?;
 
-                let mut tls_config = TlsConfig::new_server_config(
-                    cert_file,
-                    key_file,
-                    vec![b"h3".to_vec(), b"http/0.9".to_vec()],
-                    false,
-                )
-                .map_err(|e| TransportError::ConfigError(format!("TLS config failed: {:?}", e)))?;
-
                 let client_ca = options
                     .client_ca_file
-                    .as_ref()
-                    .or(config.client_ca_file.as_ref());
+                    .clone()
+                    .or_else(|| config.client_ca_file.clone());
                 let trust_domain = options
                     .trust_domain
-                    .as_ref()
-                    .or(config.trust_domain.as_ref());
+                    .clone()
+                    .or_else(|| config.trust_domain.clone());
 
-                let peer_identity_policy = if let Some(ca_file) = client_ca {
+                if let Some(ca_file) = client_ca.as_ref() {
                     let trust_domain = trust_domain.ok_or_else(|| {
                         TransportError::ConfigError(
                             "mTLS requires RuntimeOptions::trust_domain when client_ca_file is set"
                                 .into(),
                         )
                     })?;
-                    load_trust_anchors(&mut tls_config, ca_file, "client CA certificates")?;
-                    // SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT: request a
-                    // client certificate and make a missing/invalid one a fatal
-                    // handshake error.
-                    tls_config.set_verify_client_cert(true);
                     info!(
                         "tQUIC server mTLS ENABLED: client CA={}, trust domain={}",
                         ca_file, trust_domain
                     );
-                    Some(PeerIdentityPolicy {
-                        trust_domain: trust_domain.clone(),
-                    })
                 } else {
                     warn!(
                         "tQUIC server TLS is ONE-WAY: no client_ca_file configured, so client \
                      certificates are neither requested nor verified and mTLS is OFF"
                     );
-                    None
-                };
+                }
 
-                quic_config.set_tls_config(tls_config);
-
-                peer_identity_policy
+                TlsMaterialSpec {
+                    is_server: true,
+                    cert_file: Some(cert_file),
+                    key_file: Some(key_file),
+                    trust_anchor_file: client_ca,
+                    client_cert_file: None,
+                    client_key_file: None,
+                    verify: false,
+                    require_client_cert: true,
+                }
             } else {
                 // Two independent switches can disable verification: the runtime
                 // option (used by TquicRuntime clients) and WorkerConfig::verify_cert
@@ -925,40 +1436,18 @@ impl TquicAdapter {
                 let verify = client_verify;
                 let ca_file = options
                     .ca_cert_file
-                    .as_ref()
-                    .or(config.ca_cert_file.as_ref());
-
-                let mut tls_config =
-                    TlsConfig::new_client_config(vec![b"h3".to_vec(), b"http/0.9".to_vec()], false)
-                        .map_err(|e| {
-                            TransportError::ConfigError(format!("TLS config failed: {:?}", e))
-                        })?;
-
-                // Present a client certificate when configured. This is what makes
-                // the server's mTLS policy usable end-to-end.
+                    .clone()
+                    .or_else(|| config.ca_cert_file.clone());
                 let client_cert = options
                     .client_cert_file
-                    .as_ref()
-                    .or(config.client_cert_file.as_ref());
+                    .clone()
+                    .or_else(|| config.client_cert_file.clone());
                 let client_key = options
                     .client_key_file
-                    .as_ref()
-                    .or(config.client_key_file.as_ref());
-                match (client_cert, client_key) {
-                    (Some(cert), Some(key)) => {
-                        tls_config.set_certificate_file(cert).map_err(|e| {
-                            TransportError::ConfigError(format!(
-                                "Failed to load client certificate from {}: {:?}",
-                                cert, e
-                            ))
-                        })?;
-                        tls_config.set_private_key_file(key).map_err(|e| {
-                            TransportError::ConfigError(format!(
-                                "Failed to load client private key from {}: {:?}",
-                                key, e
-                            ))
-                        })?;
-                    }
+                    .clone()
+                    .or_else(|| config.client_key_file.clone());
+
+                match (&client_cert, &client_key) {
                     (Some(_), None) => {
                         return Err(TransportError::ConfigError(
                             "client_cert_file is set but client_key_file is missing".into(),
@@ -969,17 +1458,10 @@ impl TquicAdapter {
                             "client_key_file is set but client_cert_file is missing".into(),
                         ))
                     }
-                    (None, None) => {}
+                    _ => {}
                 }
 
-                if verify {
-                    tls_config.set_verify(true);
-                    // With no explicit CA file the BoringSSL context keeps the
-                    // platform trust store loaded in Context::new().
-                    if let Some(ca_file) = ca_file {
-                        load_trust_anchors(&mut tls_config, ca_file, "CA certificates")?;
-                    }
-                } else {
+                if !verify {
                     warn!(
                         "tQUIC client TLS server-certificate verification is DISABLED \
                      (verify_server_cert={}, WorkerConfig::verify_cert={}); \
@@ -988,10 +1470,77 @@ impl TquicAdapter {
                     );
                 }
 
-                quic_config.set_tls_config(tls_config);
-
-                None
+                TlsMaterialSpec {
+                    is_server: false,
+                    cert_file: None,
+                    key_file: None,
+                    trust_anchor_file: ca_file,
+                    client_cert_file: client_cert,
+                    client_key_file: client_key,
+                    verify,
+                    require_client_cert: false,
+                }
             };
+
+        let peer_identity_policy = if config.is_server {
+            tls_spec.trust_anchor_file.as_ref().map(|_| {
+                let trust_domain = options
+                    .trust_domain
+                    .clone()
+                    .or_else(|| config.trust_domain.clone())
+                    .expect("trust domain validated when client_ca_file is set");
+                PeerIdentityPolicy {
+                    trust_domain: trust_domain.clone(),
+                }
+            })
+        } else {
+            None
+        };
+
+        // Build the initial configuration from the same spec used by rotation,
+        // so the startup path and the reload path cannot drift apart.
+        let initial_tls = tls_spec.build()?;
+        let rotating_tls = Arc::new(RotatingTlsConfig::new(initial_tls));
+        quic_config.set_tls_config_selector(rotating_tls.clone());
+
+        let crl_files: Vec<PathBuf> = options.crl_files.iter().map(PathBuf::from).collect();
+        let initial_revocation = RevocationStore::load(
+            &crl_files,
+            &tls_spec.trust_anchor_paths(),
+            options.crl_policy,
+        )
+        .map_err(|e| TransportError::ConfigError(format!("CRL configuration error: {e}")))?;
+        if !crl_files.is_empty() {
+            info!(
+                "CRL revocation enabled: {} CRL file(s), policy={}",
+                crl_files.len(),
+                options.crl_policy
+            );
+        }
+        let revocation = Arc::new(RwLock::new(Arc::new(initial_revocation)));
+        metrics
+            .cert_material_loaded_at
+            .store(unix_now(), Ordering::Relaxed);
+        if !crl_files.is_empty() {
+            metrics
+                .crl_material_loaded_at
+                .store(unix_now(), Ordering::Relaxed);
+        }
+
+        metrics.mtls_enabled.store(
+            config.is_server && peer_identity_policy.is_some(),
+            Ordering::Relaxed,
+        );
+
+        let rotation = Arc::new(MaterialRotation::new(
+            tls_spec,
+            rotating_tls,
+            revocation,
+            metrics.clone(),
+            crl_files,
+            options.crl_policy,
+            options.reload_interval,
+        ));
 
         let poll = mio::Poll::new()?;
         let registry = poll.registry();
@@ -1001,11 +1550,6 @@ impl TquicAdapter {
 
         let bind_addr = config.bind_addr;
 
-        let metrics = Arc::new(RuntimeMetrics::default());
-        metrics.mtls_enabled.store(
-            config.is_server && peer_identity_policy.is_some(),
-            Ordering::Relaxed,
-        );
         let sock = Rc::new(QuicSocket::with_metrics(
             &bind_addr,
             registry,
@@ -1025,6 +1569,7 @@ impl TquicAdapter {
             stream_bufs.clone(),
             peer_identity_policy,
             verify_peer_chain,
+            Some(rotation.clone()),
             metrics.clone(),
         );
 
@@ -1044,6 +1589,7 @@ impl TquicAdapter {
             stream_bufs,
             waker,
             metrics,
+            rotation: Some(rotation),
             running: false,
             poll_events: mio::Events::with_capacity(1024),
         })
@@ -1051,6 +1597,10 @@ impl TquicAdapter {
 
     pub fn waker(&self) -> Arc<Waker> {
         self.waker.clone()
+    }
+
+    pub fn rotation_handle(&self) -> Option<Arc<MaterialRotation>> {
+        self.rotation.clone()
     }
 
     pub fn metrics(&self) -> Arc<RuntimeMetrics> {
@@ -1114,6 +1664,10 @@ impl TquicAdapter {
             }
 
             self.endpoint.on_timeout(Instant::now());
+
+            if let Some(rotation) = &self.rotation {
+                rotation.tick();
+            }
 
             while let Ok(event) = self.event_rx.try_recv() {
                 debug!("Received event: {:?}", event);
@@ -1255,6 +1809,11 @@ enum RuntimeCommand {
         conn_index: u64,
         resp: oneshot::Sender<Result<(), TransportError>>,
     },
+    /// Reload certificate/key/trust anchors and CRLs without dropping
+    /// established connections.
+    ReloadMaterial {
+        resp: oneshot::Sender<Result<ReloadReport, TransportError>>,
+    },
     Shutdown,
 }
 
@@ -1264,6 +1823,7 @@ pub struct TquicRuntime {
     waker: Arc<Waker>,
     wake_pending: Arc<std::sync::atomic::AtomicBool>,
     metrics: Arc<RuntimeMetrics>,
+    rotation: Option<Arc<MaterialRotation>>,
 }
 
 impl std::fmt::Debug for TquicRuntime {
@@ -1378,8 +1938,11 @@ impl TquicRuntime {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<RuntimeCommand>(2048);
         let wake_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let wake_pending_thread = wake_pending.clone();
-        let (waker_tx, waker_rx) =
-            std::sync::mpsc::sync_channel::<(Arc<Waker>, Arc<RuntimeMetrics>)>(1);
+        let (waker_tx, waker_rx) = std::sync::mpsc::sync_channel::<(
+            Arc<Waker>,
+            Arc<RuntimeMetrics>,
+            Option<Arc<MaterialRotation>>,
+        )>(1);
 
         let thread_handle = thread::spawn(move || {
             pin_current_thread_to_cpu(options.worker_id);
@@ -1405,7 +1968,11 @@ impl TquicRuntime {
 
             let mut adapter =
                 TquicAdapter::with_options(config, options).expect("Failed to create TquicAdapter");
-            let _ = waker_tx.send((adapter.waker(), adapter.metrics()));
+            let _ = waker_tx.send((
+                adapter.waker(),
+                adapter.metrics(),
+                adapter.rotation_handle(),
+            ));
 
             let stream_bufs = adapter.stream_bufs.clone();
             let mut pending_accepts: Vec<AcceptResponse> = Vec::new();
@@ -1605,6 +2172,14 @@ impl TquicRuntime {
                                 )));
                             }
                         }
+                        RuntimeCommand::ReloadMaterial { resp } => {
+                            let result = adapter
+                                .rotation
+                                .as_ref()
+                                .map(|r| r.reload_now())
+                                .unwrap_or_else(|| Ok(ReloadReport::default()));
+                            let _ = resp.send(result);
+                        }
                         RuntimeCommand::Shutdown => {
                             adapter.close();
                             return;
@@ -1616,6 +2191,10 @@ impl TquicRuntime {
                     error!("process connections error: {:?}", e);
                 }
                 adapter.endpoint.on_timeout(Instant::now());
+
+                if let Some(rotation) = &adapter.rotation {
+                    rotation.tick();
+                }
 
                 // Drain every event, not an arbitrary batch of 64. A backlog
                 // here directly becomes receiver latency.
@@ -1745,7 +2324,7 @@ impl TquicRuntime {
             }
         });
 
-        let (waker, metrics) = waker_rx.recv().map_err(|_| {
+        let (waker, metrics, rotation) = waker_rx.recv().map_err(|_| {
             TransportError::ConnectionFailed("Runtime thread failed to start".into())
         })?;
 
@@ -1755,6 +2334,7 @@ impl TquicRuntime {
             waker,
             wake_pending,
             metrics,
+            rotation,
         })
     }
 
@@ -1784,6 +2364,21 @@ impl TquicRuntime {
     /// Per-worker counters for diagnostics. Cheap to clone.
     pub fn metrics(&self) -> Arc<RuntimeMetrics> {
         self.metrics.clone()
+    }
+
+    /// Reload certificate/key/trust anchors and the CRL bundle without
+    /// restarting or dropping established connections. Returns an error when
+    /// either component failed; the previous material stays active.
+    pub async fn reload_tls_material(&self) -> Result<ReloadReport, TransportError> {
+        if self.rotation.is_none() {
+            return Ok(ReloadReport::default());
+        }
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.send_command(RuntimeCommand::ReloadMaterial { resp: resp_tx })
+            .await?;
+        resp_rx
+            .await
+            .map_err(|_| TransportError::ConnectionFailed("Runtime stopped".into()))?
     }
 
     pub async fn connect(
@@ -2002,6 +2597,13 @@ impl TquicClient {
         self.connect_with_server_name(addr, None).await
     }
 
+    /// Hot-reload TLS material and CRLs on the client (for example a client
+    /// certificate or the server trust anchors). Established connections are
+    /// unaffected.
+    pub async fn reload_tls_material(&self) -> Result<ReloadReport, TransportError> {
+        self.runtime.reload_tls_material().await
+    }
+
     /// Connect with an explicit TLS server name (SNI / certificate SAN).
     /// `None` derives the name from the address, preserving the legacy
     /// behaviour.
@@ -2066,6 +2668,12 @@ impl TquicServer {
     /// Runtime counters, including mTLS handshake and rejection counts.
     pub fn metrics(&self) -> Arc<RuntimeMetrics> {
         self.runtime.metrics()
+    }
+
+    /// Hot-reload TLS material and CRLs. Established connections keep the
+    /// identity they verified; new handshakes use the new material.
+    pub async fn reload_tls_material(&self) -> Result<ReloadReport, TransportError> {
+        self.runtime.reload_tls_material().await
     }
 
     pub async fn listen(&self, _addr: &str) -> Result<TquicListener, TransportError> {
