@@ -5,6 +5,11 @@ top of the merged mTLS/SPIFFE transport identity and the bounded
 watch-retention/reconnect/backpressure machinery. QuicCrunch is still not the
 default WAF↔distri-kv transport; the remaining gaps are listed in §11.
 
+**Pin the release, not a branch.** The first tagged release is
+`v0.1.0-alpha.1` (`0.1.0-alpha.1`, pre-release, commits only — the crates are
+not on crates.io). Use the exact `rev` and the compatibility rules in
+[`VERSIONING.md`](VERSIONING.md). Do not vendor a moving branch.
+
 ## 1. What was built
 
 | Area | Result |

@@ -1,6 +1,6 @@
 [package]
 name = "comparison"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
 publish = false
 description = "Same-shape head-to-head benchmark: tonic/h2 vs QuicCrunch"

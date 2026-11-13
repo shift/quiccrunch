@@ -1,6 +1,6 @@
 [package]
 name = "quiccrunch-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
 authors = ["QuicCrunch Contributors"]
 description = "High-performance QUIC RPC framework with Cap'n Proto serialization and dual backend support"

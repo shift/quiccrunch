@@ -36,8 +36,9 @@ No bug bounty is offered.
 
 | Version | Supported | Notes |
 | --- | --- | --- |
-| `main` (0.1.x prototype) | Best-effort fixes only | No release tags; API and wire formats may change without notice |
-| `docs/public-readiness`, `feat/mtls-identity`, `feat/backend-messaging` and other topic branches | No | Development branches; report against `main` where possible |
+| `v0.1.0-alpha.1` (pre-release) | Best-effort fixes only | First tagged alpha; API and wire formats may change. See [`RELEASE_NOTES.md`](RELEASE_NOTES.md) and [`docs/VERSIONING.md`](docs/VERSIONING.md) |
+| `main` (0.1.x prototype) | Best-effort fixes only | Development head; API and wire formats may change without notice |
+| Other topic branches | No | Development branches; report against `main` where possible |
 | Any published crate or binary | None exist | The crates are not published to crates.io |
 
 ## Security model on `main`
@@ -48,28 +49,30 @@ No bug bounty is offered.
 - Verification is disabled only for loopback tests with self-signed
   certificates, and each such call site says so inline. There is no
   `allow_insecure_tls` flag.
-- The server presents a certificate but does **not** request or verify client
-  certificates: `main` is one-way TLS. mTLS/SPIFFE peer identity is the subject
-  of [PR #6](https://github.com/shift/quiccrunch/pull/6) and is not available on
-  `main`.
-- `AsyncTquicClient` (`transport::worker`) builds a TLS config but never installs
-  it on the tQUIC `Config`, so it fails closed (the handshake cannot succeed).
-  Do not rely on that path for security decisions until it is wired up and
-  tested.
+- On the adapter path (`TquicClient`/`TquicServer`) a server configured with a
+  client CA requires a client certificate and rejects a handshake without one.
+  The verified chain must carry exactly one SPIFFE URI SAN in the configured
+  trust domain, and `SpiffePolicy` enforces per-method RBAC.
+- CRLs are enforced at handshake with `CrlPolicy::Required` (fail closed) as
+  the default; certificates, keys, trust anchors and CRLs can be hot-rotated.
+  See [`docs/SECURITY.md`](docs/SECURITY.md) for the accurate detail.
+- `AsyncTquicClient` (`transport::worker`) installs its TLS config but does not
+  yet expose the peer identity to callers. Use the adapter path for
+  identity-based authorization.
 
 ## Known gaps and caveats
 
 These are deliberate, documented limitations, not vulnerabilities:
 
-- **No revocation checking.** There is no CRL or OCSP support. A certificate
-  that is trusted at handshake time stays trusted until the connection ends.
-  Revoking a peer requires removing the CA or restarting the process.
-- **No CA rotation without a restart.** The trust anchor (`ca_cert_file`) is
-  loaded once when the client is constructed. Replacing the file on disk does
-  not affect running clients; a restart is required. `CertificateRotator` in
-  `production` is a helper and is not wired into any binary.
-- **No client certificates on `main`.** Anything that needs workload identity
-  must wait for PR #6 or terminate TLS in front of the service.
+- **No OCSP.** CRLs are supported, but OCSP (including stapled OCSP) is not.
+  A certificate that was valid when a connection was established is not
+  re-checked for the lifetime of that connection, so revocation applies to the
+  next handshake.
+- **No CRL coverage for the server's own chain** beyond the peer CA anchors and
+  CRLs that are explicitly configured.
+- **Worker-pool rotation and identity.** `AsyncTquicClient` installs TLS at
+  construction and does not expose peer identity; hot rotation and
+  identity-based authorization use the adapter path.
 - **Early data.** The server config hard-codes `enable_early_data = true`, but
   the client passes `false`, so 0-RTT is not negotiated by the adapter. If a
   caller enables client early data, request replay is a risk it must handle.
@@ -91,8 +94,8 @@ These are deliberate, documented limitations, not vulnerabilities:
 
 ## What is out of scope
 
-- Missing features that are documented as missing (mTLS, CRL/OCSP, CA
-  rotation, connection migration, loss recovery tuning).
+- Missing features that are documented as missing (OCSP, worker-pool peer
+  identity, SPIFFE federation, connection migration, loss recovery tuning).
 - Performance differences against tonic; those are measured and published in
   [`docs/GRPC_VS_QUICCRUNCH.md`](docs/GRPC_VS_QUICCRUNCH.md).
 - Reports that require running the code with verification explicitly disabled.
