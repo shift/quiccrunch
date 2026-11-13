@@ -10,7 +10,7 @@ allowed to change. It does not promise SemVer stability.
 | --- | --- |
 | Workspace version | `0.1.0-alpha.1` |
 | Git tag | `v0.1.0-alpha.1` |
-| Commit | `git rev-parse v0.1.0-alpha.1^{commit}` (annotated tag) |
+| Commit | `be6258187114a205f79b155228ab537811537300` |
 | Registry | **Not published to crates.io** |
 | GitHub release | Pre-release, Linux x86_64 CLI asset only |
 
@@ -25,7 +25,7 @@ read; the `rev` is what makes the build reproducible if a tag is ever moved.
 
 ```toml
 # Reproducible: exact commit behind v0.1.0-alpha.1.
-quiccrunch-core = { git = "https://github.com/shift/quiccrunch", rev = "<commit-sha>" }
+quiccrunch-core = { git = "https://github.com/shift/quiccrunch", rev = "be6258187114a205f79b155228ab537811537300" }
 ```
 
 If you prefer the tag, keep the commit in a comment so an auditor can verify
@@ -33,7 +33,7 @@ that the tag still points where it did:
 
 ```toml
 quiccrunch-core = { git = "https://github.com/shift/quiccrunch", tag = "v0.1.0-alpha.1" }
-# v0.1.0-alpha.1 -> <commit-sha>
+# v0.1.0-alpha.1 -> be6258187114a205f79b155228ab537811537300
 ```
 
 Resolve the commit yourself with:
