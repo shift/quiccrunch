@@ -19,6 +19,10 @@ QuicCrunch exists to answer one question with measurements: does QUIC give a
 control-plane RPC anything that tonic/gRPC does not? The answer so far, on this
 hardware and for this RPC shape, is no.
 
+The first tagged release is **`v0.1.0-alpha.1`** (pre-release; not published to
+crates.io). Read [`RELEASE_NOTES.md`](RELEASE_NOTES.md) before pinning it and
+use the exact `rev` in [`docs/VERSIONING.md`](docs/VERSIONING.md).
+
 ### What is implemented and working
 
 - Multi-worker QUIC server: one `TquicRuntime` event loop per worker on a
@@ -52,15 +56,17 @@ methodology, hardware and the full 36-cell matrix;
 
 ### What is not done
 
-- **mTLS and workload identity.** `main` provides one-way TLS: the client
-  verifies the server certificate, the server does not request or verify client
-  certificates. Peer-certificate support (SPIFFE identity) is in
-  [PR #6](https://github.com/shift/quiccrunch/pull/6), which carries a vendored
-  tQUIC patch.
-- **Raft RPC comparison.** The Raft RPC surface exists, but it has not been
-  benchmarked against a tonic equivalent.
-- **Backend messaging contract.** The versioned messaging prototype is draft
-  [PR #2](https://github.com/shift/quiccrunch/pull/2).
+- **Peer identity on the worker-pool path.** mTLS, SPIFFE SAN binding, RBAC,
+  CRL checking and hot rotation are implemented and tested on the adapter path
+  (`TquicClient`/`TquicServer`). `AsyncTquicClient` installs TLS but does not yet
+  expose the peer identity, so identity-based authorization must use the
+  adapter. See [`docs/SECURITY.md`](docs/SECURITY.md).
+- **Raft RPC performance.** The Raft RPC surface exists and is benchmarked
+  against tonic. Tonic wins every cell, including bulk throughput; see
+  [`docs/RAFT_TRANSPORT_PERFORMANCE.md`](docs/RAFT_TRANSPORT_PERFORMANCE.md).
+- **Backend messaging contract.** The versioned messaging prototype is
+  implemented, but QuicCrunch is still not the default WAF↔distri-kv transport.
+  The remaining gaps are in [`docs/BACKEND_MESSAGING.md`](docs/BACKEND_MESSAGING.md).
 - **Network realism.** No packet loss, WAN delay, connection migration or
   CPU-cost-per-byte measurement. The comparison matrix is loopback (plus an
   injected fixed delay) and the path is lossless, so QUIC loss recovery never
@@ -73,9 +79,10 @@ methodology, hardware and the full 36-cell matrix;
   `auth` feature, but that feature does not compile on `main`. It is excluded
   from the default build and from CI. See
   [`docs/known-issues/auth-feature-does-not-build.md`](docs/known-issues/auth-feature-does-not-build.md).
-- **Operational hardening.** No CRL/OCSP, no CA rotation without a restart, no
-  retransmit/loss counters in the per-worker metrics. See
-  [`SECURITY.md`](SECURITY.md).
+- **Operational hardening.** CRL revocation, CRL/CA/certificate hot rotation
+  and their tests are in place; OCSP is not implemented, established
+  connections are not re-checked after revocation, and the worker-pool path
+  does not hot-rotate. See [`SECURITY.md`](SECURITY.md).
 
 ### Deliberately out of scope
 

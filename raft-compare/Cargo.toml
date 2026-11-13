@@ -1,6 +1,6 @@
 [package]
 name = "raft-compare"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
 publish = false
 description = "AppendEntries benchmark: tonic vs QuicCrunch over the same Raft RPC contract"
